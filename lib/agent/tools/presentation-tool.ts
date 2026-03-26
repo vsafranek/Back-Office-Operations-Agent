@@ -1,6 +1,7 @@
 import PptxGenJS from "pptxgenjs";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { z } from "zod";
+import { WEEKLY_REPORT_DEFAULT_SLIDE_COUNT } from "@/lib/agent/defaults";
 import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
 import { getEnv } from "@/lib/config/env";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
@@ -169,6 +170,10 @@ async function buildSlideSpecs(params: {
 }) {
   const sample = params.rows.slice(0, 16);
   const maxTokens = Math.min(1800, Math.max(900, params.slideCount * 180));
+  const threeSlideStructure =
+    params.slideCount === 3
+      ? "\nStruktura (presne 3 slidy): 1) Executive shrnuti a klicova KPI z dat. 2) Vyvoj v case / trendy a strucny komentar. 3) Rizika, prilezitosti a konkretni doporucene akce pro vedeni.\n"
+      : "";
   let llmText = "";
   try {
     const llm = await generateWithAzureProxy({
@@ -189,6 +194,7 @@ async function buildSlideSpecs(params: {
             `Nazev prezentace: ${params.title}\n` +
             `Pozadovany pocet slidu: ${params.slideCount}\n` +
             `Kontext: ${params.context ?? "tydenni executive report"}\n` +
+            threeSlideStructure +
             `Ukazka dat:\n${JSON.stringify(sample)}`
         }
       ]
@@ -274,7 +280,7 @@ export async function generatePresentationArtifact(params: PresentationArtifactI
     if (created.error) throw new Error(`STORAGE_BUCKET_INIT_FAILED: ${created.error.message}`);
   }
 
-  const slideCount = Math.min(15, Math.max(2, parsedInput.data.slideCount ?? 5));
+  const slideCount = Math.min(15, Math.max(2, parsedInput.data.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT));
   const slides = await buildSlideSpecs({ ...parsedInput.data, slideCount });
 
   const pptx = new PptxGenJS();

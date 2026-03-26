@@ -5,6 +5,9 @@ import { generatePresentationArtifact, presentationToolContract } from "@/lib/ag
 import { suggestViewingSlots } from "@/lib/agent/tools/calendar-tool";
 import { createEmailDraft } from "@/lib/agent/tools/email-tool";
 import { enqueueWorkflowTask } from "@/lib/agent/tools/workflow-tool";
+import { fetchMarketListings, upsertMarketListings, FetchMarketListingsInputSchema, FetchMarketListingsOutputSchema, UpsertMarketListingsInputSchema, UpsertMarketListingsOutputSchema } from "@/lib/agent/tools/market-listings-tool";
+import { webSearch, WebSearchInputSchema, WebSearchOutputSchema } from "@/lib/agent/tools/web-search-tool";
+import { fetchWebPageText, FetchWebPageTextInputSchema, FetchWebPageTextOutputSchema } from "@/lib/agent/tools/web-fetch-tool";
 import type { McpTool, ToolAuthMode } from "./types";
 import type { AgentToolContext } from "@/lib/agent/types";
 import { ToolRunner } from "./tool-runner";
@@ -141,13 +144,63 @@ const workflowTool: McpTool<z.infer<typeof EnqueueWorkflowTaskInputSchema>, unkn
   run: async (_ctx: AgentToolContext, input) => enqueueWorkflowTask({ endpoint: input.endpoint, payload: input.payload })
 };
 
+const fetchMarketListingsTool: McpTool<z.infer<typeof FetchMarketListingsInputSchema>, z.infer<typeof FetchMarketListingsOutputSchema>> = {
+  contract: {
+    name: "fetchMarketListings",
+    description: "Ziska nove nabidky z realitnich portalu (nyni mock).",
+    inputSchema: FetchMarketListingsInputSchema,
+    outputSchema: FetchMarketListingsOutputSchema,
+    auth: "service-role",
+    sideEffects: []
+  },
+  run: async (_ctx: AgentToolContext, input) => fetchMarketListings(input)
+};
+
+const upsertMarketListingsTool: McpTool<z.infer<typeof UpsertMarketListingsInputSchema>, z.infer<typeof UpsertMarketListingsOutputSchema>> = {
+  contract: {
+    name: "upsertMarketListings",
+    description: "Upsertne market_listings do Supabase podle external_id.",
+    inputSchema: UpsertMarketListingsInputSchema,
+    outputSchema: UpsertMarketListingsOutputSchema,
+    auth: "service-role",
+    sideEffects: ["Supabase upsert into market_listings"]
+  },
+  run: async (_ctx: AgentToolContext, input) => upsertMarketListings(input)
+};
+
+const webSearchTool: McpTool<z.infer<typeof WebSearchInputSchema>, z.infer<typeof WebSearchOutputSchema>> = {
+  contract: {
+    name: "webSearch",
+    description: "Vyhleda informace na webu. Implementace pouziva DuckDuckGo HTML (bez API klíče).",
+    inputSchema: WebSearchInputSchema,
+    outputSchema: WebSearchOutputSchema,
+    auth: "service-role",
+    sideEffects: ["HTTP GET na DuckDuckGo"]
+  },
+  run: async (_ctx: AgentToolContext, input) => webSearch(input)
+};
+
 const tools = {
   runSqlPreset: sqlTool,
   generateReportArtifacts: reportTool,
   generatePresentationArtifact: presentationTool,
   suggestViewingSlots: calendarTool,
   createEmailDraft: emailTool,
-  enqueueWorkflowTask: workflowTool
+  enqueueWorkflowTask: workflowTool,
+  fetchMarketListings: fetchMarketListingsTool,
+  upsertMarketListings: upsertMarketListingsTool,
+  webSearch: webSearchTool,
+  fetchWebPageText: {
+    contract: {
+      name: "fetchWebPageText",
+      description: "Stahne HTML z URL a extrahuje citelný text pro další shrnutí.",
+      inputSchema: FetchWebPageTextInputSchema,
+      outputSchema: FetchWebPageTextOutputSchema,
+      auth: "service-role",
+      sideEffects: ["HTTP GET"]
+    },
+    run: async (_ctx: AgentToolContext, input) => fetchWebPageText(input as any)
+  } as McpTool<unknown, unknown>
 };
 
 export function getToolRunner() {

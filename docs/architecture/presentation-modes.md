@@ -2,7 +2,8 @@
 
 ## Current mode (BOA-001)
 - Runtime mode: local PPTX generation using `pptxgenjs`.
-- Output: `presentation.pptx` stored in Supabase Storage.
+- Default deck size: **3 slides** (`WEEKLY_REPORT_DEFAULT_SLIDE_COUNT`); override via API or agent options.
+- Output: `presentation.pptx` and `presentation.pdf` stored in Supabase Storage with public URLs on artifacts.
 - Trigger points:
   - weekly workflow (`/api/workflows/weekly-report`)
   - weekly report intent in agent.

@@ -15,6 +15,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.100.1",
     "ai": "^6.0.138",
+    "cheerio": "^1.2.0",
     "googleapis": "^171.4.0",
     "next": "^16.2.1",
     "pdf-lib": "^1.17.1",

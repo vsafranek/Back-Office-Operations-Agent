@@ -13,9 +13,9 @@ Back-office agent for real-estate operations built on:
 4. Run dev server: `npm run dev`
 
 ## Main endpoints
-- `POST /api/agent` - natural-language prompt for analytics/workflows (optional `options.presentation.slideCount`).
+- `POST /api/agent` - natural-language prompt for analytics/workflows (optional `options.presentation.slideCount`; weekly report defaults to **3** slides).
 - `POST /api/cron/daily` - daily market monitoring job.
-- `POST /api/workflows/weekly-report` - weekly executive report trigger (optional: `slideCount`, `title`, `context`).
+- `POST /api/workflows/weekly-report` - weekly executive report trigger (optional: `slideCount` default **3**, `title`, `context`).
 - `GET /api/storage/list` - list files in Supabase Storage (auth required).
 - `GET /api/storage/download` - create signed download link (auth required).
 - `POST /api/storage/download-batch` - create multiple signed download links (auth required).
@@ -26,7 +26,7 @@ Back-office agent for real-estate operations built on:
 - Weekly report flow now generates:
   - CSV dataset
   - Markdown summary
-  - PPTX presentation (`presentation.pptx`) with dynamic slide count
+  - PPTX presentation (`presentation.pptx`) with dynamic slide count (default **3** for weekly flow)
   - PDF version (`presentation.pdf`) for direct sharing
 - Decision note for future MCP-based presentation mode:
   - `docs/architecture/presentation-modes.md`

@@ -1,6 +1,6 @@
 # Back Office Agent Backlog
 
-Last updated: 2026-03-26 (evening)
+Last updated: 2026-03-26 (night)
 
 ## How to use
 - `status`: `todo` | `in_progress` | `blocked` | `done`
@@ -11,7 +11,7 @@ Last updated: 2026-03-26 (evening)
 
 | id | title | status | priority | notes |
 |---|---|---|---|---|
-| BOA-001 | Weekly report: generate 3-slide presentation artifact | in_progress | P0 | Next delivery target. Add PPTX or Google Slides output and store link in artifacts. |
+| BOA-001 | Weekly report: generate 3-slide presentation artifact | done | P0 | PPTX+PDF do Supabase Storage, verejne URL v artefaktech. Vychozi pocet slidu 3 (`WEEKLY_REPORT_DEFAULT_SLIDE_COUNT`). |
 | BOA-002 | Generate chart images (PNG) for analytics outputs | todo | P0 | Persist PNG charts to Supabase Storage and return URLs. |
 | BOA-003 | Replace market monitor mock feed with real property sources | todo | P0 | Add ingestion adapters, dedupe, and relevance scoring for Praha Holesovice. |
 | BOA-004 | Add explicit approval workflow for outbound email sending | todo | P1 | Keep draft-first and add approve/send state transition. |
@@ -23,3 +23,4 @@ Last updated: 2026-03-26 (evening)
 | BOA-010 | Add pagination and lazy loading for long conversation histories | todo | P2 | Prevent full-history payload on each switch. |
 | BOA-011 | Add scheduler verification runbook and automated health checks | todo | P2 | Validate cron execution and workflow freshness daily. |
 | BOA-012 | Add disconnect/reconnect Google integration diagnostics in UI | in_progress | P2 | Disconnect implemented. Remaining: token health, last refresh timestamp, guided reconnect. |
+| BOA-013 | Scrapers for major Czech listing portals (Sreality.cz, Reality.iDNES.cz, Bezrealitky.cz) | todo | P0 | Ingestion adapters per portal: fetch/listing detail parsing, unified schema, dedupe across sites, rate limits, logging. Prefer official/API or allowed feeds where available; align with site ToS and robots.txt. Supports BOA-003. |

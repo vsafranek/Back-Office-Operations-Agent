@@ -1,16 +1,45 @@
-import { describe, expect, it } from "vitest";
-import { detectIntent } from "../lib/agent";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 
-describe("detectIntent", () => {
-  it("returns calendar_email for meeting/email prompts", () => {
-    expect(detectIntent("Napis email a navrhni termin prohlidky")).toBe("calendar_email");
+vi.mock("@/lib/llm/azure-proxy-provider", () => ({
+  generateWithAzureProxy: vi.fn()
+}));
+
+import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
+import { classifyAgentIntent } from "@/lib/agent/llm/intent-classifier";
+
+describe("classifyAgentIntent", () => {
+  beforeEach(() => {
+    vi.mocked(generateWithAzureProxy).mockReset();
   });
 
-  it("returns weekly_report for report prompts", () => {
-    expect(detectIntent("Priprav report pro vedeni a 3 slidy")).toBe("weekly_report");
+  it("returns calendar_email when the model emits matching JSON", async () => {
+    vi.mocked(generateWithAzureProxy).mockResolvedValueOnce({
+      text: '{"intent":"calendar_email"}',
+      model: "mock"
+    });
+
+    const r = await classifyAgentIntent({ runId: "run-1", question: "Napis email a navrhni termin prohlidky" });
+    expect(r.intent).toBe("calendar_email");
+    expect(generateWithAzureProxy).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to analytics", () => {
-    expect(detectIntent("Jaci jsou novi klienti v Q1")).toBe("analytics");
+  it("returns weekly_report with slideCount when present", async () => {
+    vi.mocked(generateWithAzureProxy).mockResolvedValueOnce({
+      text: '{"intent":"weekly_report","slideCount":3}',
+      model: "mock"
+    });
+
+    const r = await classifyAgentIntent({ runId: "run-2", question: "Priprav report pro vedeni a 3 slidy" });
+    expect(r.intent).toBe("weekly_report");
+    expect(r.slideCount).toBe(3);
+  });
+
+  it("falls back to analytics when JSON is invalid", async () => {
+    vi.mocked(generateWithAzureProxy)
+      .mockResolvedValueOnce({ text: "not json", model: "mock" })
+      .mockResolvedValueOnce({ text: "still wrong", model: "mock" });
+
+    const r = await classifyAgentIntent({ runId: "run-3", question: "Jaci jsou novi klienti v Q1" });
+    expect(r.intent).toBe("analytics");
   });
 });

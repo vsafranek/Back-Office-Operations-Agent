@@ -30,7 +30,7 @@ type ConversationMessage = {
 export default function DashboardPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const router = useRouter();
-  const [question, setQuestion] = useState("Jaké nové klienty máme za 1. kvartál?");
+  const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<AgentResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +110,12 @@ export default function DashboardPage() {
     event.preventDefault();
     setLoading(true);
     setError(null);
+
+    if (!question.trim()) {
+      setError("Zadejte text dotazu.");
+      setLoading(false);
+      return;
+    }
 
     const sessionResult = await supabase.auth.getSession();
     const accessToken = sessionResult.data.session?.access_token;
@@ -293,8 +299,13 @@ export default function DashboardPage() {
         Odhlásit se
       </button>
       <form onSubmit={runAgent} style={{ marginTop: 16, display: "grid", gap: 8 }}>
-        <textarea value={question} onChange={(e) => setQuestion(e.target.value)} rows={4} />
-        <button type="submit" disabled={loading}>
+        <textarea
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          rows={4}
+          placeholder="Zadejte vlastní dotaz nebo zadání pro agenta."
+        />
+        <button type="submit" disabled={loading || !question.trim()}>
           {loading ? "Zpracovávám..." : "Spustit agenta"}
         </button>
       </form>
