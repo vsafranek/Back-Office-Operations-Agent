@@ -6,7 +6,16 @@ export const runtime = "nodejs";
 
 const requestSchema = z.object({
   question: z.string().min(3),
-  conversationId: z.string().uuid().optional()
+  conversationId: z.string().uuid().optional(),
+  options: z
+    .object({
+      presentation: z
+        .object({
+          slideCount: z.coerce.number().int().min(2).max(15).optional()
+        })
+        .optional()
+    })
+    .optional()
 });
 
 export async function POST(request: Request) {
@@ -17,7 +26,8 @@ export async function POST(request: Request) {
     const result = await runBackOfficeAgent({
       userId: user.id,
       question: parsed.question,
-      conversationId: parsed.conversationId
+      conversationId: parsed.conversationId,
+      options: parsed.options
     });
 
     return Response.json(result);

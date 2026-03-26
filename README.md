@@ -13,7 +13,7 @@ Back-office agent for real-estate operations built on:
 4. Run dev server: `npm run dev`
 
 ## Main endpoints
-- `POST /api/agent` - natural-language prompt for analytics/workflows.
+- `POST /api/agent` - natural-language prompt for analytics/workflows (optional `options.presentation.slideCount`).
 - `POST /api/cron/daily` - daily market monitoring job.
 - `POST /api/workflows/weekly-report` - weekly executive report trigger (optional: `slideCount`, `title`, `context`).
 - `GET /api/storage/list` - list files in Supabase Storage (auth required).

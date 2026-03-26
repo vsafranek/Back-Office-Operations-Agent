@@ -1,5 +1,6 @@
 import PptxGenJS from "pptxgenjs";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { z } from "zod";
 import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
 import { getEnv } from "@/lib/config/env";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
@@ -7,6 +8,55 @@ import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 type SlideSpec = {
   title: string;
   bullets: string[];
+};
+
+export type PresentationArtifactInput = {
+  runId: string;
+  title: string;
+  rows: Record<string, unknown>[];
+  context?: string;
+  slideCount?: number;
+};
+
+export type PresentationArtifactOutput = {
+  publicUrl: string;
+  pdfPublicUrl: string;
+  slides: SlideSpec[];
+};
+
+const SlideSpecSchema = z.object({
+  title: z.string().min(1),
+  bullets: z.array(z.string().min(1)).min(4).max(8)
+});
+
+const PresentationArtifactInputSchema = z.object({
+  runId: z.string().min(3),
+  title: z.string().min(3).max(120),
+  rows: z.array(z.record(z.string(), z.unknown())).default([]),
+  context: z.string().max(2000).optional(),
+  slideCount: z.coerce.number().int().min(2).max(15).optional()
+});
+
+const PresentationArtifactOutputSchema = z.object({
+  publicUrl: z.string().url(),
+  pdfPublicUrl: z.string().url(),
+  slides: z.array(SlideSpecSchema)
+});
+
+export const presentationToolContract = {
+  name: "generatePresentationArtifact",
+  description:
+    "Generuje bohatý prezentacni deck v cestine, ulozi jej do Supabase Storage jako PPTX a zaroven vytvori PDF verzi. Side-effect: uklada do bucketu public artefakty pod cestou reports/{runId}/.",
+  inputSchema: PresentationArtifactInputSchema,
+  outputSchema: PresentationArtifactOutputSchema,
+  sideEffects: ["Storage upload (PPTX + PDF) do bucketu env.SUPABASE_STORAGE_BUCKET"],
+  auth: "service-role (server-side, uses Supabase admin client)",
+  errorModel: [
+    { code: "INVALID_INPUT", meaning: "Vstupy nesplnuji schema (napr. title/slideCount)." },
+    { code: "STORAGE_BUCKET_INIT_FAILED", meaning: "Nepodarilo se inicializovat Storage bucket." },
+    { code: "PRESENTATION_UPLOAD_FAILED", meaning: "Nepodarilo se nahrat PPTX/PDF do Storage." },
+    { code: "LLM_FAILED", meaning: "LLM selhalo/timeoutovalo; pouzije se fallback generovani obsahu." }
+  ]
 };
 
 function toSafeSlideSpecs(value: unknown, expectedCount: number): SlideSpec[] | null {
@@ -21,8 +71,10 @@ function toSafeSlideSpecs(value: unknown, expectedCount: number): SlideSpec[] | 
       const bullets = Array.isArray(rawBullets)
         ? rawBullets.filter((v): v is string => typeof v === "string").map((v) => v.trim()).filter(Boolean)
         : [];
-      if (!title || bullets.length < 4) return null;
-      return { title, bullets: bullets.slice(0, 8) };
+      if (!title) return null;
+      const trimmedBullets = bullets.slice(0, 8);
+      if (trimmedBullets.length < 4) return null;
+      return { title, bullets: trimmedBullets };
     })
     .filter((item): item is SlideSpec => Boolean(item));
   return cleaned.length === expectedCount ? cleaned : null;
@@ -39,6 +91,13 @@ function buildFallbackSlides(rows: Record<string, unknown>[], slideCount: number
   const totalSold = rows.reduce((acc, row) => acc + safeNum(row.sold_count), 0);
   const conversion = totalLeads > 0 ? ((totalSold / totalLeads) * 100).toFixed(1) : "0.0";
   const topRows = rows.slice(0, 10).map((row) => JSON.stringify(row));
+  const padBullets = (bullets: string[]) => {
+    const next = bullets.slice(0, 8);
+    while (next.length < 4) {
+      next.push("Doplnte relevantni metriky pro rozhodovani vedení.");
+    }
+    return next;
+  };
 
   const base: SlideSpec[] = [
     {
@@ -64,7 +123,7 @@ function buildFallbackSlides(rows: Record<string, unknown>[], slideCount: number
     {
       title: "Detailni metriky",
       bullets: rows.length > 0
-        ? topRows.slice(0, 6)
+        ? padBullets(topRows.slice(0, 6))
         : [
             "Nejsou dostupna zadna data pro vypocet detailnich metrik.",
             "Zkontrolujte SQL preset a zdrojove tabulky.",
@@ -200,30 +259,29 @@ async function generatePdfBuffer(params: { title: string; slides: SlideSpec[] })
   return Buffer.from(bytes);
 }
 
-export async function generatePresentationArtifact(params: {
-  runId: string;
-  title: string;
-  rows: Record<string, unknown>[];
-  context?: string;
-  slideCount?: number;
-}) {
+export async function generatePresentationArtifact(params: PresentationArtifactInput): Promise<PresentationArtifactOutput> {
+  const parsedInput = PresentationArtifactInputSchema.safeParse(params);
+  if (!parsedInput.success) {
+    throw new Error(`INVALID_INPUT: ${parsedInput.error.issues.map((i) => i.message).join("; ")}`);
+  }
+
   const env = getEnv();
   const supabase = getSupabaseAdminClient();
   const bucketName = env.SUPABASE_STORAGE_BUCKET;
   const bucketCheck = await supabase.storage.getBucket(bucketName);
   if (bucketCheck.error) {
     const created = await supabase.storage.createBucket(bucketName, { public: true });
-    if (created.error) throw new Error(`Storage bucket init failed: ${created.error.message}`);
+    if (created.error) throw new Error(`STORAGE_BUCKET_INIT_FAILED: ${created.error.message}`);
   }
 
-  const slideCount = Math.min(15, Math.max(2, params.slideCount ?? 5));
-  const slides = await buildSlideSpecs({ ...params, slideCount });
+  const slideCount = Math.min(15, Math.max(2, parsedInput.data.slideCount ?? 5));
+  const slides = await buildSlideSpecs({ ...parsedInput.data, slideCount });
 
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_WIDE";
   pptx.author = "Back Office Operations Agent";
-  pptx.subject = params.title;
-  pptx.title = params.title;
+  pptx.subject = parsedInput.data.title;
+  pptx.title = parsedInput.data.title;
 
   slides.forEach((slideSpec) => {
     const slide = pptx.addSlide();
@@ -254,26 +312,32 @@ export async function generatePresentationArtifact(params: {
   });
 
   const buffer = (await pptx.write({ outputType: "nodebuffer" })) as Buffer;
-  const pptxPath = `reports/${params.runId}/presentation.pptx`;
+  const pptxPath = `reports/${parsedInput.data.runId}/presentation.pptx`;
   const upload = await supabase.storage.from(bucketName).upload(pptxPath, buffer, {
     upsert: true,
     contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation"
   });
   if (upload.error) {
-    throw new Error(`Presentation upload failed: ${upload.error.message}`);
+    throw new Error(`PRESENTATION_UPLOAD_FAILED: ${upload.error.message}`);
   }
 
-  const pdfBuffer = await generatePdfBuffer({ title: params.title, slides });
-  const pdfPath = `reports/${params.runId}/presentation.pdf`;
+  const pdfBuffer = await generatePdfBuffer({ title: parsedInput.data.title, slides });
+  const pdfPath = `reports/${parsedInput.data.runId}/presentation.pdf`;
   const pdfUpload = await supabase.storage.from(bucketName).upload(pdfPath, pdfBuffer, {
     upsert: true,
     contentType: "application/pdf"
   });
   if (pdfUpload.error) {
-    throw new Error(`Presentation PDF upload failed: ${pdfUpload.error.message}`);
+    throw new Error(`PRESENTATION_UPLOAD_FAILED: ${pdfUpload.error.message}`);
   }
 
   const publicUrl = supabase.storage.from(bucketName).getPublicUrl(pptxPath).data.publicUrl;
   const pdfPublicUrl = supabase.storage.from(bucketName).getPublicUrl(pdfPath).data.publicUrl;
-  return { publicUrl, pdfPublicUrl, slides };
+
+  const output: PresentationArtifactOutput = { publicUrl, pdfPublicUrl, slides };
+  const checked = PresentationArtifactOutputSchema.safeParse(output);
+  if (!checked.success) {
+    throw new Error(`INVALID_OUTPUT: ${checked.error.issues.map((i) => i.message).join("; ")}`);
+  }
+  return checked.data;
 }
