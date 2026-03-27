@@ -4,7 +4,10 @@ import { z } from "zod";
 import { WEEKLY_REPORT_DEFAULT_SLIDE_COUNT } from "@/lib/agent/defaults";
 import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
 import { getEnv } from "@/lib/config/env";
+import { resolvePresentationTemplate } from "@/lib/config/presentation-template";
+import { logger } from "@/lib/observability/logger";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
+import { generatePptxFromBlueWhiteTemplate } from "@/lib/agent/tools/presentation-from-template";
 
 type SlideSpec = {
   title: string;
@@ -45,13 +48,18 @@ const PresentationArtifactOutputSchema = z.object({
 });
 
 export const presentationToolContract = {
-  name: "generatePresentationArtifact",
+  role: "subagent" as const,
+  name: "runPresentationAgent",
+  auth: "service-role" as const,
   description:
-    "Generuje bohatý prezentacni deck v cestine, ulozi jej do Supabase Storage jako PPTX a zaroven vytvori PDF verzi. Side-effect: uklada do bucketu public artefakty pod cestou reports/{runId}/.",
+    "Prezentacni specialista (MCP subagent): z tabulkovych radku a zadani vygeneruje PPTX + PDF v cestine a nahraje do Supabase Storage (reports/{runId}/). " +
+    "Vstupy: runId, title (nazev decku), rows (data pro obsah slidů), volitelne context (ukol/tagline pro titulni slide a LLM), slideCount 2-15. " +
+    "Pokud je k dispozici PPTX šablona (env PRESENTATION_*), vystupni PPTX pouzije firemni layout ({{BOA_*}}). " +
+    "PDF je jednoduchy export ze stejnych bulletu (vizualne muze odlisovat od šablony) nebo PRESENTATION_SKIP_PDF. " +
+    "Pred volanim lze zjistit dalsi nastroje pres listMcpCapabilities.",
   inputSchema: PresentationArtifactInputSchema,
   outputSchema: PresentationArtifactOutputSchema,
   sideEffects: ["Storage upload (PPTX + PDF) do bucketu env.SUPABASE_STORAGE_BUCKET"],
-  auth: "service-role (server-side, uses Supabase admin client)",
   errorModel: [
     { code: "INVALID_INPUT", meaning: "Vstupy nesplnuji schema (napr. title/slideCount)." },
     { code: "STORAGE_BUCKET_INIT_FAILED", meaning: "Nepodarilo se inicializovat Storage bucket." },
@@ -161,18 +169,35 @@ function buildFallbackSlides(rows: Record<string, unknown>[], slideCount: number
   return base.slice(0, slideCount);
 }
 
+const TEMPLATE_MAX_TITLE_CHARS = 64;
+const TEMPLATE_MAX_BULLET_CHARS = 180;
+
+function clampSlidesForTemplateLayout(slides: SlideSpec[]): SlideSpec[] {
+  const ell = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, Math.max(0, max - 1))}…`);
+  return slides.map((s) => ({
+    title: ell(s.title.trim(), TEMPLATE_MAX_TITLE_CHARS),
+    bullets: s.bullets.map((b) => ell(b.trim(), TEMPLATE_MAX_BULLET_CHARS))
+  }));
+}
+
 async function buildSlideSpecs(params: {
   runId: string;
   title: string;
   rows: Record<string, unknown>[];
   context?: string;
   slideCount: number;
+  layoutMode: "plain" | "branded_template";
 }) {
   const sample = params.rows.slice(0, 16);
   const maxTokens = Math.min(1800, Math.max(900, params.slideCount * 180));
   const threeSlideStructure =
     params.slideCount === 3
       ? "\nStruktura (presne 3 slidy): 1) Executive shrnuti a klicova KPI z dat. 2) Vyvoj v case / trendy a strucny komentar. 3) Rizika, prilezitosti a konkretni doporucene akce pro vedeni.\n"
+      : "";
+  const templateHint =
+    params.layoutMode === "branded_template"
+      ? " Vystup bude vlozen do firemniho PPTX: kazdy titulek slidu musi byt kratky (nadcas nadpis, max ~55 znaku). " +
+        "Kazdy bullet strucny (idealne do ~140 znaku), jedna myslenka, zadne odradkovani uvnitr bulletu. "
       : "";
   let llmText = "";
   try {
@@ -186,7 +211,8 @@ async function buildSlideSpecs(params: {
             `Jsi senior analytik. Vrat pouze validni JSON pole delky ${params.slideCount}. ` +
             "Kazdy prvek musi mit tvar {\"title\":\"...\",\"bullets\":[\"...\",\"...\"]}. " +
             "Pis vyhradne cesky (bez anglictiny). Kazdy slide musi mit 4 az 8 konkretni bullet bodu s datovym obsahem, " +
-            "zaverem nebo doporucenim. Zadny markdown, zadne vysvetleni mimo JSON."
+            "zaverem nebo doporucenim. Zadny markdown, zadne vysvetleni mimo JSON." +
+            templateHint
         },
         {
           role: "user",
@@ -220,6 +246,16 @@ async function buildSlideSpecs(params: {
   }
 
   return toSafeSlideSpecs(parsed, params.slideCount) ?? buildFallbackSlides(params.rows, params.slideCount);
+}
+
+async function generateSkippedPdfPlaceholder(): Promise<Buffer> {
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const page = pdf.addPage([595, 420]);
+  const msg =
+    "PDF export byl vypnut (PRESENTATION_SKIP_PDF). Stahnete prosim soubor presentation.pptx pro aktualni obsah a firemni vizual.";
+  page.drawText(msg, { x: 40, y: 360, size: 11, font, maxWidth: 520, lineHeight: 13 });
+  return Buffer.from(await pdf.save());
 }
 
 async function generatePdfBuffer(params: { title: string; slides: SlideSpec[] }): Promise<Buffer> {
@@ -281,43 +317,69 @@ export async function generatePresentationArtifact(params: PresentationArtifactI
   }
 
   const slideCount = Math.min(15, Math.max(2, parsedInput.data.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT));
-  const slides = await buildSlideSpecs({ ...parsedInput.data, slideCount });
-
-  const pptx = new PptxGenJS();
-  pptx.layout = "LAYOUT_WIDE";
-  pptx.author = "Back Office Operations Agent";
-  pptx.subject = parsedInput.data.title;
-  pptx.title = parsedInput.data.title;
-
-  slides.forEach((slideSpec) => {
-    const slide = pptx.addSlide();
-    slide.background = { color: "F8FAFC" };
-    slide.addText(slideSpec.title, {
-      x: 0.5,
-      y: 0.35,
-      w: 12.3,
-      h: 0.8,
-      bold: true,
-      fontFace: "Calibri",
-      fontSize: 30,
-      color: "1F2937"
-    });
-    slide.addText(
-      slideSpec.bullets.map((b) => ({ text: b, options: { bullet: { indent: 18 } } })),
-      {
-        x: 0.8,
-        y: 1.4,
-        w: 11.8,
-        h: 5.2,
-        fontFace: "Calibri",
-        fontSize: 20,
-        color: "111827",
-        breakLine: true
-      }
-    );
+  const templateCfg = resolvePresentationTemplate(env);
+  const slidesRaw = await buildSlideSpecs({
+    ...parsedInput.data,
+    slideCount,
+    layoutMode: templateCfg.useTemplate ? "branded_template" : "plain"
   });
+  const slides = templateCfg.useTemplate ? clampSlidesForTemplateLayout(slidesRaw) : slidesRaw;
+  const useFlag = env.PRESENTATION_USE_TEMPLATE?.trim().toLowerCase();
+  const templateForcedOn = useFlag === "true" || useFlag === "1" || useFlag === "yes" || useFlag === "on";
+  if (templateForcedOn && !templateCfg.useTemplate) {
+    logger.warn("presentation_template_missing", { path: templateCfg.resolvedTemplatePath });
+  }
 
-  const buffer = (await pptx.write({ outputType: "nodebuffer" })) as Buffer;
+  let buffer: Buffer;
+  if (templateCfg.useTemplate) {
+    buffer = await generatePptxFromBlueWhiteTemplate({
+      templatePath: templateCfg.resolvedTemplatePath,
+      titleSlideIndex: templateCfg.titleSlideIndex,
+      contentSlideIndex: templateCfg.contentSlideIndex,
+      deckTitle: parsedInput.data.title,
+      deckSubtitle: (env.PRESENTATION_DECK_SUBTITLE ?? "Back Office · report").trim().slice(0, 120),
+      deckTagline:
+        (parsedInput.data.context ?? "Týdenní executive report").slice(0, 220) ||
+        "Automaticky generovaný report.",
+      slides
+    });
+  } else {
+    const pptx = new PptxGenJS();
+    pptx.layout = "LAYOUT_WIDE";
+    pptx.author = "Back Office Operations Agent";
+    pptx.subject = parsedInput.data.title;
+    pptx.title = parsedInput.data.title;
+
+    slides.forEach((slideSpec) => {
+      const slide = pptx.addSlide();
+      slide.background = { color: "F8FAFC" };
+      slide.addText(slideSpec.title, {
+        x: 0.5,
+        y: 0.35,
+        w: 12.3,
+        h: 0.8,
+        bold: true,
+        fontFace: "Calibri",
+        fontSize: 30,
+        color: "1F2937"
+      });
+      slide.addText(
+        slideSpec.bullets.map((b) => ({ text: b, options: { bullet: { indent: 18 } } })),
+        {
+          x: 0.8,
+          y: 1.4,
+          w: 11.8,
+          h: 5.2,
+          fontFace: "Calibri",
+          fontSize: 20,
+          color: "111827",
+          breakLine: true
+        }
+      );
+    });
+
+    buffer = (await pptx.write({ outputType: "nodebuffer" })) as Buffer;
+  }
   const pptxPath = `reports/${parsedInput.data.runId}/presentation.pptx`;
   const upload = await supabase.storage.from(bucketName).upload(pptxPath, buffer, {
     upsert: true,
@@ -327,7 +389,18 @@ export async function generatePresentationArtifact(params: PresentationArtifactI
     throw new Error(`PRESENTATION_UPLOAD_FAILED: ${upload.error.message}`);
   }
 
-  const pdfBuffer = await generatePdfBuffer({ title: parsedInput.data.title, slides });
+  let pdfBuffer: Buffer;
+  if (templateCfg.skipPdf) {
+    pdfBuffer = await generateSkippedPdfPlaceholder();
+  } else {
+    if (templateCfg.useTemplate) {
+      logger.warn("presentation_pdf_not_template_layout", {
+        runId: parsedInput.data.runId,
+        message: "PDF je stale generovany staticky pres pdf-lib ze SlideSpec; layout odpovida textu, ne PPTX šabloně."
+      });
+    }
+    pdfBuffer = await generatePdfBuffer({ title: parsedInput.data.title, slides });
+  }
   const pdfPath = `reports/${parsedInput.data.runId}/presentation.pdf`;
   const pdfUpload = await supabase.storage.from(bucketName).upload(pdfPath, pdfBuffer, {
     upsert: true,

@@ -20,14 +20,22 @@ export async function runWeeklyReportSubAgent(params: {
     rows: data.rows
   });
 
+  const presentationContext = [
+    `Pozadavek uzivatele: ${params.question}`,
+    `Nazev vystupniho baliku: ${params.title}`,
+    `Pocet obsahovych slidu: ${params.slideCount}`
+  ]
+    .join("\n")
+    .slice(0, 2000);
+
   const presentation = await params.toolRunner.run<{ publicUrl: string; pdfPublicUrl: string }>(
-    "generatePresentationArtifact",
+    "runPresentationAgent",
     params.ctx,
     {
       runId: params.ctx.runId,
       title: params.title,
       rows: data.rows,
-      context: params.question,
+      context: presentationContext,
       slideCount: params.slideCount
     }
   );

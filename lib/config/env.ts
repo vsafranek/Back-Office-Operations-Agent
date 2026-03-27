@@ -34,7 +34,26 @@ const envSchema = z.object({
   AGENT_MAX_QUERY_ROWS: z.coerce.number().default(500),
   AGENT_QUERY_TIMEOUT_MS: z.coerce.number().default(15_000),
   TOKEN_ENCRYPTION_KEY: z.string().min(16),
-  CRON_SECRET: z.string().optional()
+  CRON_SECRET: z.string().optional(),
+  /** Relative to cwd or absolute; default blue-white deck in assets/. */
+  PRESENTATION_TEMPLATE_PATH: optionalString,
+  /** When unset, template is used if the resolved file exists. */
+  PRESENTATION_USE_TEMPLATE: optionalString,
+  /** 1-based slide in template cloned per SlideSpec (see presentation-template-blue-white.md). */
+  PRESENTATION_TEMPLATE_CONTENT_SLIDE_INDEX: z.coerce.number().int().min(1).max(200).default(13),
+  /** 1-based title slide; set 0 to omit. */
+  PRESENTATION_TEMPLATE_TITLE_SLIDE_INDEX: z.coerce.number().int().min(0).max(200).default(1),
+  /** Skip pdf-lib PDF (PPTX may still be branded; PDF does not match template). */
+  PRESENTATION_SKIP_PDF: z
+    .preprocess((value) => {
+      if (value === undefined || value === "") return false;
+      if (typeof value === "boolean") return value;
+      const s = String(value).toLowerCase().trim();
+      return ["1", "true", "yes", "on"].includes(s);
+    }, z.boolean())
+    .default(false),
+  /** Subtitle on template title slide (slide 1); default Back Office · report */
+  PRESENTATION_DECK_SUBTITLE: optionalString
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

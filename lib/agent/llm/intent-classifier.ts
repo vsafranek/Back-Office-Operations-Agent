@@ -4,7 +4,7 @@ import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
 import { tryParseJsonObject } from "@/lib/agent/llm/parse-json-response";
 
 const IntentSchema = z.object({
-  intent: z.enum(["analytics", "calendar_email", "weekly_report", "web_search"]),
+  intent: z.enum(["analytics", "calendar_email", "presentation", "weekly_report", "web_search"]),
   slideCount: z.number().int().min(2).max(15).optional()
 });
 
@@ -34,12 +34,13 @@ export async function classifyAgentIntent(params: {
           role: "system",
           content:
             "Zarad pozadavek uzivatele do jedne kategorie. Vrat POUZE JSON bez markdownu nebo vysvetlovani, tvar:\n" +
-            '{"intent":"analytics"|"calendar_email"|"weekly_report"|"web_search","slideCount":<cislo 2-15 nebo vynechej>}\n\n' +
-            "analytics: interni data, SQL, KPI, klienti, leady, nemovitosti, dashboard.\n" +
+            '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search","slideCount":<cislo 2-15 nebo vynechej>}\n\n' +
+            "analytics: interni data, SQL, KPI, klienti, leady, nemovitosti, dashboard (predevsim tabulka/CSV/MD, ne pozadavek na PPTX jako hlavni vystup).\n" +
             "calendar_email: e-mail, prohlidka, termin schuzky, kalendář, Gmail draft.\n" +
-            "weekly_report: report pro vedeni, vystup pro manazerstvi, slidova prezentace, PPTX.\n" +
+            "presentation: hlavne PPTX/slidova prezentace z internich dat bez pozadavku na cely manazersky balicek (CSV+MD+prezentace); PowerPoint, slidy, deck.\n" +
+            "weekly_report: komplexni report pro vedeni — dataset CSV, souhrn MD a prezentace dohromady.\n" +
             "web_search: informace z internetu, aktualni udalosti, overeni faktu mimo interni databazi.\n" +
-            "slideCount dopln jen u weekly_report pokud uzivatel zminil konkretni pocet slidu; jinak vynechej (system pouzije standard 3)."
+            "slideCount dopln u presentation nebo weekly_report pokud uzivatel zminil konkretni pocet slidu; jinak vynechej (system pouzije standard 3)."
         },
         { role: "user", content: `Pozadavek:\n${params.question}${history}` }
       ]

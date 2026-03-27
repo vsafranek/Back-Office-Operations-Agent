@@ -23,6 +23,20 @@ describe("classifyAgentIntent", () => {
     expect(generateWithAzureProxy).toHaveBeenCalledTimes(1);
   });
 
+  it("returns presentation when the model chooses deck-only output", async () => {
+    vi.mocked(generateWithAzureProxy).mockResolvedValueOnce({
+      text: '{"intent":"presentation","slideCount":5}',
+      model: "mock"
+    });
+
+    const r = await classifyAgentIntent({
+      runId: "run-presentation",
+      question: "Udelej PPTX prezentaci z leadu, 5 slidu"
+    });
+    expect(r.intent).toBe("presentation");
+    expect(r.slideCount).toBe(5);
+  });
+
   it("returns weekly_report with slideCount when present", async () => {
     vi.mocked(generateWithAzureProxy).mockResolvedValueOnce({
       text: '{"intent":"weekly_report","slideCount":3}',

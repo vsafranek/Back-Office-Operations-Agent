@@ -8,6 +8,7 @@ import { logger } from "@/lib/observability/logger";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 import { WEEKLY_REPORT_DEFAULT_SLIDE_COUNT } from "@/lib/agent/defaults";
 import { runAgentOrchestrator } from "@/lib/agent/orchestrator/agent-orchestrator";
+import { getMcpToolRunnerForAgent } from "@/lib/agent/mcp-tools/tool-registry";
 
 function safeText(value: unknown): string {
   if (typeof value === "string") return value;
@@ -99,7 +100,8 @@ export async function runBackOfficeAgent(input: {
 
   const explicitSlideCount = input.options?.presentation?.slideCount;
   const fromClassifier = classified.slideCount;
-  const slideDefault = intent === "weekly_report" ? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT : 5;
+  const slideDefault =
+    intent === "weekly_report" || intent === "presentation" ? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT : 5;
   const resolvedSlideCount = Math.min(15, Math.max(2, explicitSlideCount ?? fromClassifier ?? slideDefault));
 
   const dispatchId = await handle.trace.record({
@@ -138,6 +140,8 @@ export async function runBackOfficeAgent(input: {
 
   let answer: AgentAnswer;
 
+  const toolRunner = getMcpToolRunnerForAgent(agentDef);
+
   answer = await runAgentOrchestrator({
     intent,
     ctx: {
@@ -149,7 +153,8 @@ export async function runBackOfficeAgent(input: {
     contextText,
     slideCount: resolvedSlideCount,
     trace: handle.trace,
-    traceDispatchId: dispatchId
+    traceDispatchId: dispatchId,
+    toolRunner
   });
 
   answer = {

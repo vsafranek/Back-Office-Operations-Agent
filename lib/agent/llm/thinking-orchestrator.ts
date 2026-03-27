@@ -6,7 +6,7 @@ import type { ClassifiedAgentIntent } from "@/lib/agent/llm/intent-classifier";
 
 const ThinkingOrchestratorSchema = z.object({
   reasoning: z.string().min(1),
-  intent: z.enum(["analytics", "calendar_email", "weekly_report", "web_search"]),
+  intent: z.enum(["analytics", "calendar_email", "presentation", "weekly_report", "web_search"]),
   slideCount: z.number().int().min(2).max(15).optional()
 });
 
@@ -31,13 +31,14 @@ export async function classifyWithThinkingOrchestrator(params: {
     "Jsi orchestrator back-office agenta pro realitni firmu.\n" +
     "Nejdrive proved uvahu (reasoning): 3–8 vet v cestine, co uzivatel chce, jaka je sporna mista a ktery typ ulohy to je.\n" +
     "Pak v jedinem JSON objektu (bez markdownu) vrat:\n" +
-    '{"reasoning":"<tva uvaha jako jeden retezec>","intent":"analytics"|"calendar_email"|"weekly_report"|"web_search","slideCount":<volitelne 2-15>}\n' +
+    '{"reasoning":"<tva uvaha jako jeden retezec>","intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search","slideCount":<volitelne 2-15>}\n' +
     "intent:\n" +
-    "- analytics: interni databaze, KPI, klienti, leady, nemovitosti.\n" +
+    "- analytics: interni data, KPI, SQL vystup — predevsim tabulka a prehled, ne hlavni PPTX.\n" +
     "- calendar_email: e-mail, prohlidka, kalendář, draft do Gmailu.\n" +
-    "- weekly_report: report pro vedeni, prezentace, slidy.\n" +
+    "- presentation: predevsim slidova prezentace / PPTX z dat, bez celeho balicku CSV+MD+prezentace.\n" +
+    "- weekly_report: komplexni manazersky balicek — CSV, Markdown a prezentace.\n" +
     "- web_search: overeni na internetu mimo interni data.\n" +
-    "slideCount jen u weekly_report a jen pokud uzivatel explicitne zminil pocet slidu; jinak pole vynechej.\n" +
+    "slideCount u presentation nebo weekly_report jen pokud uzivatel explicitne zminil pocet slidu; jinak pole vynechej.\n" +
     "V poli reasoning strucne shrn duvod pro vybrany intent.";
 
   const ask = async (traceName: "llm.orchestrator.thinking" | "llm.orchestrator.thinking.repair") =>

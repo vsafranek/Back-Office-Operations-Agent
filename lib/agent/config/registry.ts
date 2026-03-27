@@ -1,8 +1,13 @@
 import { basicAgentConfig } from "./agents/basic.agent.config";
 import { thinkingOrchestratorAgentConfig } from "./agents/thinking-orchestrator.agent.config";
 import type { AgentDefinition, AgentUiOption } from "./types";
+import { assertAgentMcpToolsValid } from "./validate-agent-mcp-tools";
 
 const list: AgentDefinition[] = [basicAgentConfig, thinkingOrchestratorAgentConfig];
+
+for (const def of list) {
+  assertAgentMcpToolsValid(def);
+}
 
 const byId = new Map(list.map((def) => [def.id, def]));
 

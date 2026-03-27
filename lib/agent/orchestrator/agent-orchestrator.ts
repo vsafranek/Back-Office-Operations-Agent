@@ -1,13 +1,14 @@
 import { WEEKLY_REPORT_DEFAULT_SLIDE_COUNT } from "@/lib/agent/defaults";
 import type { AgentAnswer, AgentToolContext } from "@/lib/agent/types";
 import type { AgentTraceRecorder } from "@/lib/agent/trace/recorder";
-import { getToolRunner } from "@/lib/agent/mcp-tools/tool-registry";
+import type { ToolRunner } from "@/lib/agent/mcp-tools/tool-runner";
 import { runAnalyticsSubAgent } from "@/lib/agent/subagents/analytics-subagent";
 import { runCalendarEmailSubAgent } from "@/lib/agent/subagents/calendar-email-subagent";
+import { runPresentationSubAgent } from "@/lib/agent/subagents/presentation-subagent";
 import { runWeeklyReportSubAgent } from "@/lib/agent/subagents/weekly-report-subagent";
 import { runWebSearchSubAgent } from "@/lib/agent/subagents/web-search-subagent";
 
-export type AgentIntent = "analytics" | "calendar_email" | "weekly_report" | "web_search";
+export type AgentIntent = "analytics" | "calendar_email" | "presentation" | "weekly_report" | "web_search";
 
 export async function runAgentOrchestrator(params: {
   intent: AgentIntent;
@@ -17,8 +18,9 @@ export async function runAgentOrchestrator(params: {
   slideCount?: number;
   trace?: AgentTraceRecorder;
   traceDispatchId?: string | null;
+  toolRunner: ToolRunner;
 }): Promise<AgentAnswer> {
-  const toolRunner = getToolRunner();
+  const { toolRunner } = params;
 
   let traceParentId = params.traceDispatchId ?? null;
   if (params.trace && traceParentId) {
@@ -45,6 +47,18 @@ export async function runAgentOrchestrator(params: {
       ctx,
       question: params.question,
       contextText: params.contextText
+    });
+  }
+
+  if (params.intent === "presentation") {
+    const slideCount = params.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT;
+    const title = params.question.trim().slice(0, 120) || "Prezentace";
+    return runPresentationSubAgent({
+      toolRunner,
+      ctx,
+      slideCount,
+      question: params.question,
+      title
     });
   }
 

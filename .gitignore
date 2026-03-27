@@ -1,4 +1,7 @@
 .next
+# Rozbalené PPTX / dočasné extrakce při analýze šablony (necommitovat)
+.tmp-pptx-extract/
+
 node_modules
 .env
 .env.local
