@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { AgentTraceRecorder } from "@/lib/agent/trace/recorder";
-import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
+import { generateWithAzureProxy, streamWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
 import { tryParseJsonObject } from "@/lib/agent/llm/parse-json-response";
 import type { ClassifiedAgentIntent } from "@/lib/agent/llm/intent-classifier";
 
@@ -10,11 +10,154 @@ const ThinkingOrchestratorSchema = z.object({
   slideCount: z.number().int().min(2).max(15).optional()
 });
 
+const IntentOnlySchema = z.object({
+  intent: z.enum(["analytics", "calendar_email", "presentation", "weekly_report", "web_search"]),
+  slideCount: z.number().int().min(2).max(15).optional()
+});
+
 export type ThinkingOrchestratorResult = ClassifiedAgentIntent & {
   reasoning: string;
 };
 
-export async function classifyWithThinkingOrchestrator(params: {
+function intentRulesBlock(): string {
+  return (
+    "intent:\n" +
+    "- analytics: interni data, KPI, SQL — tabulka, souhrn, graf nad daty v aplikaci (slovo 'graf' u klientu/leadu = analytics).\n" +
+    "- calendar_email: e-mail, prohlidka, kalendář, draft do Gmailu.\n" +
+    "- presentation: hlavni vystup je PPTX / slidovy deck (PowerPoint), ne pouhy graf z databaze.\n" +
+    "- weekly_report: komplexni manazersky balicek — CSV, Markdown a prezentace.\n" +
+    "- web_search: overeni na internetu mimo interni data.\n" +
+    "slideCount u presentation nebo weekly_report jen pokud uzivatel explicitne zminil pocet slidu; jinak pole vynechej.\n"
+  );
+}
+
+function buildThinkingSystemPrompt(extra: string): string {
+  return (
+    "Jsi orchestrator back-office agenta pro realitni firmu.\n" +
+    "Nejdrive proved uvahu (reasoning): 3–8 vet v cestine, co uzivatel chce, jaka je sporna mista a ktery typ ulohy to je.\n" +
+    "Pak v jedinem JSON objektu (bez markdownu) vrat:\n" +
+    '{"reasoning":"<tva uvaha jako jeden retezec>","intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search","slideCount":<volitelne 2-15>}\n' +
+    intentRulesBlock() +
+    "V poli reasoning strucne shrn duvod pro vybrany intent." +
+    extra
+  );
+}
+
+async function thinkingOrchestratorStreamed(params: {
+  runId: string;
+  question: string;
+  contextText?: string;
+  extraInstructions?: string;
+  trace?: { recorder: AgentTraceRecorder; parentId: string | null };
+  onReasoningDelta: (chunk: string) => void | Promise<void>;
+}): Promise<ThinkingOrchestratorResult> {
+  const history = params.contextText?.trim()
+    ? `\n\nKontext poslednich zprav:\n${params.contextText}`
+    : "";
+
+  const extra = params.extraInstructions?.trim() ? `\n\nDodatecne pokyny orchestratora:\n${params.extraInstructions}` : "";
+
+  const reasoningSystem =
+    "Jsi orchestrator back-office agenta pro realitni firmu.\n" +
+    "Napis 3–8 vet v cestine: co uzivatel chce, pochybna mista, jaky typ ulohy (analytika, e-mail/kalendar, prezentace, report, web).\n" +
+    "Vrat POUZE souvisly text (bez JSON, bez odrzek, bez nadpisu)." +
+    extra;
+
+  const streamTrace = params.trace
+    ? {
+        recorder: params.trace.recorder,
+        parentId: params.trace.parentId,
+        name: "llm.orchestrator.thinking.reasoning_stream" as const
+      }
+    : undefined;
+
+  const streamed = await streamWithAzureProxy({
+    runId: params.runId,
+    maxTokens: 600,
+    trace: streamTrace,
+    onTextDelta: (chunk) => {
+      void params.onReasoningDelta(chunk);
+    },
+    messages: [
+      { role: "system", content: reasoningSystem },
+      { role: "user", content: `Pozadavek uzivatele:\n${params.question}${history}` }
+    ]
+  });
+
+  const intentSystem =
+    "Na zaklade zadani uzivatele a hotove uvahy asistenta (cesky) vrat POUZE jeden JSON objekt (bez markdownu):\n" +
+    '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search","slideCount":<volitelne cislo 2-15>}\n' +
+    intentRulesBlock();
+
+  const intentUser =
+    `Pozadavek uzivatele:\n${params.question}${history}\n\n---\nUvaha asistenta:\n${streamed.text}`;
+
+  let intentLlm = await generateWithAzureProxy({
+    runId: params.runId,
+    maxTokens: 220,
+    trace: params.trace
+      ? {
+          recorder: params.trace.recorder,
+          parentId: params.trace.parentId,
+          name: "llm.orchestrator.thinking.intent_json"
+        }
+      : undefined,
+    messages: [
+      { role: "system", content: intentSystem },
+      { role: "user", content: intentUser }
+    ]
+  });
+
+  let parsed = tryParseJsonObject(IntentOnlySchema, intentLlm.text);
+  if (!parsed) {
+    intentLlm = await generateWithAzureProxy({
+      runId: params.runId,
+      maxTokens: 200,
+      trace: params.trace
+        ? {
+            recorder: params.trace.recorder,
+            parentId: params.trace.parentId,
+            name: "llm.orchestrator.thinking.intent_json.repair"
+          }
+        : undefined,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Predchozi vystup nebyl platny JSON. Vrat pouze jeden objekt {intent, slideCount?} podle pravidel."
+        },
+        { role: "user", content: intentLlm.text }
+      ]
+    });
+    parsed = tryParseJsonObject(IntentOnlySchema, intentLlm.text);
+  }
+
+  if (parsed) {
+    if (params.trace?.recorder && intentLlm.traceEventId) {
+      void params.trace.recorder.record({
+        parentId: intentLlm.traceEventId,
+        kind: "orchestrator",
+        name: "thinking.parsed_from_stream",
+        output: {
+          intent: parsed.intent,
+          slideCount: parsed.slideCount,
+          reasoningPreview: streamed.text.slice(0, 8000)
+        }
+      });
+    }
+    return { intent: parsed.intent, slideCount: parsed.slideCount, reasoning: streamed.text.trim() };
+  }
+
+  return thinkingOrchestratorSinglePass({
+    runId: params.runId,
+    question: params.question,
+    contextText: params.contextText,
+    extraInstructions: params.extraInstructions,
+    trace: params.trace
+  });
+}
+
+async function thinkingOrchestratorSinglePass(params: {
   runId: string;
   question: string;
   contextText?: string;
@@ -27,19 +170,7 @@ export async function classifyWithThinkingOrchestrator(params: {
 
   const extra = params.extraInstructions?.trim() ? `\n\nDodatecne pokyny orchestratora:\n${params.extraInstructions}` : "";
 
-  const systemPrompt =
-    "Jsi orchestrator back-office agenta pro realitni firmu.\n" +
-    "Nejdrive proved uvahu (reasoning): 3–8 vet v cestine, co uzivatel chce, jaka je sporna mista a ktery typ ulohy to je.\n" +
-    "Pak v jedinem JSON objektu (bez markdownu) vrat:\n" +
-    '{"reasoning":"<tva uvaha jako jeden retezec>","intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search","slideCount":<volitelne 2-15>}\n' +
-    "intent:\n" +
-    "- analytics: interni data, KPI, SQL vystup — predevsim tabulka a prehled, ne hlavni PPTX.\n" +
-    "- calendar_email: e-mail, prohlidka, kalendář, draft do Gmailu.\n" +
-    "- presentation: predevsim slidova prezentace / PPTX z dat, bez celeho balicku CSV+MD+prezentace.\n" +
-    "- weekly_report: komplexni manazersky balicek — CSV, Markdown a prezentace.\n" +
-    "- web_search: overeni na internetu mimo interni data.\n" +
-    "slideCount u presentation nebo weekly_report jen pokud uzivatel explicitne zminil pocet slidu; jinak pole vynechej.\n" +
-    "V poli reasoning strucne shrn duvod pro vybrany intent.";
+  const systemPrompt = buildThinkingSystemPrompt(extra);
 
   const ask = async (traceName: "llm.orchestrator.thinking" | "llm.orchestrator.thinking.repair") =>
     generateWithAzureProxy({
@@ -49,7 +180,7 @@ export async function classifyWithThinkingOrchestrator(params: {
         ? { recorder: params.trace.recorder, parentId: params.trace.parentId, name: traceName }
         : undefined,
       messages: [
-        { role: "system", content: systemPrompt + extra },
+        { role: "system", content: systemPrompt },
         { role: "user", content: `Pozadavek uzivatele:\n${params.question}${history}` }
       ]
     });
@@ -108,4 +239,22 @@ export async function classifyWithThinkingOrchestrator(params: {
     intent: "analytics",
     reasoning: "Model nevratil strukturovany JSON; spustena zalozni vetev analytics."
   };
+}
+
+export async function classifyWithThinkingOrchestrator(params: {
+  runId: string;
+  question: string;
+  contextText?: string;
+  extraInstructions?: string;
+  trace?: { recorder: AgentTraceRecorder; parentId: string | null };
+  /** Když je nastaveno (např. /api/agent/stream), úvaha se streamuje token po tokenu. */
+  onReasoningDelta?: (chunk: string) => void | Promise<void>;
+}): Promise<ThinkingOrchestratorResult> {
+  if (params.onReasoningDelta) {
+    return thinkingOrchestratorStreamed({
+      ...params,
+      onReasoningDelta: params.onReasoningDelta
+    });
+  }
+  return thinkingOrchestratorSinglePass(params);
 }

@@ -9,6 +9,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 import { WEEKLY_REPORT_DEFAULT_SLIDE_COUNT } from "@/lib/agent/defaults";
 import { runAgentOrchestrator } from "@/lib/agent/orchestrator/agent-orchestrator";
 import { getMcpToolRunnerForAgent } from "@/lib/agent/mcp-tools/tool-registry";
+import type { AgentRunProgress } from "@/lib/agent/types";
 
 function safeText(value: unknown): string {
   if (typeof value === "string") return value;
@@ -46,13 +47,23 @@ export async function runBackOfficeAgent(input: {
       slideCount?: number;
     };
   };
+  /** Volitelně: průběžné hlášky pro streaming UI (/api/agent/stream). */
+  onProgress?: (event: AgentRunProgress) => void | Promise<void>;
+  /** Tokeny úvahy thinking orchestrátoru (jen při streamovaném běhu). */
+  onOrchestratorDelta?: (textChunk: string) => void | Promise<void>;
 }): Promise<AgentAnswer> {
+  const emit = async (phase: string) => {
+    await input.onProgress?.({ phase });
+  };
+
   const runId = randomUUID();
   const startedAt = new Date().toISOString();
   const supabase = getSupabaseAdminClient();
   const conversationId = input.conversationId ?? null;
 
+  await emit("Zpracovávám dotaz…");
   const contextText = await loadConversationContext({ supabase, conversationId });
+  await emit("Kontext konverzace načten.");
   const agentDef = getAgentDefinition(input.agentId);
   const handle = createAgentRunHandle({
     runId,
@@ -78,16 +89,19 @@ export async function runBackOfficeAgent(input: {
   let orchestrationReasoning: string | undefined;
 
   if (agentDef.mode === "thinking") {
+    await emit("Orchestrátor promýšlí zadání a vhodné nástroje…");
     const thinking = await classifyWithThinkingOrchestrator({
       runId,
       question: input.question,
       contextText: contextText || undefined,
       extraInstructions: agentDef.orchestratorInstructions,
-      trace: traceRef
+      trace: traceRef,
+      onReasoningDelta: input.onOrchestratorDelta
     });
     classified = { intent: thinking.intent, slideCount: thinking.slideCount };
     orchestrationReasoning = thinking.reasoning;
   } else {
+    await emit("Klasifikuji typ požadavku…");
     classified = await classifyAgentIntent({
       runId,
       question: input.question,
@@ -97,6 +111,7 @@ export async function runBackOfficeAgent(input: {
   }
 
   const intent = classified.intent;
+  await emit(intentProgressLabel(intent));
 
   const explicitSlideCount = input.options?.presentation?.slideCount;
   const fromClassifier = classified.slideCount;
@@ -142,6 +157,7 @@ export async function runBackOfficeAgent(input: {
 
   const toolRunner = getMcpToolRunnerForAgent(agentDef);
 
+  await emit("Spouštím podagenta a nástroje (může chvíli trvat)…");
   answer = await runAgentOrchestrator({
     intent,
     ctx: {
@@ -167,6 +183,7 @@ export async function runBackOfficeAgent(input: {
     }
   };
 
+  await emit("Ukládám výsledek a audit…");
   const finishedAt = new Date().toISOString();
   const { error } = await supabase.from("agent_runs").insert({
     run_id: runId,
@@ -212,5 +229,17 @@ export async function runBackOfficeAgent(input: {
   }
 
   logger.info("agent_run_finished", { runId, confidence: answer.confidence });
+  await emit("Hotovo.");
   return answer;
+}
+
+function intentProgressLabel(intent: ClassifiedAgentIntent["intent"]): string {
+  const labels: Record<ClassifiedAgentIntent["intent"], string> = {
+    analytics: "Záměr: analytika nad interními daty — připravuji odpověď…",
+    calendar_email: "Záměr: kalendář a e-mail — připravuji odpověď…",
+    presentation: "Záměr: prezentace — připravuji odpověď…",
+    weekly_report: "Záměr: týdenní report — připravuji odpověď…",
+    web_search: "Záměr: vyhledávání na webu — připravuji odpověď…"
+  };
+  return labels[intent];
 }

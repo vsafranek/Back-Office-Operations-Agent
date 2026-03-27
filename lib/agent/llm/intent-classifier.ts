@@ -35,9 +35,9 @@ export async function classifyAgentIntent(params: {
           content:
             "Zarad pozadavek uzivatele do jedne kategorie. Vrat POUZE JSON bez markdownu nebo vysvetlovani, tvar:\n" +
             '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search","slideCount":<cislo 2-15 nebo vynechej>}\n\n' +
-            "analytics: interni data, SQL, KPI, klienti, leady, nemovitosti, dashboard (predevsim tabulka/CSV/MD, ne pozadavek na PPTX jako hlavni vystup).\n" +
+            "analytics: interni data, SQL, KPI, klienti, leady, nemovitosti, dashboard — tabulka, CSV, graf nebo Markdown z dat (i kdyz uzivatel chce 'graf', jde o analytics, ne PPTX).\n" +
             "calendar_email: e-mail, prohlidka, termin schuzky, kalendář, Gmail draft.\n" +
-            "presentation: hlavne PPTX/slidova prezentace z internich dat bez pozadavku na cely manazersky balicek (CSV+MD+prezentace); PowerPoint, slidy, deck.\n" +
+            "presentation: hlavne PPTX/slidova prezentace / slidovy deck (PowerPoint); NE jen graf nad daty v aplikaci — to je analytics.\n" +
             "weekly_report: komplexni report pro vedeni — dataset CSV, souhrn MD a prezentace dohromady.\n" +
             "web_search: informace z internetu, aktualni udalosti, overeni faktu mimo interni databazi.\n" +
             "slideCount dopln u presentation nebo weekly_report pokud uzivatel zminil konkretni pocet slidu; jinak vynechej (system pouzije standard 3)."

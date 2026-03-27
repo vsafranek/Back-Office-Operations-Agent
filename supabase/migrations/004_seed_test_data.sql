@@ -1,6 +1,7 @@
 -- Test seed data for Back Office Operations Agent
 -- Safe to run repeatedly (idempotent with fixed UUIDs + where not exists).
 
+-- Sloupce ohledně nemovitostí doplňuje migrace 009; zde jen základní řádky.
 insert into public.clients (id, full_name, email, phone, source_channel, created_at)
 select * from (
   values

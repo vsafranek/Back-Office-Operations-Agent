@@ -14,6 +14,15 @@ export type AgentOrchestrationMeta = {
   reasoning?: string;
 };
 
+/** Strukturovaná data pro pravý panel dashboardu (tabulka + graf). */
+export type AgentDataPanel =
+  | {
+      kind: "clients_q1";
+      source: string;
+      rows: Record<string, unknown>[];
+      chart: { title: string; labels: string[]; values: number[] };
+    };
+
 export type AgentAnswer = {
   /** Korelace s řádky v agent_trace_events; doplní `runBackOfficeAgent`. */
   runId?: string;
@@ -23,6 +32,8 @@ export type AgentAnswer = {
   generated_artifacts: AgentArtifact[];
   next_actions: string[];
   orchestration?: AgentOrchestrationMeta;
+  /** Volitelné: vykreslení v UI (např. analytics Q1 klienti). */
+  dataPanel?: AgentDataPanel;
 };
 
 export type AgentToolContext = {
@@ -31,4 +42,16 @@ export type AgentToolContext = {
   conversationId?: string | null;
   trace?: AgentTraceRecorder;
   traceParentId?: string | null;
+};
+
+/** Řádek NDJSON z POST /api/agent/stream. */
+export type AgentStreamLine =
+  | { type: "phase"; label: string }
+  | { type: "orchestrator_delta"; text: string }
+  | { type: "result"; payload: AgentAnswer }
+  | { type: "error"; message: string };
+
+/** Callback z runBackOfficeAgent pro server-sent fáze. */
+export type AgentRunProgress = {
+  phase: string;
 };

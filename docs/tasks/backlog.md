@@ -1,6 +1,6 @@
 # Back Office Agent Backlog
 
-Last updated: 2026-03-26 (night)
+Last updated: 2026-03-27
 
 ## How to use
 - `status`: `todo` | `in_progress` | `blocked` | `done`
@@ -24,3 +24,5 @@ Last updated: 2026-03-26 (night)
 | BOA-011 | Add scheduler verification runbook and automated health checks | todo | P2 | Validate cron execution and workflow freshness daily. |
 | BOA-012 | Add disconnect/reconnect Google integration diagnostics in UI | in_progress | P2 | Disconnect implemented. Remaining: token health, last refresh timestamp, guided reconnect. |
 | BOA-013 | Scrapers for major Czech listing portals (Sreality.cz, Reality.iDNES.cz, Bezrealitky.cz) | todo | P0 | Ingestion adapters per portal: fetch/listing detail parsing, unified schema, dedupe across sites, rate limits, logging. Prefer official/API or allowed feeds where available; align with site ToS and robots.txt. Supports BOA-003. |
+| BOA-014 | Agent-callable Clients DB query tool | done | P1 | Rozšířen `runSqlPreset`: preset `new_clients_q1` → view `vw_new_clients_q1` (migrace 008: Q1 + aktuální rok Europe/Prague), lepší detekce z NL (`detectQueryPresetFromQuestion`). Service-role beze změny. |
+| BOA-015 | Pravý panel: tabulka + graf z výstupů agenta | done | P1 | `AgentAnswer.dataPanel`, analytics subagent plní `clients_q1`; UI `AgentDataPanel` + split grid v `ConfigurableAgentPanel`. Export PNG zůstává v BOA-002. |

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AgentTraceTree } from "@/components/agent/AgentTraceTree";
 import { ConfigurableAgentPanel } from "@/components/agent/ConfigurableAgentPanel";
 import { DEFAULT_AGENT_ID, listAgentUiOptions } from "@/lib/agent/config/agent-definitions";
+import { readAgentNdjsonStream } from "@/lib/agent/stream-client";
 import type { AgentAnswer } from "@/lib/agent/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
@@ -175,7 +176,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <main style={{ maxWidth: 1200, display: "grid", gridTemplateColumns: "280px 1fr", gap: 20 }}>
+    <main style={{ maxWidth: 1480, display: "grid", gridTemplateColumns: "280px 1fr", gap: 20 }}>
       <aside>
         <h2>Konverzace</h2>
         <button type="button" onClick={createConversation}>
@@ -223,7 +224,7 @@ export default function DashboardPage() {
           const sessionResult = await supabase.auth.getSession();
           return sessionResult.data.session?.access_token ?? null;
         }}
-        onRun={async ({ question, agentId }) => {
+        onRun={async ({ question, agentId }, streamOpts) => {
           const sessionResult = await supabase.auth.getSession();
           const accessToken = sessionResult.data.session?.access_token;
 
@@ -250,7 +251,7 @@ export default function DashboardPage() {
             }
           }
 
-          const response = await fetch("/api/agent", {
+          const response = await fetch("/api/agent/stream", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -259,11 +260,25 @@ export default function DashboardPage() {
             body: JSON.stringify({ question, conversationId, agentId })
           });
 
-          const payload = (await response.json()) as AgentAnswer & { error?: string };
-
           if (!response.ok) {
-            throw new Error(payload.error ?? "Agent request failed.");
+            const errText = await response.text();
+            let message = `HTTP ${response.status}`;
+            try {
+              const firstLine = errText.trim().split("\n")[0];
+              if (firstLine) {
+                const parsed = JSON.parse(firstLine) as { message?: string };
+                if (parsed.message) message = parsed.message;
+              }
+            } catch {
+              if (errText) message = errText.slice(0, 200);
+            }
+            throw new Error(message);
           }
+
+          const payload = await readAgentNdjsonStream(response, {
+            onPhase: streamOpts?.onPhase,
+            onOrchestratorDelta: streamOpts?.onOrchestratorDelta
+          });
 
           if (conversationId) {
             const messagesResponse = await fetch(`/api/conversations/${conversationId}/messages`, {

@@ -148,3 +148,69 @@ export async function generateWithAzureProxy(params: {
 
   throw lastError instanceof Error ? lastError : new Error("Azure OpenAI generation failed.");
 }
+
+export type StreamWithAzureProxyResult = {
+  text: string;
+  model: string;
+  traceEventId?: string | null;
+};
+
+/**
+ * Tokenový stream obsahu zprávy (delta). Pro živý výstup orchestrátoru v UI.
+ */
+export async function streamWithAzureProxy(params: {
+  messages: AzureProxyMessage[];
+  runId: string;
+  model?: string;
+  maxTokens?: number;
+  onTextDelta: (chunk: string) => void;
+  trace?: LlmTraceParams;
+}): Promise<StreamWithAzureProxyResult> {
+  const env = getEnv();
+  const model = params.model ?? env.AZURE_PROXY_MODEL_DEFAULT;
+  const maxTokens = Math.min(params.maxTokens ?? env.AZURE_PROXY_MAX_TOKENS_PER_REQUEST, env.AZURE_PROXY_MAX_TOKENS_PER_REQUEST);
+  const client = createAzureOpenAIClient(env);
+  const attemptStarted = Date.now();
+
+  const stream = await client.chat.completions.create({
+    model,
+    messages: params.messages,
+    temperature: 0.2,
+    max_tokens: maxTokens,
+    stream: true
+  });
+
+  let full = "";
+  for await (const part of stream) {
+    const delta = part.choices[0]?.delta?.content;
+    if (typeof delta === "string" && delta.length > 0) {
+      full += delta;
+      params.onTextDelta(delta);
+    }
+  }
+
+  const text = full.trim();
+  if (!text) {
+    throw new Error("Streamed completion did not include message content.");
+  }
+
+  logger.info("azure_proxy_stream_success", { runId: params.runId, model, length: text.length });
+
+  let traceEventId: string | null = null;
+  if (params.trace) {
+    traceEventId = await params.trace.recorder.record({
+      parentId: params.trace.parentId,
+      kind: "llm",
+      name: params.trace.name,
+      input: summarizeLlmMessages(params.messages),
+      output: {
+        textPreview: text.slice(0, 8000),
+        model
+      },
+      durationMs: Date.now() - attemptStarted,
+      meta: { streamed: true }
+    });
+  }
+
+  return { text, model, traceEventId };
+}
