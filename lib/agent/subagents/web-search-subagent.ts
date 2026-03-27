@@ -35,6 +35,13 @@ export async function runWebSearchSubAgent(params: {
   const reply = await generateUserFacingReply({
     runId: params.ctx.runId,
     maxTokens: 1200,
+    trace: params.ctx.trace
+      ? {
+          recorder: params.ctx.trace,
+          parentId: params.ctx.traceParentId ?? null,
+          name: "llm.subagent.web-search.reply"
+        }
+      : undefined,
     userContent: [
       `Dotaz uzivatele: ${params.question}`,
       "Pouzij VYHRADNE nize uvedene zdroje. Pokud neco nevypliva, rekni ze to z nich nejde spolehlive udelat.",

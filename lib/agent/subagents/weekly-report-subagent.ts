@@ -35,6 +35,13 @@ export async function runWeeklyReportSubAgent(params: {
   const reply = await generateUserFacingReply({
     runId: params.ctx.runId,
     maxTokens: 1000,
+    trace: params.ctx.trace
+      ? {
+          recorder: params.ctx.trace,
+          parentId: params.ctx.traceParentId ?? null,
+          name: "llm.subagent.weekly-report.reply"
+        }
+      : undefined,
     userContent: [
       `Pozadavek uzivatele: ${params.question}`,
       `Nazev baliku vystupu: ${params.title}`,

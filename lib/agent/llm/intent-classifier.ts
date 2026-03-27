@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AgentTraceRecorder } from "@/lib/agent/trace/recorder";
 import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
 import { tryParseJsonObject } from "@/lib/agent/llm/parse-json-response";
 
@@ -13,15 +14,21 @@ export async function classifyAgentIntent(params: {
   runId: string;
   question: string;
   contextText?: string;
+  trace?: { recorder: AgentTraceRecorder; parentId: string | null };
 }): Promise<ClassifiedAgentIntent> {
   const history = params.contextText?.trim()
     ? `\n\nKontext poslednich zprav:\n${params.contextText}`
     : "";
 
+  const traceParams = params.trace
+    ? { recorder: params.trace.recorder, parentId: params.trace.parentId, name: "llm.intent.classify" as const }
+    : undefined;
+
   const ask = async () =>
     generateWithAzureProxy({
       runId: params.runId,
       maxTokens: 220,
+      trace: traceParams,
       messages: [
         {
           role: "system",
@@ -40,18 +47,41 @@ export async function classifyAgentIntent(params: {
 
   let llm = await ask();
   let parsed = tryParseJsonObject(IntentSchema, llm.text);
-  if (parsed) return parsed;
+  if (parsed) {
+    if (params.trace?.recorder && llm.traceEventId) {
+      void params.trace.recorder.record({
+        parentId: llm.traceEventId,
+        kind: "orchestrator",
+        name: "intent.parsed",
+        output: { intent: parsed.intent, slideCount: parsed.slideCount }
+      });
+    }
+    return parsed;
+  }
 
   llm = await generateWithAzureProxy({
     runId: params.runId,
     maxTokens: 200,
+    trace: params.trace
+      ? { recorder: params.trace.recorder, parentId: params.trace.parentId, name: "llm.intent.repair" }
+      : undefined,
     messages: [
       { role: "system", content: "Predchozi vystup nebyl validni JSON. Oprav ho na jediny JSON objekt dle IntentSchema, bez dalsiho textu." },
       { role: "user", content: llm.text }
     ]
   });
   parsed = tryParseJsonObject(IntentSchema, llm.text);
-  if (parsed) return parsed;
+  if (parsed) {
+    if (params.trace?.recorder && llm.traceEventId) {
+      void params.trace.recorder.record({
+        parentId: llm.traceEventId,
+        kind: "orchestrator",
+        name: "intent.parsed",
+        output: { intent: parsed.intent, slideCount: parsed.slideCount }
+      });
+    }
+    return parsed;
+  }
 
   return { intent: "analytics" };
 }

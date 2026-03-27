@@ -3,7 +3,7 @@
 Back-office agent for real-estate operations built on:
 - Next.js (API + orchestration),
 - Supabase (database, storage),
-- Azure LLM proxy (single model access point),
+- Azure OpenAI-compatible endpoint via official **`openai`** SDK (chat completions),
 - Google Workspace (Calendar + Gmail drafts).
 
 ## Quick start
@@ -13,7 +13,8 @@ Back-office agent for real-estate operations built on:
 4. Run dev server: `npm run dev`
 
 ## Main endpoints
-- `POST /api/agent` - natural-language prompt for analytics/workflows (optional `options.presentation.slideCount`; weekly report defaults to **3** slides).
+- `POST /api/agent` - natural-language prompt for analytics/workflows. Body: `question`, optional `conversationId`, optional `agentId` (`basic` / `thinking-orchestrator`, default = thinking orchestrator), optional `options.presentation.slideCount` (weekly report defaults to **3** slides).
+- `GET /api/agent/trace?runId=...` - strom LLM + nástrojů pro jeden běh (stejný uživatel jako Bearer token).
 - `POST /api/cron/daily` - daily market monitoring job.
 - `POST /api/workflows/weekly-report` - weekly executive report trigger (optional: `slideCount` default **3**, `title`, `context`).
 - `GET /api/storage/list` - list files in Supabase Storage (auth required).
@@ -32,10 +33,11 @@ Back-office agent for real-estate operations built on:
   - `docs/architecture/presentation-modes.md`
 
 ## Supabase migrations
-Run files in order:
-1. `supabase/migrations/001_init_core.sql`
-2. `supabase/migrations/002_views_and_functions.sql`
-3. `supabase/migrations/003_rls_policies.sql`
+Run files in order (včetně konverzací a trace), např.:
+1. `001_init_core.sql` … `006_conversations.sql` (jak máte v repu),
+2. **`007_agent_trace_events.sql`** – strom agent / LLM / tool pro dashboard.
+
+Architektura: `docs/architecture/system-overview.md`.
 
 ## Security notes
 - Keep service keys only in server env vars.

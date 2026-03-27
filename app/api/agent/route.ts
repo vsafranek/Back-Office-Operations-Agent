@@ -1,12 +1,21 @@
 import { z } from "zod";
 import { runBackOfficeAgent } from "@/lib/agent";
+import { listAgentIds } from "@/lib/agent/config/registry";
 import { requireAuthenticatedUser } from "@/lib/auth/server-auth";
 
 export const runtime = "nodejs";
 
+const agentIdSchema = z
+  .string()
+  .optional()
+  .refine((id) => id == null || id === "" || listAgentIds().includes(id), {
+    message: "Unknown agentId"
+  });
+
 const requestSchema = z.object({
   question: z.string().min(3),
   conversationId: z.string().uuid().optional(),
+  agentId: agentIdSchema,
   options: z
     .object({
       presentation: z
@@ -27,6 +36,7 @@ export async function POST(request: Request) {
       userId: user.id,
       question: parsed.question,
       conversationId: parsed.conversationId,
+      agentId: parsed.agentId?.trim() || undefined,
       options: parsed.options
     });
 

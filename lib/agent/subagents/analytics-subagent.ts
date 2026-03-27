@@ -22,6 +22,13 @@ export async function runAnalyticsSubAgent(params: {
   const reply = await generateUserFacingReply({
     runId: params.ctx.runId,
     maxTokens: 1000,
+    trace: params.ctx.trace
+      ? {
+          recorder: params.ctx.trace,
+          parentId: params.ctx.traceParentId ?? null,
+          name: "llm.subagent.analytics.reply"
+        }
+      : undefined,
     userContent: [
       `Puvodni dotaz uzivatele: ${params.question}`,
       `SQL zdroj / preset: ${data.source}`,

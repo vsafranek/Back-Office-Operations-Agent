@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AgentTraceRecorder } from "@/lib/agent/trace/recorder";
 import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
 import { AGENT_SYSTEM_PROMPT } from "@/lib/agent/system-prompt";
 import { tryParseJsonObject } from "@/lib/agent/llm/parse-json-response";
@@ -19,6 +20,7 @@ export async function generateUserFacingReply(params: {
   runId: string;
   userContent: string;
   maxTokens?: number;
+  trace?: { recorder: AgentTraceRecorder; parentId: string | null; name?: string };
 }): Promise<UserFacingReply> {
   const system =
     `${AGENT_SYSTEM_PROMPT}\n\n` +
@@ -26,17 +28,25 @@ export async function generateUserFacingReply(params: {
     "Vrat POUZE jeden validni JSON objekt (bez markdownu), klice: " +
     'answer_text (retezec), confidence (0 az 1), next_actions (pole 2–4 kratkych konkretnich navrhu v cestine).';
 
-  const run = (user: string) =>
+  const llmName = params.trace?.name ?? "llm.user-facing.reply";
+  const run = (user: string, traceSuffix: string) =>
     generateWithAzureProxy({
       runId: params.runId,
       maxTokens: params.maxTokens ?? 900,
+      trace: params.trace
+        ? {
+            recorder: params.trace.recorder,
+            parentId: params.trace.parentId,
+            name: `${llmName}${traceSuffix}`
+          }
+        : undefined,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user }
       ]
     });
 
-  let llm = await run(params.userContent);
+  let llm = await run(params.userContent, "");
   let parsed = tryParseJsonObject(UserReplySchema, llm.text);
   if (parsed) {
     return {
@@ -47,7 +57,8 @@ export async function generateUserFacingReply(params: {
   }
 
   llm = await run(
-    `${params.userContent}\n\n---\nPredchozi odpoved modelu nebyla pouzitelnym JSON. Vrat pouze validni JSON podle instrukci. Neopakuj omyl.\nPredchozi:\n${llm.text}`
+    `${params.userContent}\n\n---\nPredchozi odpoved modelu nebyla pouzitelnym JSON. Vrat pouze validni JSON podle instrukci. Neopakuj omyl.\nPredchozi:\n${llm.text}`,
+    ".retry"
   );
   parsed = tryParseJsonObject(UserReplySchema, llm.text);
   if (parsed) {
@@ -61,6 +72,13 @@ export async function generateUserFacingReply(params: {
   llm = await generateWithAzureProxy({
     runId: params.runId,
     maxTokens: 400,
+    trace: params.trace
+      ? {
+          recorder: params.trace.recorder,
+          parentId: params.trace.parentId,
+          name: `${llmName}.final`
+        }
+      : undefined,
     messages: [
       { role: "system", content: system },
       { role: "user", content: `${params.userContent}\n\nZkus znovu: pouze JSON.` }

@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { AgentAnswer } from "@/lib/agent/types";
-import { classifyAgentIntent } from "@/lib/agent/llm/intent-classifier";
+import { getAgentDefinition } from "@/lib/agent/config/registry";
+import { classifyAgentIntent, type ClassifiedAgentIntent } from "@/lib/agent/llm/intent-classifier";
+import { classifyWithThinkingOrchestrator } from "@/lib/agent/llm/thinking-orchestrator";
+import { createAgentRunHandle } from "@/lib/agent/runtime/agent-run-handle";
 import { logger } from "@/lib/observability/logger";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 import { WEEKLY_REPORT_DEFAULT_SLIDE_COUNT } from "@/lib/agent/defaults";
@@ -35,6 +38,8 @@ export async function runBackOfficeAgent(input: {
   userId: string;
   question: string;
   conversationId?: string;
+  /** Viz `lib/agent/config/registry.ts` – např. basic | thinking-orchestrator */
+  agentId?: string;
   options?: {
     presentation?: {
       slideCount?: number;
@@ -47,21 +52,82 @@ export async function runBackOfficeAgent(input: {
   const conversationId = input.conversationId ?? null;
 
   const contextText = await loadConversationContext({ supabase, conversationId });
-  const classified = await classifyAgentIntent({
+  const agentDef = getAgentDefinition(input.agentId);
+  const handle = createAgentRunHandle({
     runId,
-    question: input.question,
-    contextText: contextText || undefined
+    userId: input.userId,
+    conversationId
   });
+
+  const rootId = await handle.trace.record({
+    parentId: null,
+    kind: "orchestrator",
+    name: "run.start",
+    input: {
+      agentId: agentDef.id,
+      mode: agentDef.mode,
+      questionPreview: input.question.slice(0, 600),
+      hasConversation: Boolean(conversationId)
+    }
+  });
+
+  const traceRef = { recorder: handle.trace, parentId: rootId };
+
+  let classified: ClassifiedAgentIntent;
+  let orchestrationReasoning: string | undefined;
+
+  if (agentDef.mode === "thinking") {
+    const thinking = await classifyWithThinkingOrchestrator({
+      runId,
+      question: input.question,
+      contextText: contextText || undefined,
+      extraInstructions: agentDef.orchestratorInstructions,
+      trace: traceRef
+    });
+    classified = { intent: thinking.intent, slideCount: thinking.slideCount };
+    orchestrationReasoning = thinking.reasoning;
+  } else {
+    classified = await classifyAgentIntent({
+      runId,
+      question: input.question,
+      contextText: contextText || undefined,
+      trace: traceRef
+    });
+  }
+
   const intent = classified.intent;
 
-  logger.info("agent_run_started", { runId, userId: input.userId, intent });
+  const explicitSlideCount = input.options?.presentation?.slideCount;
+  const fromClassifier = classified.slideCount;
+  const slideDefault = intent === "weekly_report" ? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT : 5;
+  const resolvedSlideCount = Math.min(15, Math.max(2, explicitSlideCount ?? fromClassifier ?? slideDefault));
+
+  const dispatchId = await handle.trace.record({
+    parentId: rootId,
+    kind: "orchestrator",
+    name: "intent.selected",
+    input: {
+      intent,
+      reasoningPreview: orchestrationReasoning?.slice(0, 3000)
+    },
+    output: { slideCount: resolvedSlideCount }
+  });
+
+  logger.info("agent_run_started", {
+    runId,
+    userId: input.userId,
+    intent,
+    agentId: agentDef.id,
+    mode: agentDef.mode,
+    traceRootId: rootId
+  });
 
   if (conversationId) {
     await supabase.from("conversation_messages").insert({
       conversation_id: conversationId,
       role: "user",
       content: input.question,
-      metadata: { runId, intent }
+      metadata: { runId, intent, agentId: agentDef.id, agentMode: agentDef.mode }
     });
     await supabase
       .from("conversations")
@@ -72,18 +138,29 @@ export async function runBackOfficeAgent(input: {
 
   let answer: AgentAnswer;
 
-  const explicitSlideCount = input.options?.presentation?.slideCount;
-  const fromClassifier = classified.slideCount;
-  const slideDefault = intent === "weekly_report" ? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT : 5;
-  const resolvedSlideCount = Math.min(15, Math.max(2, explicitSlideCount ?? fromClassifier ?? slideDefault));
-
   answer = await runAgentOrchestrator({
     intent,
-    ctx: { runId, userId: input.userId },
+    ctx: {
+      runId,
+      userId: input.userId,
+      conversationId
+    },
     question: input.question,
     contextText,
-    slideCount: resolvedSlideCount
+    slideCount: resolvedSlideCount,
+    trace: handle.trace,
+    traceDispatchId: dispatchId
   });
+
+  answer = {
+    ...answer,
+    runId,
+    orchestration: {
+      agentId: agentDef.id,
+      mode: agentDef.mode,
+      ...(orchestrationReasoning ? { reasoning: orchestrationReasoning } : {})
+    }
+  };
 
   const finishedAt = new Date().toISOString();
   const { error } = await supabase.from("agent_runs").insert({
@@ -110,6 +187,9 @@ export async function runBackOfficeAgent(input: {
       metadata: {
         runId,
         intent,
+        agentId: agentDef.id,
+        agentMode: agentDef.mode,
+        orchestration: answer.orchestration,
         confidence: answer.confidence,
         sources: answer.sources,
         generated_artifacts: answer.generated_artifacts,

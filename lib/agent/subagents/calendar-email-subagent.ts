@@ -35,9 +35,14 @@ export async function runCalendarEmailSubAgent(params: {
     `Preferovany termin prohlidky (nabidni ho v tele): ${recommended?.start ?? "dohodou"}\n\n` +
     `Historie konverzace:\n${params.contextText}`;
 
+  const llmTrace = params.ctx.trace
+    ? { recorder: params.ctx.trace, parentId: params.ctx.traceParentId ?? null }
+    : undefined;
+
   let llm = await generateWithAzureProxy({
     runId: params.ctx.runId,
     maxTokens: 900,
+    trace: llmTrace ? { ...llmTrace, name: "llm.calendar-email.draft" } : undefined,
     messages: [
       { role: "system", content: draftInstructions },
       { role: "user", content: userPrompt }
@@ -49,6 +54,7 @@ export async function runCalendarEmailSubAgent(params: {
     llm = await generateWithAzureProxy({
       runId: params.ctx.runId,
       maxTokens: 900,
+      trace: llmTrace ? { ...llmTrace, name: "llm.calendar-email.draft.repair" } : undefined,
       messages: [
         { role: "system", content: draftInstructions },
         {
@@ -73,6 +79,9 @@ export async function runCalendarEmailSubAgent(params: {
   const reply = await generateUserFacingReply({
     runId: params.ctx.runId,
     maxTokens: 650,
+    trace: llmTrace
+      ? { ...llmTrace, name: "llm.calendar-email.assistant-summary" }
+      : undefined,
     userContent: [
       `Co chtel uzivatel: ${params.question}`,
       `Navrhnute sloty (JSON): ${JSON.stringify(slots)}`,
