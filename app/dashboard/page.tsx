@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AgentTraceTree } from "@/components/agent/AgentTraceTree";
 import { ConfigurableAgentPanel } from "@/components/agent/ConfigurableAgentPanel";
-import { DEFAULT_AGENT_ID, listAgentUiOptions } from "@/lib/agent/config/registry";
+import { DEFAULT_AGENT_ID, listAgentUiOptions } from "@/lib/agent/config/agent-definitions";
 import type { AgentAnswer } from "@/lib/agent/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 

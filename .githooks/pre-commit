@@ -1,0 +1,5 @@
+#!/bin/sh
+# Aktivace: git config core.hooksPath .githooks
+# Limit: TEST_HOOK_BUDGET_MS (ms), výchozí 60000 — viz scripts/git-hook-tests.mjs
+
+node scripts/git-hook-tests.mjs

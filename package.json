@@ -6,7 +6,9 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:hook": "node scripts/git-hook-tests.mjs",
+    "git-hooks": "git config core.hooksPath .githooks"
   },
   "keywords": [],
   "author": "",
@@ -24,6 +26,7 @@
     "pptxgenjs": "^4.0.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "server-only": "^0.0.1",
     "workflow": "^4.2.0-beta.72",
     "zod": "^4.3.6"
   },
