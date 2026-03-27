@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import type { AgentDataPanel as AgentDataPanelModel } from "@/lib/agent/types";
+import { MarketListingsDataPanelSection } from "@/components/agent/MarketListingsDataPanelSection";
 
 function formatCell(value: unknown): string {
   if (value == null) return "—";
@@ -104,7 +105,24 @@ const panelChrome: CSSProperties = {
   overflow: "auto"
 };
 
-export function AgentDataPanel({ panel }: { panel: AgentDataPanelModel }) {
+export function AgentDataPanel({
+  panel,
+  getAccessToken
+}: {
+  panel: AgentDataPanelModel;
+  getAccessToken?: () => Promise<string | null>;
+}) {
+  if (panel.kind === "market_listings") {
+    return (
+      <MarketListingsDataPanelSection
+        title={panel.title}
+        fetchParams={panel.fetchParams}
+        initialListings={panel.listings}
+        getAccessToken={getAccessToken}
+      />
+    );
+  }
+
   if (panel.kind === "clients_filtered") {
     const orderedKeys = orderedKeysForRows(panel.rows);
     return (

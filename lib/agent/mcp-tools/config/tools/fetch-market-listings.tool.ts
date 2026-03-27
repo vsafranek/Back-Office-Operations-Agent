@@ -12,7 +12,8 @@ const tool: McpTool<z.infer<typeof FetchMarketListingsInputSchema>, z.infer<type
   contract: {
     role: "tool",
     name: "fetchMarketListings",
-    description: "Ziska nove nabidky z realitnich portalu (nyni mock).",
+    description:
+      "Ziska nabidky nemovitosti. Parametry: sources, bezrealitkyOfferType, bezrealitkyRegionOsmIds, bezrealitkyRegionLabel, srealityLocalityRegionId, regionGeocodeHint (kratce po \"v …\" pro Nominatim), srealityOfferKind, location. Sreality REST + Bezrealitky GraphQL.",
     inputSchema: FetchMarketListingsInputSchema,
     outputSchema: FetchMarketListingsOutputSchema,
     auth: "service-role",

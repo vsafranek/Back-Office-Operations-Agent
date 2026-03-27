@@ -1,0 +1,63 @@
+import { FetchMarketListingsInputSchema } from "@/lib/agent/tools/market-listings-tool";
+import { resolveCzMarketRegionFromText } from "@/lib/integrations/cz-market-regions";
+import { extractCzPlaceHintForGeocode } from "@/lib/integrations/cz-place-hint";
+import type { z } from "zod";
+
+type FetchMarketListingsInput = z.infer<typeof FetchMarketListingsInputSchema>;
+
+/**
+ * Z přirozeného jazyka odvodí vstup pro fetchMarketListings (chatová větev bez LLM v args nástroje).
+ */
+export function inferMarketListingsInputFromQuestion(question: string): FetchMarketListingsInput {
+  const q = question.trim();
+  const low = q.toLowerCase();
+
+  const mentionsBez = /bezrealitk|bez\s*realit/i.test(low);
+  const mentionsSre = /srealit|sreality/i.test(low);
+  const onlyPhrase = /(jen|pouze|jenom|only|vyhradne|v\s*y\s*h\s*r\s*a\s*d\s*n\s*ě)\b/i.test(low);
+
+  let sources: FetchMarketListingsInput["sources"];
+  if (onlyPhrase && mentionsBez && !mentionsSre) {
+    sources = ["bezrealitky"];
+  } else if (onlyPhrase && mentionsSre && !mentionsBez) {
+    sources = ["sreality"];
+  } else if (mentionsBez && !mentionsSre) {
+    sources = ["bezrealitky"];
+  } else if (mentionsSre && !mentionsBez) {
+    sources = ["sreality"];
+  } else {
+    sources = ["sreality", "bezrealitky"];
+  }
+
+  const rent =
+    /pron\u00e1jmu|pron\u00e1jem|k\s+pron|n\u00e1jem|pronajem|rent\b|leasing/i.test(low) ||
+    /\bpron\u00e1j/i.test(low);
+
+  const bezrealitkyOfferType = rent ? "PRONAJEM" : "PRODEJ";
+  const srealityOfferKind = rent ? "pronajem" : "prodej";
+
+  const region = resolveCzMarketRegionFromText(q);
+  const regionGeocodeHint = region ? undefined : extractCzPlaceHintForGeocode(q) ?? undefined;
+
+  let location = "Česko";
+  if (region) {
+    location = region.label;
+  } else if (!/st\u00e1hni|zaj\u00edm|dotaz|nab\u00edd/i.test(low) && q.length <= 72) {
+    location = q;
+  }
+
+  return FetchMarketListingsInputSchema.parse({
+    location,
+    sources,
+    bezrealitkyOfferType,
+    srealityOfferKind,
+    ...(regionGeocodeHint ? { regionGeocodeHint } : {}),
+    ...(region
+      ? {
+          bezrealitkyRegionOsmIds: [...region.bezrealitkyRegionOsmIds],
+          bezrealitkyRegionLabel: region.label,
+          srealityLocalityRegionId: region.srealityLocalityRegionId
+        }
+      : {})
+  });
+}

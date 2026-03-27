@@ -239,7 +239,8 @@ function intentProgressLabel(intent: ClassifiedAgentIntent["intent"]): string {
     calendar_email: "Záměr: kalendář a e-mail — připravuji odpověď…",
     presentation: "Záměr: prezentace — připravuji odpověď…",
     weekly_report: "Záměr: týdenní report — připravuji odpověď…",
-    web_search: "Záměr: vyhledávání na webu — připravuji odpověď…"
+    web_search: "Záměr: vyhledávání na webu — připravuji odpověď…",
+    market_listings: "Záměr: nabídky Sreality / Bezrealitky — stahuji data…"
   };
   return labels[intent];
 }

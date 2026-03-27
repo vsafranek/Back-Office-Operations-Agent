@@ -165,7 +165,12 @@ export function ConfigurableAgentPanel({ agents, defaultAgentId, onRun, getAcces
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: result.dataPanel ? "1fr minmax(300px, 420px)" : "1fr",
+              gridTemplateColumns:
+                result.dataPanel?.kind === "market_listings"
+                  ? "1fr minmax(320px, 520px)"
+                  : result.dataPanel
+                    ? "1fr minmax(300px, 420px)"
+                    : "1fr",
               gap: 20,
               alignItems: "start"
             }}
@@ -245,12 +250,15 @@ export function ConfigurableAgentPanel({ agents, defaultAgentId, onRun, getAcces
 
               {result.dataPanel ? null : (
                 <p style={{ margin: 0, fontSize: 13, color: "#94a3b8" }}>
-                  Graf a tabulka z databáze se zobrazí u analytických dotazů na nové klienty (Q1).
+                  Graf a tabulka z databáze se zobrazí u analytických dotazů na nové klienty (Q1). Nabídky z portálů jako karty
+                  u dotazů na trh (Sreality / Bezrealitky).
                 </p>
               )}
             </div>
 
-            {result.dataPanel ? <AgentDataPanel panel={result.dataPanel} /> : null}
+            {result.dataPanel ? (
+              <AgentDataPanel panel={result.dataPanel} getAccessToken={getAccessToken} />
+            ) : null}
           </div>
         </section>
       ) : null}

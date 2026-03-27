@@ -48,6 +48,19 @@ describe("classifyAgentIntent", () => {
     expect(r.slideCount).toBe(3);
   });
 
+  it("returns market_listings when the model emits matching JSON", async () => {
+    vi.mocked(generateWithAzureProxy).mockResolvedValueOnce({
+      text: '{"intent":"market_listings"}',
+      model: "mock"
+    });
+
+    const r = await classifyAgentIntent({
+      runId: "run-ml",
+      question: "Stahni nabidky z Sreality a Bezrealitky pro Prahu"
+    });
+    expect(r.intent).toBe("market_listings");
+  });
+
   it("falls back to analytics when JSON is invalid", async () => {
     vi.mocked(generateWithAzureProxy)
       .mockResolvedValueOnce({ text: "not json", model: "mock" })

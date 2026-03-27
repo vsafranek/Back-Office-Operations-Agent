@@ -7,8 +7,15 @@ import { runCalendarEmailSubAgent } from "@/lib/agent/subagents/calendar-email-s
 import { runPresentationSubAgent } from "@/lib/agent/subagents/presentation-subagent";
 import { runWeeklyReportSubAgent } from "@/lib/agent/subagents/weekly-report-subagent";
 import { runWebSearchSubAgent } from "@/lib/agent/subagents/web-search-subagent";
+import { runMarketListingsChatSubAgent } from "@/lib/agent/subagents/market-listings-chat-subagent";
 
-export type AgentIntent = "analytics" | "calendar_email" | "presentation" | "weekly_report" | "web_search";
+export type AgentIntent =
+  | "analytics"
+  | "calendar_email"
+  | "presentation"
+  | "weekly_report"
+  | "web_search"
+  | "market_listings";
 
 export async function runAgentOrchestrator(params: {
   intent: AgentIntent;
@@ -76,6 +83,10 @@ export async function runAgentOrchestrator(params: {
 
   if (params.intent === "web_search") {
     return runWebSearchSubAgent({ toolRunner, ctx, question: params.question });
+  }
+
+  if (params.intent === "market_listings") {
+    return runMarketListingsChatSubAgent({ toolRunner, ctx, question: params.question });
   }
 
   return runAnalyticsSubAgent({

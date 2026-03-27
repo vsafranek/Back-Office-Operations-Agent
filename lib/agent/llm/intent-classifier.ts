@@ -4,7 +4,7 @@ import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
 import { tryParseJsonObject } from "@/lib/agent/llm/parse-json-response";
 
 const IntentSchema = z.object({
-  intent: z.enum(["analytics", "calendar_email", "presentation", "weekly_report", "web_search"]),
+  intent: z.enum(["analytics", "calendar_email", "presentation", "weekly_report", "web_search", "market_listings"]),
   slideCount: z.number().int().min(2).max(15).optional()
 });
 
@@ -34,12 +34,13 @@ export async function classifyAgentIntent(params: {
           role: "system",
           content:
             "Zarad pozadavek uzivatele do jedne kategorie. Vrat POUZE JSON bez markdownu nebo vysvetlovani, tvar:\n" +
-            '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search","slideCount":<cislo 2-15 nebo vynechej>}\n\n' +
-            "analytics: interni data, SQL, KPI, klienti, leady, nemovitosti, dashboard — tabulka, CSV, graf nebo Markdown z dat (i kdyz uzivatel chce 'graf', jde o analytics, ne PPTX).\n" +
+            '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings","slideCount":<cislo 2-15 nebo vynechej>}\n\n' +
+            "analytics: interni data, SQL, KPI, klienti, leady, dashboard — tabulka, CSV, graf nebo Markdown z dat (i kdyz uzivatel chce 'graf', jde o analytics, ne PPTX).\n" +
             "calendar_email: e-mail, prohlidka, termin schuzky, kalendář, Gmail draft.\n" +
             "presentation: hlavne PPTX/slidova prezentace / slidovy deck (PowerPoint); NE jen graf nad daty v aplikaci — to je analytics.\n" +
             "weekly_report: komplexni report pro vedeni — dataset CSV, souhrn MD a prezentace dohromady.\n" +
-            "web_search: informace z internetu, aktualni udalosti, overeni faktu mimo interni databazi.\n" +
+            "market_listings: nabidky z realitnich portálu (Sreality, Bezrealitky), stazeni inzeratu pres interni nastroj fetchMarketListings, monitoring trhu. I kdyz uzivatel napise 'internet'. NENI to obecne DDG/Google ani SQL nad CRM.\n" +
+            "web_search: obecne overeni na webu, aktuality, fakta mimo interni DB — NE dotazy primarne na Sreality/Bezrealitky ani explicitni fetchMarketListings (to market_listings).\n" +
             "slideCount dopln u presentation nebo weekly_report pokud uzivatel zminil konkretni pocet slidu; jinak vynechej (system pouzije standard 3)."
         },
         { role: "user", content: `Pozadavek:\n${params.question}${history}` }

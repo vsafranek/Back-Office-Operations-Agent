@@ -6,12 +6,12 @@ import type { ClassifiedAgentIntent } from "@/lib/agent/llm/intent-classifier";
 
 const ThinkingOrchestratorSchema = z.object({
   reasoning: z.string().min(1),
-  intent: z.enum(["analytics", "calendar_email", "presentation", "weekly_report", "web_search"]),
+  intent: z.enum(["analytics", "calendar_email", "presentation", "weekly_report", "web_search", "market_listings"]),
   slideCount: z.number().int().min(2).max(15).optional()
 });
 
 const IntentOnlySchema = z.object({
-  intent: z.enum(["analytics", "calendar_email", "presentation", "weekly_report", "web_search"]),
+  intent: z.enum(["analytics", "calendar_email", "presentation", "weekly_report", "web_search", "market_listings"]),
   slideCount: z.number().int().min(2).max(15).optional()
 });
 
@@ -26,7 +26,8 @@ function intentRulesBlock(): string {
     "- calendar_email: e-mail, prohlidka, kalendář, draft do Gmailu.\n" +
     "- presentation: hlavni vystup je PPTX / slidovy deck (PowerPoint), ne pouhy graf z databaze.\n" +
     "- weekly_report: komplexni manazersky balicek — CSV, Markdown a prezentace.\n" +
-    "- web_search: overeni na internetu mimo interni data.\n" +
+    "- market_listings: Sreality/Bezrealitky, fetchMarketListings, nabidky z portálu — neni SQL ani obecny webovy search.\n" +
+    "- web_search: obecne overeni na webu mimo interni data — ne primarne Sreality/Bezrealitky (to market_listings).\n" +
     "slideCount u presentation nebo weekly_report jen pokud uzivatel explicitne zminil pocet slidu; jinak pole vynechej.\n"
   );
 }
@@ -36,7 +37,7 @@ function buildThinkingSystemPrompt(extra: string): string {
     "Jsi orchestrator back-office agenta pro realitni firmu.\n" +
     "Nejdrive proved uvahu (reasoning): 3–8 vet v cestine, co uzivatel chce, jaka je sporna mista a ktery typ ulohy to je.\n" +
     "Pak v jedinem JSON objektu (bez markdownu) vrat:\n" +
-    '{"reasoning":"<tva uvaha jako jeden retezec>","intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search","slideCount":<volitelne 2-15>}\n' +
+    '{"reasoning":"<tva uvaha jako jeden retezec>","intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings","slideCount":<volitelne 2-15>}\n' +
     intentRulesBlock() +
     "V poli reasoning strucne shrn duvod pro vybrany intent." +
     extra
@@ -86,7 +87,7 @@ async function thinkingOrchestratorStreamed(params: {
 
   const intentSystem =
     "Na zaklade zadani uzivatele a hotove uvahy asistenta (cesky) vrat POUZE jeden JSON objekt (bez markdownu):\n" +
-    '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search","slideCount":<volitelne cislo 2-15>}\n' +
+    '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings","slideCount":<volitelne cislo 2-15>}\n' +
     intentRulesBlock();
 
   const intentUser =

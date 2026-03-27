@@ -53,7 +53,29 @@ const envSchema = z.object({
     }, z.boolean())
     .default(false),
   /** Subtitle on template title slide (slide 1); default Back Office · report */
-  PRESENTATION_DECK_SUBTITLE: optionalString
+  PRESENTATION_DECK_SUBTITLE: optionalString,
+  /** Volitelné: přepíše výchozí GraphQL URL (https://api.bezrealitky.cz/graphql/). */
+  BEZREALITKY_GRAPHQL_URL: optionalString,
+  /** Volitelné: vlastní GraphQL dokument (jinak vestavěná šablona listAdverts). */
+  BEZREALITKY_GRAPHQL_QUERY: optionalString,
+  /** Při vlastním query: operationName z DevTools (např. AdvertRelatedList). */
+  BEZREALITKY_GRAPHQL_OPERATION_NAME: optionalString,
+  BEZREALITKY_GRAPHQL_ORIGIN: optionalString,
+  BEZREALITKY_GRAPHQL_REFERER: optionalString,
+  /** User-Agent pro fetch MarketListings (Sreality / Bezrealitky). */
+  MARKET_FETCH_USER_AGENT: optionalString,
+  /**
+   * Vypne dohledání kraje přes OSM Nominatim při neznámé obci (1/true/yes/on = vypnuto).
+   * Výchozí: geokód zapnutý.
+   */
+  MARKET_LISTINGS_DISABLE_NOMINATIM: z
+    .preprocess((value) => {
+      if (value === undefined || value === "") return false;
+      if (typeof value === "boolean") return value;
+      const s = String(value).toLowerCase().trim();
+      return ["1", "true", "yes", "on"].includes(s);
+    }, z.boolean())
+    .default(false)
 });
 
 export type AppEnv = z.infer<typeof envSchema>;

@@ -15,6 +15,16 @@ export type AgentOrchestrationMeta = {
 };
 
 /** Strukturovaná data pro pravý panel dashboardu (tabulka + volitelný graf). */
+/** Jedna kartička nabídky v pravém panelu (Sreality styl). */
+export type AgentMarketListingCard = {
+  external_id: string;
+  title: string;
+  location: string;
+  source: string;
+  url: string;
+  image_url?: string;
+};
+
 export type AgentDataPanel =
   | {
       kind: "clients_q1";
@@ -28,6 +38,20 @@ export type AgentDataPanel =
       /** Nadpis nad tabulkou (např. vyhledaná oblast). */
       title: string;
       rows: Record<string, unknown>[];
+    }
+  | {
+      kind: "market_listings";
+      title: string;
+      /**
+       * Parametry pro POST /api/market-listings (stejné jako nástroj fetchMarketListings).
+       * UI si podle nich zavolá API a vyplní karty. (Volitelné u starších uložených odpovědí.)
+       */
+      fetchParams?: Record<string, unknown>;
+      /**
+       * Legacy / přednačtení; při `fetchParams` preferuje komponenta data z API.
+       * Může zůstat prázdné v odpovědi agenta.
+       */
+      listings: AgentMarketListingCard[];
     };
 
 export type AgentAnswer = {

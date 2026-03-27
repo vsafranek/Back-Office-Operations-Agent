@@ -13,7 +13,7 @@ Last updated: 2026-03-27
 |---|---|---|---|---|
 | BOA-001 | Weekly report: generate 3-slide presentation artifact | done | P0 | PPTX+PDF do Supabase Storage, verejne URL v artefaktech. Vychozi pocet slidu 3 (`WEEKLY_REPORT_DEFAULT_SLIDE_COUNT`). |
 | BOA-002 | Generate chart images (PNG) for analytics outputs | done | P0 | Q1 kanálový graf: SVG (`chart-png-svg.ts`) → PNG (`sharp`) → `reports/{runId}/q1-source-channel.png`, veřejná URL v artefaktu typu `chart`; analytický subagent. |
-| BOA-003 | Replace market monitor mock feed with real property sources | todo | P0 | Add ingestion adapters, dedupe, and relevance scoring for Praha Holesovice. |
+| BOA-003 | Replace market monitor mock feed with real property sources | in_progress | P0 | Sreality: `sreality-listings.ts`. Bezrealitky: `bezrealitky-listings.ts` — výchozí `https://api.bezrealitky.cz/graphql/`, volitelně `BEZREALITKY_GRAPHQL_QUERY` z DevTools. Dedup/relevance Holešovice zůstává. |
 | BOA-004 | Add explicit approval workflow for outbound email sending | todo | P1 | Keep draft-first and add approve/send state transition. |
 | BOA-005 | Create data-quality task queue for missing property fields | todo | P1 | Auto-create tasks from missing reconstruction analysis with owner/priority. |
 | BOA-006 | Add role model (admin, broker, management) and enforce RLS/UI permissions | todo | P1 | Restrict reports and settings by role. |
@@ -23,6 +23,6 @@ Last updated: 2026-03-27
 | BOA-010 | Add pagination and lazy loading for long conversation histories | todo | P2 | Prevent full-history payload on each switch. |
 | BOA-011 | Add scheduler verification runbook and automated health checks | todo | P2 | Validate cron execution and workflow freshness daily. |
 | BOA-012 | Add disconnect/reconnect Google integration diagnostics in UI | in_progress | P2 | Disconnect implemented. Remaining: token health, last refresh timestamp, guided reconnect. |
-| BOA-013 | Scrapers for major Czech listing portals (Sreality.cz, Reality.iDNES.cz, Bezrealitky.cz) | todo | P0 | Ingestion adapters per portal: fetch/listing detail parsing, unified schema, dedupe across sites, rate limits, logging. Prefer official/API or allowed feeds where available; align with site ToS and robots.txt. Supports BOA-003. |
+| BOA-013 | Scrapers for major Czech listing portals (Sreality.cz, Reality.iDNES.cz, Bezrealitky.cz) | in_progress | P0 | Hotovo první vlna: Sreality (API), Bezrealitky (GraphQL přes env + šablona). Zbývá iDNES / detail parsing / meziportálový dedupe — navazuje na BOA-003. |
 | BOA-014 | Agent-callable Clients DB query tool | done | P1 | Rozšířen `runSqlPreset`: preset `new_clients_q1` → view `vw_new_clients_q1` (migrace 008: Q1 + aktuální rok Europe/Prague), lepší detekce z NL (`detectQueryPresetFromQuestion`). Service-role beze změny. |
 | BOA-015 | Pravý panel: tabulka + graf z výstupů agenta | done | P1 | `AgentAnswer.dataPanel`, analytics subagent plní `clients_q1`; UI `AgentDataPanel` + split grid v `ConfigurableAgentPanel`. PNG export viz BOA-002. |

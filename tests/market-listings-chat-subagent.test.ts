@@ -1,0 +1,72 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import type { ToolRunner } from "@/lib/agent/mcp-tools/tool-runner";
+import type { AgentToolContext } from "@/lib/agent/types";
+
+vi.mock("@/lib/agent/llm/user-facing-reply", () => ({
+  generateUserFacingReply: vi.fn().mockResolvedValue({
+    answer_text: "Hotovo.",
+    confidence: 0.9,
+    next_actions: []
+  })
+}));
+
+vi.mock("@/lib/agent/tools/market-listings-tool", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/agent/tools/market-listings-tool")>();
+  return {
+    ...actual,
+    fetchMarketListings: vi.fn()
+  };
+});
+
+import { generateUserFacingReply } from "@/lib/agent/llm/user-facing-reply";
+import { fetchMarketListings } from "@/lib/agent/tools/market-listings-tool";
+import { runMarketListingsChatSubAgent } from "@/lib/agent/subagents/market-listings-chat-subagent";
+
+const mockListing = {
+  external_id: "sreality:x",
+  title: "Test",
+  location: "Praha",
+  source: "sreality",
+  url: "https://www.sreality.cz/detail/x",
+  created_at: "2026-01-01T00:00:00.000Z",
+  image_url: "https://cdn.example/img.jpg"
+};
+
+describe("runMarketListingsChatSubAgent", () => {
+  beforeEach(() => {
+    vi.mocked(fetchMarketListings).mockResolvedValue([mockListing]);
+  });
+
+  it("volá fetchMarketListings, dataPanel má fetchParams a prázdné listings pro UI", async () => {
+    const run = vi.fn();
+    const toolRunner = { run } as unknown as ToolRunner;
+
+    const ctx: AgentToolContext = { runId: "r1", userId: "u1" };
+    const answer = await runMarketListingsChatSubAgent({
+      toolRunner,
+      ctx,
+      question: "Nabídky v Praze první stránka"
+    });
+
+    expect(run).not.toHaveBeenCalled();
+    expect(fetchMarketListings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        location: "Praha",
+        sources: ["sreality", "bezrealitky"],
+        bezrealitkyRegionOsmIds: ["R435514"],
+        srealityLocalityRegionId: 10
+      })
+    );
+    expect(generateUserFacingReply).toHaveBeenCalled();
+    expect(answer.dataPanel?.kind).toBe("market_listings");
+    if (answer.dataPanel?.kind === "market_listings") {
+      expect(answer.dataPanel.fetchParams).toEqual(
+        expect.objectContaining({
+          location: "Praha",
+          sources: ["sreality", "bezrealitky"]
+        })
+      );
+      expect(answer.dataPanel.listings).toHaveLength(0);
+    }
+  });
+});
