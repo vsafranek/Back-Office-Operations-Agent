@@ -7,6 +7,12 @@ export type AgentArtifact = {
   content?: string;
 };
 
+/** Odkazy k exportu dat zobrazených vedle tabulky/grafu v pravém panelu. */
+export type AgentDataPanelDownloads = {
+  excel?: string;
+  csv?: string;
+};
+
 export type AgentOrchestrationMeta = {
   agentId: string;
   mode: "basic" | "thinking";
@@ -31,6 +37,15 @@ export type AgentDataPanel =
       source: string;
       rows: Record<string, unknown>[];
       chart: { title: string; labels: string[]; values: number[] };
+      /** Skryje blok grafu v UI (např. „jen tabulka“). */
+      hideChart?: boolean;
+    }
+  | {
+      kind: "leads_sales_6m";
+      source: string;
+      rows: Record<string, unknown>[];
+      chart: { title: string; labels: string[]; leads: number[]; sold: number[] };
+      hideChart?: boolean;
     }
   | {
       kind: "clients_filtered";
@@ -65,6 +80,8 @@ export type AgentAnswer = {
   orchestration?: AgentOrchestrationMeta;
   /** Volitelné: vykreslení v UI (např. analytics Q1 klienti). */
   dataPanel?: AgentDataPanel;
+  /** Volitelné: tlačítka stažení vedle panelu (např. Excel z report artefaktů). */
+  dataPanelDownloads?: AgentDataPanelDownloads;
 };
 
 export type AgentToolContext = {

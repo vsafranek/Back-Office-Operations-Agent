@@ -1,6 +1,6 @@
 # Back Office Agent Backlog
 
-Last updated: 2026-03-27
+Last updated: 2026-03-27 (úkoly: Excel export + migrace 011)
 
 ## How to use
 - `status`: `todo` | `in_progress` | `blocked` | `done`
@@ -26,3 +26,6 @@ Last updated: 2026-03-27
 | BOA-013 | Scrapers for major Czech listing portals (Sreality.cz, Reality.iDNES.cz, Bezrealitky.cz) | in_progress | P0 | Hotovo první vlna: Sreality (API), Bezrealitky (GraphQL přes env + šablona). Zbývá iDNES / detail parsing / meziportálový dedupe — navazuje na BOA-003. |
 | BOA-014 | Agent-callable Clients DB query tool | done | P1 | Rozšířen `runSqlPreset`: preset `new_clients_q1` → view `vw_new_clients_q1` (migrace 008: Q1 + aktuální rok Europe/Prague), lepší detekce z NL (`detectQueryPresetFromQuestion`). Service-role beze změny. |
 | BOA-015 | Pravý panel: tabulka + graf z výstupů agenta | done | P1 | `AgentAnswer.dataPanel`, analytics subagent plní `clients_q1`; UI `AgentDataPanel` + split grid v `ConfigurableAgentPanel`. PNG export viz BOA-002. |
+| BOA-016 | Analytics: graf + panel pro leady vs prodané (6 měsíců) | done | P1 | `dataPanel` `leads_sales_6m`: dvojité sloupce v UI + tabulka; LLM instrukce neomlouvají absenci grafu. Volitelný follow-up: PNG do Storage jako u Q1 (`chart-png`). |
+| BOA-017 | Rozšíření DB pro realitní provoz (lead pipeline, deal detaily) | todo | P1 | Migrace **011** doplnila portfoliové sloupce na `properties`, indexy a hromadný seed leadů/nemovitostí/deals v čase. Dál: enum/KPI pipeline, `deals` (provize, zdroj obchodu), materializované agregace podle potřeby BI. |
+| BOA-018 | Excel (.xlsx) z analytiky + extra listy Properties/Leads | done | P1 | `exceljs`, `generateReportArtifacts` → Storage `report.xlsx`, MCP `xlsxPublic`; heuristika „excel/xlsx/portfolio/nemovitosti“ → `fetchCrmSheetsForReport`; weekly report má Excel artefakt; Vitest `tests/report-tool.test.ts`. Migrace: `011_leads_portfolio_scale.sql`. |

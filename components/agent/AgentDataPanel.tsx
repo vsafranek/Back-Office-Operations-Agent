@@ -1,7 +1,10 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import type { AgentDataPanel as AgentDataPanelModel } from "@/lib/agent/types";
+import type {
+  AgentDataPanel as AgentDataPanelModel,
+  AgentDataPanelDownloads
+} from "@/lib/agent/types";
 import { MarketListingsDataPanelSection } from "@/components/agent/MarketListingsDataPanelSection";
 
 function formatCell(value: unknown): string {
@@ -105,12 +108,67 @@ const panelChrome: CSSProperties = {
   overflow: "auto"
 };
 
+function downloadLinkStyle(primary: boolean): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "8px 14px",
+    fontSize: 13,
+    fontWeight: 600,
+    borderRadius: 8,
+    textDecoration: "none",
+    cursor: "pointer",
+    border: primary ? "1px solid #059669" : "1px solid #cbd5e1",
+    background: primary ? "linear-gradient(180deg,#ecfdf5,#d1fae5)" : "#fff",
+    color: primary ? "#065f46" : "#334155"
+  };
+}
+
+/** Tlačítka stažení vedle tabulky a grafu (stejné soubory jako v artefaktech). */
+function DataPanelDownloads({ downloads }: { downloads?: AgentDataPanelDownloads }) {
+  if (!downloads?.excel && !downloads?.csv) return null;
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 10,
+        alignItems: "center",
+        paddingBottom: 12,
+        marginBottom: 4,
+        borderBottom: "1px solid #e2e8f0"
+      }}
+    >
+      <span style={{ fontSize: 12, fontWeight: 600, color: "#475569" }}>Stažení dat</span>
+      {downloads.excel ? (
+        <a
+          href={downloads.excel}
+          target="_blank"
+          rel="noreferrer"
+          download
+          style={downloadLinkStyle(true)}
+        >
+          Excel (.xlsx)
+        </a>
+      ) : null}
+      {downloads.csv ? (
+        <a href={downloads.csv} target="_blank" rel="noreferrer" download style={downloadLinkStyle(false)}>
+          CSV
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 export function AgentDataPanel({
   panel,
-  getAccessToken
+  getAccessToken,
+  dataPanelDownloads
 }: {
   panel: AgentDataPanelModel;
   getAccessToken?: () => Promise<string | null>;
+  dataPanelDownloads?: AgentDataPanelDownloads;
 }) {
   if (panel.kind === "market_listings") {
     return (
@@ -123,10 +181,145 @@ export function AgentDataPanel({
     );
   }
 
+  if (panel.kind === "leads_sales_6m") {
+    const { chart } = panel;
+    const maxVal = Math.max(
+      1,
+      ...chart.labels.map((_, i) => Math.max(chart.leads[i] ?? 0, chart.sold[i] ?? 0))
+    );
+    const orderedKeys = orderedKeysForRows(panel.rows);
+    return (
+      <div style={panelChrome}>
+        <DataPanelDownloads downloads={dataPanelDownloads} />
+        <div>
+          <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>Leady vs prodeje</h2>
+          <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
+            Zdroj: <code>{panel.source}</code> · {panel.rows.length} měsíců v datech
+          </p>
+        </div>
+
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 15 }}>{chart.title}</div>
+          {panel.hideChart ? (
+            <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>
+              Graf je podle zadání skrytý (zobrazena tabulka níže). Znovu se zeptejte včetně požadavku na graf.
+            </p>
+          ) : chart.labels.length === 0 ? (
+            <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>Žádná data pro graf.</p>
+          ) : (
+            <>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-end",
+                  gap: 14,
+                  minHeight: 148,
+                  paddingTop: 8,
+                  flexWrap: "wrap"
+                }}
+              >
+                {chart.labels.map((label, i) => {
+                  const lv = chart.leads[i] ?? 0;
+                  const sv = chart.sold[i] ?? 0;
+                  const hL = Math.round((lv / maxVal) * 100);
+                  const hS = Math.round((sv / maxVal) * 100);
+                  return (
+                    <div
+                      key={`${label}-${i}`}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: 6,
+                        minWidth: 56
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 5,
+                          alignItems: "flex-end",
+                          height: 118
+                        }}
+                      >
+                        <div
+                          title={`Leady: ${lv}`}
+                          style={{
+                            width: 22,
+                            height: `${Math.max(hL, lv > 0 ? 8 : 4)}px`,
+                            background: "linear-gradient(180deg, #3b82f6, #1d4ed8)",
+                            borderRadius: 4,
+                            minHeight: 4
+                          }}
+                        />
+                        <div
+                          title={`Prodané: ${sv}`}
+                          style={{
+                            width: 22,
+                            height: `${Math.max(hS, sv > 0 ? 8 : 4)}px`,
+                            background: "linear-gradient(180deg, #10b981, #047857)",
+                            borderRadius: 4,
+                            minHeight: 4
+                          }}
+                        />
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "#475569",
+                          textAlign: "center",
+                          lineHeight: 1.2,
+                          maxWidth: 80
+                        }}
+                      >
+                        {label}
+                      </span>
+                      <span style={{ fontSize: 11, color: "#94a3b8" }}>
+                        {lv} / {sv}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 20,
+                  fontSize: 12,
+                  marginTop: 10,
+                  color: "#475569"
+                }}
+              >
+                <span>
+                  <span style={{ color: "#1d4ed8", marginRight: 6 }} aria-hidden>
+                    ■
+                  </span>
+                  Leady
+                </span>
+                <span>
+                  <span style={{ color: "#047857", marginRight: 6 }} aria-hidden>
+                    ■
+                  </span>
+                  Prodané
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 15 }}>Tabulka</div>
+          <ClientsTable rows={panel.rows} orderedKeys={orderedKeys} />
+        </div>
+      </div>
+    );
+  }
+
   if (panel.kind === "clients_filtered") {
     const orderedKeys = orderedKeysForRows(panel.rows);
     return (
       <div style={panelChrome}>
+        <DataPanelDownloads downloads={dataPanelDownloads} />
         <div>
           <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>{panel.title}</h2>
           <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
@@ -151,6 +344,7 @@ export function AgentDataPanel({
 
   return (
     <div style={panelChrome}>
+      <DataPanelDownloads downloads={dataPanelDownloads} />
       <div>
         <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>Data z dotazu</h2>
         <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
@@ -160,7 +354,11 @@ export function AgentDataPanel({
 
       <div>
         <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 15 }}>{panel.chart.title}</div>
-        {panel.chart.labels.length === 0 ? (
+        {panel.hideChart ? (
+          <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>
+            Graf je podle zadání skrytý (zobrazena tabulka níže).
+          </p>
+        ) : panel.chart.labels.length === 0 ? (
           <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>Žádná data pro graf.</p>
         ) : (
           <div style={{ display: "flex", alignItems: "flex-end", gap: 10, minHeight: 140, paddingTop: 8 }}>

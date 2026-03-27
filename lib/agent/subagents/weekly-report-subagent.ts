@@ -14,11 +14,15 @@ export async function runWeeklyReportSubAgent(params: {
     runId: params.ctx.runId
   });
 
-  const report = await params.toolRunner.run<{ csvPublic: string; mdPublic: string }>("generateReportArtifacts", params.ctx, {
-    runId: params.ctx.runId,
-    title: params.title,
-    rows: data.rows
-  });
+  const report = await params.toolRunner.run<{ csvPublic: string; mdPublic: string; xlsxPublic: string }>(
+    "generateReportArtifacts",
+    params.ctx,
+    {
+      runId: params.ctx.runId,
+      title: params.title,
+      rows: data.rows
+    }
+  );
 
   const presentationContext = [
     `Pozadavek uzivatele: ${params.question}`,
@@ -57,7 +61,7 @@ export async function runWeeklyReportSubAgent(params: {
       `Datovy zdroj: ${data.source}, radku: ${data.rows.length}`,
       "Ukazka dat (JSON, max 15 radku):",
       JSON.stringify(data.rows.slice(0, 15), null, 2),
-      `Odkazy: CSV ${report.csvPublic}, Markdown ${report.mdPublic}, PPTX ${presentation.publicUrl}, PDF ${presentation.pdfPublicUrl}`,
+      `Odkazy: CSV ${report.csvPublic}, Markdown ${report.mdPublic}, Excel ${report.xlsxPublic}, PPTX ${presentation.publicUrl}, PDF ${presentation.pdfPublicUrl}`,
       "Popis uzivateli strucne co bylo vygenerovano a co ma zkontrolovat; odvozuj jen z udaju vyse."
     ].join("\n\n")
   });
@@ -69,6 +73,7 @@ export async function runWeeklyReportSubAgent(params: {
     generated_artifacts: [
       { type: "report", label: "CSV dataset", url: report.csvPublic },
       { type: "report", label: "Markdown summary", url: report.mdPublic },
+      { type: "table", label: "Excel workbook", url: report.xlsxPublic },
       { type: "presentation", label: `Prezentace (${params.slideCount} slidu) PPTX`, url: presentation.publicUrl },
       { type: "presentation", label: `Prezentace (${params.slideCount} slidu) PDF`, url: presentation.pdfPublicUrl }
     ],

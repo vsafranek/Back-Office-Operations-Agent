@@ -250,14 +250,18 @@ export function ConfigurableAgentPanel({ agents, defaultAgentId, onRun, getAcces
 
               {result.dataPanel ? null : (
                 <p style={{ margin: 0, fontSize: 13, color: "#94a3b8" }}>
-                  Graf a tabulka z databáze se zobrazí u analytických dotazů na nové klienty (Q1). Nabídky z portálů jako karty
-                  u dotazů na trh (Sreality / Bezrealitky).
+                  Pravý panel (tabulka / graf / karty) se zapojí u analytických dotazů nebo monitoru trhu. CSV, Excel a další
+                  soubory jsou v sekci Artefakty výše (odkaz = otevření nebo stažení v prohlížeči).
                 </p>
               )}
             </div>
 
             {result.dataPanel ? (
-              <AgentDataPanel panel={result.dataPanel} getAccessToken={getAccessToken} />
+              <AgentDataPanel
+                panel={result.dataPanel}
+                getAccessToken={getAccessToken}
+                dataPanelDownloads={result.dataPanelDownloads}
+              />
             ) : null}
           </div>
         </section>
