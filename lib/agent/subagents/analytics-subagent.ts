@@ -12,6 +12,9 @@ export async function runAnalyticsSubAgent(params: {
     rows: Record<string, unknown>[];
     source: string;
     preset: string;
+    rowTextNarrowing?: string;
+    filterLabel?: string;
+    suggestSourceChannelChart: boolean;
   }>("runSqlPreset", params.ctx, {
     question: params.question,
     runId: params.ctx.runId
@@ -23,11 +26,24 @@ export async function runAnalyticsSubAgent(params: {
     rows: data.rows
   });
 
-  const chart = buildSourceChannelChart(data.rows);
-  const chartSummary =
-    chart.labels.length === 0
-      ? "Podle zdroje: žádní klienti v datasetu."
-      : `Podle zdroje (kanál): ${chart.labels.map((l, i) => `${l}: ${chart.values[i]}`).join(", ")}`;
+  const showChannelChart =
+    data.suggestSourceChannelChart && data.preset === "new_clients_q1" && !data.rowTextNarrowing;
+
+  let chart: ReturnType<typeof buildSourceChannelChart> | null = null;
+  let chartSummary: string;
+  if (showChannelChart) {
+    const q1Chart = buildSourceChannelChart(data.rows);
+    chart = q1Chart;
+    chartSummary =
+      q1Chart.labels.length === 0
+        ? "Podle zdroje: žádní klienti v datasetu."
+        : `Podle zdroje (kanál): ${q1Chart.labels.map((l, i) => `${l}: ${q1Chart.values[i]}`).join(", ")}`;
+  } else if (data.rowTextNarrowing) {
+    chartSummary = `Textové zúžení: „${data.rowTextNarrowing}“. Graf podle kanálu negeneruj, pokud k tomu uživatel výslovně nepobízí a data jsou už vyfiltrované.`;
+  } else {
+    chartSummary =
+      "Graf podle zdroje (kanál) použij jen u přehledu nových klientů Q1 bez textového filtru; jinak tabulka nebo souhrn bez vynuceného grafu.";
+  }
 
   const sampleRows = data.rows.slice(0, 50);
   const reply = await generateUserFacingReply({
@@ -42,25 +58,32 @@ export async function runAnalyticsSubAgent(params: {
       : undefined,
     userContent: [
       `Puvodni dotaz uzivatele: ${params.question}`,
-      `SQL zdroj / preset: ${data.source} (${data.preset})`,
+      `Datovy zdroj: ${data.source} (dataset: ${data.preset})`,
       `Pocet radek: ${data.rows.length}`,
       chartSummary,
       "Ukazka radku (JSON):",
       JSON.stringify(sampleRows, null, 2),
       `Artefakty: CSV ${report.csvPublic}, prehled MD ${report.mdPublic}`,
-      "Shrnut vysledky pro uzivatele (cisla musi sedet s agregaci vyse) a navrhni dalsi kroky."
+      "Shrnut vysledky pro uzivatele (cisla musi sedet s daty vyse) a navrhni dalsi kroky."
     ].join("\n\n")
   });
 
+  const tableTitle = data.filterLabel?.trim() || `Data: ${data.source}`;
+
   const dataPanel =
-    data.preset === "new_clients_q1"
+    showChannelChart && chart != null
       ? {
           kind: "clients_q1" as const,
           source: data.source,
           rows: data.rows,
           chart
         }
-      : undefined;
+      : {
+          kind: "clients_filtered" as const,
+          source: data.source,
+          title: tableTitle,
+          rows: data.rows
+        };
 
   return {
     answer_text: reply.answer_text,

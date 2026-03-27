@@ -12,20 +12,30 @@ const inputSchema = z.object({
 const outputSchema = z.object({
   rows: z.array(z.record(z.string(), z.unknown())),
   source: z.string(),
-  preset: z.string()
+  preset: z.string(),
+  rowTextNarrowing: z.string().optional(),
+  filterLabel: z.string().optional(),
+  suggestSourceChannelChart: z.boolean()
 });
 
 const tool: McpTool<z.infer<typeof inputSchema>, z.infer<typeof outputSchema>> = {
   contract: {
     role: "tool",
     name: "runSqlPreset",
-    description: "Spusti SQL preset (view/function) na zaklade otazky a vrati tabulky pro dalsi analýzu.",
+    description:
+      "Nacti interni data: podle kontextu otazky se zvoli tabulka/view/RPC a volitelne textove zuzeni radku (bez noveho SQL od uzivatele).",
     inputSchema,
     outputSchema,
     auth: "service-role",
     sideEffects: []
   },
-  run: async (_ctx: AgentToolContext, input) => runSqlPreset({ question: input.question, runId: input.runId })
+  run: async (ctx: AgentToolContext, input) =>
+    runSqlPreset({
+      question: input.question,
+      runId: input.runId,
+      trace: ctx.trace,
+      traceParentId: ctx.traceParentId ?? null
+    })
 };
 
 export const runSqlPresetTool: McpToolConfigEntry = { registryKey: "runSqlPreset", tool: tool as McpTool<unknown, unknown> };

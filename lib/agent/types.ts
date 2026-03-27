@@ -14,13 +14,20 @@ export type AgentOrchestrationMeta = {
   reasoning?: string;
 };
 
-/** Strukturovaná data pro pravý panel dashboardu (tabulka + graf). */
+/** Strukturovaná data pro pravý panel dashboardu (tabulka + volitelný graf). */
 export type AgentDataPanel =
   | {
       kind: "clients_q1";
       source: string;
       rows: Record<string, unknown>[];
       chart: { title: string; labels: string[]; values: number[] };
+    }
+  | {
+      kind: "clients_filtered";
+      source: string;
+      /** Nadpis nad tabulkou (např. vyhledaná oblast). */
+      title: string;
+      rows: Record<string, unknown>[];
     };
 
 export type AgentAnswer = {
