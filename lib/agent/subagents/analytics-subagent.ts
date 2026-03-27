@@ -1,4 +1,6 @@
+import { persistQ1SourceChannelChartPng } from "@/lib/agent/analytics/chart-png";
 import { buildSourceChannelChart } from "@/lib/agent/analytics/source-channel-chart";
+import { logger } from "@/lib/observability/logger";
 import type { AgentAnswer, AgentToolContext } from "@/lib/agent/types";
 import type { ToolRunner } from "@/lib/agent/mcp-tools/tool-runner";
 import { generateUserFacingReply } from "@/lib/agent/llm/user-facing-reply";
@@ -31,6 +33,7 @@ export async function runAnalyticsSubAgent(params: {
 
   let chart: ReturnType<typeof buildSourceChannelChart> | null = null;
   let chartSummary: string;
+  let chartPngPublicUrl: string | null = null;
   if (showChannelChart) {
     const q1Chart = buildSourceChannelChart(data.rows);
     chart = q1Chart;
@@ -38,6 +41,20 @@ export async function runAnalyticsSubAgent(params: {
       q1Chart.labels.length === 0
         ? "Podle zdroje: žádní klienti v datasetu."
         : `Podle zdroje (kanál): ${q1Chart.labels.map((l, i) => `${l}: ${q1Chart.values[i]}`).join(", ")}`;
+
+    if (q1Chart.labels.length > 0) {
+      try {
+        chartPngPublicUrl = await persistQ1SourceChannelChartPng({
+          runId: params.ctx.runId,
+          chart: q1Chart
+        });
+      } catch (err) {
+        logger.warn("chart_png_persist_failed", {
+          runId: params.ctx.runId,
+          message: err instanceof Error ? err.message : String(err)
+        });
+      }
+    }
   } else if (data.rowTextNarrowing) {
     chartSummary = `Textové zúžení: „${data.rowTextNarrowing}“. Graf podle kanálu negeneruj, pokud k tomu uživatel výslovně nepobízí a data jsou už vyfiltrované.`;
   } else {
@@ -63,7 +80,9 @@ export async function runAnalyticsSubAgent(params: {
       chartSummary,
       "Ukazka radku (JSON):",
       JSON.stringify(sampleRows, null, 2),
-      `Artefakty: CSV ${report.csvPublic}, prehled MD ${report.mdPublic}`,
+      `Artefakty: CSV ${report.csvPublic}, prehled MD ${report.mdPublic}${
+        chartPngPublicUrl ? `, graf PNG ${chartPngPublicUrl}` : ""
+      }`,
       "Shrnut vysledky pro uzivatele (cisla musi sedet s daty vyse) a navrhni dalsi kroky."
     ].join("\n\n")
   });
@@ -91,7 +110,12 @@ export async function runAnalyticsSubAgent(params: {
     sources: [data.source],
     generated_artifacts: [
       { type: "table", label: "Dataset (CSV)", url: report.csvPublic },
-      { type: "report", label: "Souhrn (Markdown)", url: report.mdPublic }
+      { type: "report", label: "Souhrn (Markdown)", url: report.mdPublic },
+      ...(chartPngPublicUrl
+        ? ([
+            { type: "chart" as const, label: "Graf zdroje kanálu (PNG)", url: chartPngPublicUrl }
+          ] as const)
+        : [])
     ],
     next_actions: reply.next_actions,
     dataPanel
