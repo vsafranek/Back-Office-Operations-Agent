@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
@@ -18,9 +19,13 @@ export default function RegisterPage() {
     setLoading(true);
     setMessage(null);
 
+    const emailRedirectTo = `${window.location.origin}/auth/callback`;
     const { error } = await supabase.auth.signUp({
-      email,
-      password
+      email: email.trim(),
+      password,
+      options: {
+        emailRedirectTo
+      }
     });
 
     setLoading(false);
@@ -43,17 +48,7 @@ export default function RegisterPage() {
       provider: "google",
       options: {
         redirectTo,
-        queryParams: {
-          access_type: "offline",
-          prompt: "consent"
-        },
-        scopes: [
-          "openid",
-          "email",
-          "profile",
-          "https://www.googleapis.com/auth/calendar.readonly",
-          "https://www.googleapis.com/auth/gmail.modify"
-        ].join(" ")
+        scopes: ["openid", "email", "profile"].join(" ")
       }
     });
 
@@ -66,6 +61,10 @@ export default function RegisterPage() {
   return (
     <main style={{ maxWidth: 420 }}>
       <h1>Registrace</h1>
+      <p style={{ fontSize: 14, color: "#64748b", marginTop: 0 }}>
+        Založte účet e-mailem (ověření e-mailu podle nastavení Supabase) nebo přes Google. Kalendář a poštu
+        připojíte později v <Link href="/settings">Nastavení integrací</Link>.
+      </p>
       <form onSubmit={handleRegister} style={{ display: "grid", gap: 12 }}>
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail" type="email" required />
         <input
@@ -77,7 +76,7 @@ export default function RegisterPage() {
           minLength={8}
         />
         <button type="submit" disabled={loading}>
-          {loading ? "Registruji..." : "Registrovat"}
+          {loading ? "Registruji..." : "Registrovat e-mailem"}
         </button>
       </form>
       <div style={{ marginTop: 12 }}>

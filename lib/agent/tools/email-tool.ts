@@ -1,5 +1,13 @@
 import { google } from "googleapis";
 import { getGoogleAuthForUser } from "@/lib/integrations/google-user-auth";
+import {
+  createOutlookDraft,
+  getOutlookMessage,
+  listOutlookMessages,
+  sendOutlookDraft,
+  sendOutlookMessageNow
+} from "@/lib/integrations/microsoft-graph-mail";
+import { fetchUserIntegrationSettings } from "@/lib/integrations/user-integration-settings";
 
 type GmailPartHeader = { name?: string | null; value?: string | null };
 type GmailMessagePart = {
@@ -57,6 +65,12 @@ export async function createEmailDraft(input: {
   subject: string;
   body: string;
 }) {
+  const settings = await fetchUserIntegrationSettings(input.userId);
+  const mailProvider = settings?.mail_provider ?? "gmail";
+  if (mailProvider === "outlook") {
+    return createOutlookDraft(input);
+  }
+
   const { auth } = await getGoogleAuthForUser({
     userId: input.userId,
     scopes: [GMAIL_MODIFY]
@@ -79,6 +93,12 @@ export async function createEmailDraft(input: {
 
 /** Odešle existující Gmail draft (druhý krok po schválení uživatele). */
 export async function sendGmailDraft(input: { userId: string; draftId: string }) {
+  const settings = await fetchUserIntegrationSettings(input.userId);
+  const mailProvider = settings?.mail_provider ?? "gmail";
+  if (mailProvider === "outlook") {
+    return sendOutlookDraft(input);
+  }
+
   const { auth } = await getGoogleAuthForUser({
     userId: input.userId,
     scopes: [GMAIL_MODIFY]
@@ -98,6 +118,12 @@ export async function sendGmailDraft(input: { userId: string; draftId: string })
  * Přímé odeslání zprávy (bez uložení jako draft) — Gmail users.messages.send.
  */
 export async function sendGmailMessageNow(input: { userId: string; to: string; subject: string; body: string }) {
+  const settings = await fetchUserIntegrationSettings(input.userId);
+  const mailProvider = settings?.mail_provider ?? "gmail";
+  if (mailProvider === "outlook") {
+    return sendOutlookMessageNow(input);
+  }
+
   const { auth } = await getGoogleAuthForUser({
     userId: input.userId,
     scopes: [GMAIL_MODIFY]
@@ -133,6 +159,17 @@ export async function listGmailMessages(input: {
   q?: string;
   labelIds?: string[];
 }): Promise<{ messages: GmailListItem[] }> {
+  const settings = await fetchUserIntegrationSettings(input.userId);
+  const mailProvider = settings?.mail_provider ?? "gmail";
+  if (mailProvider === "outlook") {
+    const { messages } = await listOutlookMessages({
+      userId: input.userId,
+      maxResults: input.maxResults,
+      q: input.q
+    });
+    return { messages };
+  }
+
   const max = Math.min(Math.max(input.maxResults ?? 10, 1), 50);
   const { auth } = await getGoogleAuthForUser({
     userId: input.userId,
@@ -193,6 +230,12 @@ export async function getGmailMessage(input: {
   messageId: string;
   maxBodyChars?: number;
 }): Promise<GmailMessageDetail> {
+  const settings = await fetchUserIntegrationSettings(input.userId);
+  const mailProvider = settings?.mail_provider ?? "gmail";
+  if (mailProvider === "outlook") {
+    return getOutlookMessage(input);
+  }
+
   const maxBody = Math.min(Math.max(input.maxBodyChars ?? 20_000, 500), 100_000);
   const { auth } = await getGoogleAuthForUser({
     userId: input.userId,

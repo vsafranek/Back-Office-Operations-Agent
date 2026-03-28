@@ -1,5 +1,7 @@
 import { google } from "googleapis";
 import { getGoogleAuthForUser } from "@/lib/integrations/google-user-auth";
+import { browseMicrosoftCalendarAvailability } from "@/lib/integrations/microsoft-graph-calendar";
+import { fetchUserIntegrationSettings } from "@/lib/integrations/user-integration-settings";
 
 export type CalendarTimeRange = { start: string; end: string };
 
@@ -25,6 +27,16 @@ export async function browseCalendarAvailability(params: {
   userId: string;
   daysAhead?: number;
 }): Promise<CalendarAvailabilityResult> {
+  const settings = await fetchUserIntegrationSettings(params.userId);
+  const calendarProvider = settings?.calendar_provider ?? "google";
+
+  if (calendarProvider === "microsoft") {
+    return browseMicrosoftCalendarAvailability({
+      userId: params.userId,
+      daysAhead: params.daysAhead
+    });
+  }
+
   const { auth, calendarId } = await getGoogleAuthForUser({
     userId: params.userId,
     scopes: ["https://www.googleapis.com/auth/calendar.readonly"]

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
@@ -42,17 +43,7 @@ export default function LoginPage() {
       provider: "google",
       options: {
         redirectTo,
-        queryParams: {
-          access_type: "offline",
-          prompt: "consent"
-        },
-        scopes: [
-          "openid",
-          "email",
-          "profile",
-          "https://www.googleapis.com/auth/calendar.readonly",
-          "https://www.googleapis.com/auth/gmail.modify"
-        ].join(" ")
+        scopes: ["openid", "email", "profile"].join(" ")
       }
     });
 
@@ -65,6 +56,10 @@ export default function LoginPage() {
   return (
     <main style={{ maxWidth: 420 }}>
       <h1>Přihlášení</h1>
+      <p style={{ fontSize: 14, color: "#64748b", marginTop: 0 }}>
+        E-mail a heslo, nebo Google. Účty se stejným e-mailem sloučíme v aplikaci (integrace a konverzace) po
+        přihlášení.
+      </p>
       <form onSubmit={handleLogin} style={{ display: "grid", gap: 12 }}>
         <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail" type="email" required />
         <input
@@ -76,9 +71,12 @@ export default function LoginPage() {
           minLength={8}
         />
         <button type="submit" disabled={loading}>
-          {loading ? "Přihlašuji..." : "Přihlásit se"}
+          {loading ? "Přihlašuji..." : "Přihlásit se e-mailem"}
         </button>
       </form>
+      <p style={{ marginTop: 8, fontSize: 14 }}>
+        <Link href="/auth/forgot-password">Zapomenuté heslo</Link>
+      </p>
       <div style={{ marginTop: 12 }}>
         <button type="button" onClick={handleGoogleLogin} disabled={googleLoading}>
           {googleLoading ? "Přesměrovávám na Google..." : "Přihlásit přes Google"}

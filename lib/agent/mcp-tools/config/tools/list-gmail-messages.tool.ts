@@ -32,7 +32,7 @@ const tool: McpTool<z.infer<typeof inputSchema>, z.infer<typeof outputSchema>> =
     role: "tool",
     name: "listGmailMessages",
     description:
-      "Přečte seznam zpráv ze schránky Gmail (výchozí INBOX). Volitelně filtruje dotazem `q` (Gmail search). " +
+      "Přečte seznam zpráv z příchozí pošty (Gmail INBOX nebo Outlook dle mail_provider). `q`: Gmail search nebo Graph $search u Outlooku. " +
       "Jen čtení + metadata/snippet; pro celé tělo použij getGmailMessage.",
     inputSchema,
     outputSchema,

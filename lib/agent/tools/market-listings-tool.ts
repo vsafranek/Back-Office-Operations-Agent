@@ -10,14 +10,14 @@ import { MarketListingSchema, type MarketListing } from "@/lib/agent/tools/marke
 
 export { MarketListingSchema, type MarketListing } from "@/lib/agent/tools/market-listing-model";
 
-const MarketSourceSchema = z.enum(["sreality", "bezrealitky", "mock"]);
+const MarketSourceSchema = z.enum(["sreality", "bezrealitky"]);
 
 export const FetchMarketListingsInputSchema = z.object({
   location: z
     .string()
     .min(1)
     .default("Česko")
-    .describe("Krátká lokace pro mock a štítky (např. Brno, Plzeňský kraj). Neposílej celý uživatelský dotaz větou."),
+    .describe("Krátká lokace pro štítky a region (např. Brno, Plzeňský kraj). Neposílej celý uživatelský dotaz větou."),
   sources: z
     .array(MarketSourceSchema)
     .default(["sreality", "bezrealitky"])
@@ -100,21 +100,6 @@ async function maybeResolveRegionViaNominatim(
   };
 }
 
-function mockListings(location: string): MarketListing[] {
-  const now = new Date().toISOString();
-  const loc = location.trim();
-  return [
-    {
-      external_id: `mock-${Date.now()}`,
-      title: "Byt 2+kk Praha Holesovice (mock)",
-      location: loc,
-      source: "mock_feed",
-      url: "https://example.com/listing/mock",
-      created_at: now
-    }
-  ];
-}
-
 export async function fetchMarketListings(input: z.infer<typeof FetchMarketListingsInputSchema>): Promise<MarketListing[]> {
   const env = getEnv();
   const effective = await maybeResolveRegionViaNominatim(input, env);
@@ -131,10 +116,6 @@ export async function fetchMarketListings(input: z.infer<typeof FetchMarketListi
   };
 
   for (const source of effective.sources) {
-    if (source === "mock") {
-      pushUnique(mockListings(effective.location));
-      continue;
-    }
     if (source === "sreality") {
       const categoryType = effective.srealityOfferKind === "pronajem" ? 2 : 1;
       const rows = await fetchSrealityListings({
@@ -216,7 +197,7 @@ export async function upsertMarketListings(params: { listings: MarketListing[] }
 export const marketListingsToolContract = {
   fetch: {
     name: "fetchMarketListings",
-    description: "Ziska nabidky z portalu (Sreality API + volitelne Bezrealitky GraphQL + mock).",
+    description: "Ziska nabidky z portalu (Sreality API + volitelne Bezrealitky GraphQL).",
     inputSchema: FetchMarketListingsInputSchema,
     outputSchema: FetchMarketListingsOutputSchema,
     auth: "service-role" as const,

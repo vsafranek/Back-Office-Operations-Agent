@@ -140,7 +140,7 @@ export function ViewingEmailDraftPanel({
 
     setLoadingDraft(true);
     try {
-      const res = await fetch("/api/google/email-draft", {
+      const res = await fetch("/api/mail/email-draft", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -173,11 +173,11 @@ export function ViewingEmailDraftPanel({
   async function handleSend() {
     setError(null);
     if (!draftSaved?.draftId) {
-      setError("Nejprve uložte draft v Gmailu.");
+      setError("Nejprve uložte draft (Gmail / Outlook).");
       return;
     }
     if (formDirty) {
-      setError("Obsah se změnil po uložení draftu — nejprve znovu klikněte na „Uložit draft v Gmailu“.");
+      setError("Obsah se změnil po uložení draftu — nejprve znovu uložte draft.");
       return;
     }
     if (!confirmSend) {
@@ -192,7 +192,7 @@ export function ViewingEmailDraftPanel({
 
     setLoadingSend(true);
     try {
-      const res = await fetch("/api/google/email-send", {
+      const res = await fetch("/api/mail/email-send", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -246,7 +246,7 @@ export function ViewingEmailDraftPanel({
 
     setLoadingSend(true);
     try {
-      const res = await fetch("/api/google/email-send", {
+      const res = await fetch("/api/mail/email-send", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -282,8 +282,8 @@ export function ViewingEmailDraftPanel({
       <div>
         <h2 style={{ margin: "0 0 6px", fontSize: 18 }}>Prohlídka a e-mail</h2>
         <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
-          Volné termíny z Google Calendar (free/busy). E-mail je připraven v podobě od{" "}
-          <strong>{displayName}</strong>. Můžete <strong>uložit draft</strong> v Gmailu, nebo po potvrzení{" "}
+          Volné termíny z připojeného kalendáře (Google nebo Microsoft). E-mail je připraven v podobě od{" "}
+          <strong>{displayName}</strong>. Můžete <strong>uložit draft</strong> v poště, nebo po potvrzení{" "}
           <strong>odeslat rovnou</strong> bez draftu; z uloženého draftu lze také odeslat (BOA-004). Volitelně
           propojte <strong>UUID leadů</strong> s auditním záznamem.
         </p>
@@ -444,8 +444,7 @@ export function ViewingEmailDraftPanel({
 
       {formDirty && draftSaved ? (
         <p style={{ margin: 0, fontSize: 12, color: "#b45309" }}>
-          Text se liší od naposledy uloženého draftu v Gmailu — před odesláním znovu klikněte na „Uložit draft v
-          Gmailu“.
+          Text se liší od naposledy uloženého draftu — před odesláním znovu uložte draft.
         </p>
       ) : null}
 
@@ -480,8 +479,8 @@ export function ViewingEmailDraftPanel({
             onChange={(e) => setConfirmSend(e.target.checked)}
           />
           <span>
-            Potvrzuji nevratné odeslání e-mailu příjemci <strong>{to.trim() || "—"}</strong> z mého účtu Gmail
-            (rovnou nebo z uloženého draftu).
+            Potvrzuji nevratné odeslání e-mailu příjemci <strong>{to.trim() || "—"}</strong> z mého připojeného účtu
+            (Gmail / Outlook — rovnou nebo z uloženého draftu).
           </span>
         </label>
       ) : null}
@@ -504,7 +503,7 @@ export function ViewingEmailDraftPanel({
             color: "#fff"
           }}
         >
-          {loadingDraft ? "Ukládám draft…" : "Uložit draft v Gmailu"}
+          {loadingDraft ? "Ukládám draft…" : "Uložit draft"}
         </button>
         <button
           type="button"
@@ -544,9 +543,9 @@ export function ViewingEmailDraftPanel({
           }}
         >
           <p style={{ margin: 0, fontSize: 13, color: "#334155" }}>
-            Draft v Gmailu
-            {draftSaved.draftId ? ` (id: ${draftSaved.draftId})` : ""}. Můžete ho upravit v Gmailu → Drafty a odeslat
-            odtud z uložené verze.
+            Draft uložen
+            {draftSaved.draftId ? ` (id: ${draftSaved.draftId})` : ""}. V poště (Gmail / Outlook) ho můžete upravit mezi
+            koncepty a odeslat odtud z uložené verze.
           </p>
           <button
             type="button"

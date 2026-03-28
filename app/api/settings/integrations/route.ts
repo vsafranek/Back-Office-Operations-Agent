@@ -1,16 +1,16 @@
 import { z } from "zod";
 import { requireAuthenticatedUser } from "@/lib/auth/server-auth";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
-import { decryptToken, encryptToken } from "@/lib/security/token-crypto";
+import { decryptToken } from "@/lib/security/token-crypto";
+import { fetchUserIntegrationSettings } from "@/lib/integrations/user-integration-settings";
+import { clearGoogleIntegrationTokens, clearMicrosoftIntegrationTokens } from "@/lib/integrations/persist-user-integration";
 
-const settingsSchema = z.object({
-  calendar_provider: z.string().default("google"),
+const patchSchema = z.object({
+  calendar_provider: z.enum(["google", "microsoft"]).optional(),
   calendar_account_email: z.string().email().optional().or(z.literal("")),
   calendar_id: z.string().optional().or(z.literal("")),
-  mail_provider: z.string().default("gmail"),
-  mail_from_email: z.string().email().optional().or(z.literal("")),
-  google_refresh_token: z.string().optional().or(z.literal("")),
-  google_access_token: z.string().optional().or(z.literal(""))
+  mail_provider: z.enum(["gmail", "outlook"]).optional(),
+  mail_from_email: z.string().email().optional().or(z.literal(""))
 });
 
 function toNullable(value: string | undefined) {
@@ -23,25 +23,18 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   try {
     const user = await requireAuthenticatedUser(request);
-    const supabase = getSupabaseAdminClient();
+    const row = await fetchUserIntegrationSettings(user.id);
 
-    const { data, error } = await supabase
-      .from("user_integration_settings")
-      .select("*")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    if (!data) return Response.json(null);
+    if (!row) return Response.json(null);
 
     return Response.json({
-      ...data,
+      ...row,
       google_access_token: "",
       google_refresh_token: "",
-      has_google_tokens: Boolean(data.google_access_token || data.google_refresh_token)
+      microsoft_access_token: "",
+      microsoft_refresh_token: "",
+      has_google_tokens: Boolean(row.google_access_token || row.google_refresh_token),
+      has_microsoft_tokens: Boolean(row.microsoft_access_token || row.microsoft_refresh_token)
     });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 400 });
@@ -52,20 +45,31 @@ export async function POST(request: Request) {
   try {
     const user = await requireAuthenticatedUser(request);
     const body = await request.json();
-    const parsed = settingsSchema.parse(body);
+    const parsed = patchSchema.parse(body);
 
+    const existing = await fetchUserIntegrationSettings(user.id);
     const supabase = getSupabaseAdminClient();
-    const { error } = await supabase.from("user_integration_settings").upsert({
+
+    const nextRow = {
       user_id: user.id,
-      calendar_provider: parsed.calendar_provider,
-      calendar_account_email: toNullable(parsed.calendar_account_email),
-      calendar_id: toNullable(parsed.calendar_id),
-      mail_provider: parsed.mail_provider,
-      mail_from_email: toNullable(parsed.mail_from_email),
-      google_refresh_token: encryptToken(toNullable(parsed.google_refresh_token)),
-      google_access_token: encryptToken(toNullable(parsed.google_access_token)),
-      updated_at: new Date().toISOString()
-    });
+      calendar_provider: parsed.calendar_provider ?? existing?.calendar_provider ?? "google",
+      calendar_account_email:
+        parsed.calendar_account_email !== undefined
+          ? toNullable(parsed.calendar_account_email)
+          : (existing?.calendar_account_email ?? null),
+      calendar_id: parsed.calendar_id !== undefined ? toNullable(parsed.calendar_id) : (existing?.calendar_id ?? null),
+      mail_provider: parsed.mail_provider ?? existing?.mail_provider ?? "gmail",
+      mail_from_email:
+        parsed.mail_from_email !== undefined ? toNullable(parsed.mail_from_email) : (existing?.mail_from_email ?? null),
+      google_access_token: existing?.google_access_token ?? null,
+      google_refresh_token: existing?.google_refresh_token ?? null,
+      microsoft_access_token: existing?.microsoft_access_token ?? null,
+      microsoft_refresh_token: existing?.microsoft_refresh_token ?? null,
+      updated_at: new Date().toISOString(),
+      created_at: existing?.created_at ?? new Date().toISOString()
+    };
+
+    const { error } = await supabase.from("user_integration_settings").upsert(nextRow);
 
     if (error) {
       throw new Error(error.message);
@@ -80,41 +84,30 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const user = await requireAuthenticatedUser(request);
-    const supabase = getSupabaseAdminClient();
+    const url = new URL(request.url);
+    const provider = url.searchParams.get("provider") ?? "google";
 
-    const { data, error } = await supabase
-      .from("user_integration_settings")
-      .select("google_access_token")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (error) {
-      throw new Error(error.message);
+    if (provider === "google") {
+      const existing = await fetchUserIntegrationSettings(user.id);
+      const supabase = getSupabaseAdminClient();
+      const accessToken = decryptToken(existing?.google_access_token ?? null);
+      if (accessToken) {
+        await fetch("https://oauth2.googleapis.com/revoke", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: `token=${encodeURIComponent(accessToken)}`
+        });
+      }
+      await clearGoogleIntegrationTokens(user.id);
+      return Response.json({ ok: true });
     }
 
-    const accessToken = decryptToken(data?.google_access_token ?? null);
-    if (accessToken) {
-      await fetch("https://oauth2.googleapis.com/revoke", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: `token=${encodeURIComponent(accessToken)}`
-      });
+    if (provider === "microsoft") {
+      await clearMicrosoftIntegrationTokens(user.id);
+      return Response.json({ ok: true });
     }
 
-    const { error: updateError } = await supabase
-      .from("user_integration_settings")
-      .update({
-        google_access_token: null,
-        google_refresh_token: null,
-        updated_at: new Date().toISOString()
-      })
-      .eq("user_id", user.id);
-
-    if (updateError) {
-      throw new Error(updateError.message);
-    }
-
-    return Response.json({ ok: true });
+    return Response.json({ error: "Neplatný provider (google | microsoft)." }, { status: 400 });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 400 });
   }

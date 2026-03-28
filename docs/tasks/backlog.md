@@ -1,6 +1,6 @@
 # Back Office Agent Backlog
 
-Last updated: 2026-03-27 (BOA-017: migrace 016 lead/deal CRM + Excel Deals)
+Last updated: 2026-03-27 (BOA-003: market monitor bez mock + filtr lokality)
 
 ## How to use
 - `status`: `todo` | `in_progress` | `blocked` | `done`
@@ -13,7 +13,7 @@ Last updated: 2026-03-27 (BOA-017: migrace 016 lead/deal CRM + Excel Deals)
 |---|---|---|---|---|
 | BOA-001 | Weekly report: generate 3-slide presentation artifact | done | P0 | PPTX+PDF do Supabase Storage, verejne URL v artefaktech. Vychozi pocet slidu 3 (`WEEKLY_REPORT_DEFAULT_SLIDE_COUNT`). |
 | BOA-002 | Generate chart images (PNG) for analytics outputs | done | P0 | Q1 kanálový graf: SVG (`chart-png-svg.ts`) → PNG (`sharp`) → `reports/{runId}/q1-source-channel.png`, veřejná URL v artefaktu typu `chart`; analytický subagent. |
-| BOA-003 | Replace market monitor mock feed with real property sources | in_progress | P0 | Sreality: `sreality-listings.ts`. Bezrealitky: `bezrealitky-listings.ts` — výchozí `https://api.bezrealitky.cz/graphql/`, volitelně `BEZREALITKY_GRAPHQL_QUERY` z DevTools. Dedup/relevance Holešovice zůstává. |
+| BOA-003 | Replace market monitor mock feed with real property sources | done | P0 | Daily monitor už bere jen Sreality + Bezrealitky (`fetchMarketListings` default); **mock** odstraněn z produkce. Filtr relevance čtvrtí: `market-listing-locality-filter.ts` + `daily-market-monitor-subagent` (Holešovice → text v lokaci/titulku, fallback pokud by filtr vyprázdnil data). |
 | BOA-004 | Add explicit approval workflow for outbound email sending | done | P1 | Panel: draft v Gmailu nebo „Odeslat rovnou“; `POST /api/google/email-send` s `strategy` `from_draft` \| `direct`. MCP: `sendGmailOutbound`, `createEmailDraft` (+ audit draftu), `listGmailMessages`, `getGmailMessage`. Vazba leadů: `013_outbound_email_leads` (**nasazeno na remote**), `leadIds` v API, `relatedLeadIds` v `dataPanel` (zatím ruční UUID — viz BOA-019). |
 | BOA-005 | Create data-quality task queue for missing property fields | todo | P1 | MVP hotový: agent + `missing_reconstruction` → `fn_missing_reconstruction_data`, exporty CSV/MD/XLSX, textové zúžení (title, city z RPC, `address` jsonb, internal_ref); jedna migrace **015** (rekonstrukce + `address` + DQI seed + mock 01dd) + `data_quality_issues`. Dál: owner/priority, UI fronty, auto-create při dotazu. |
 | BOA-006 | Add role model (admin, broker, management) and enforce RLS/UI permissions | todo | P1 | Restrict reports and settings by role. |

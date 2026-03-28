@@ -27,7 +27,6 @@ type ConversationMessage = {
 export default function DashboardPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const router = useRouter();
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
@@ -42,31 +41,11 @@ export default function DashboardPage() {
       }
 
       const accessToken = data.session.access_token;
-      const providerAccessToken = (data.session as { provider_token?: string }).provider_token;
-      const providerRefreshToken = (data.session as { provider_refresh_token?: string }).provider_refresh_token;
-      const userEmail = data.session.user.email ?? "";
 
-      if (providerAccessToken || providerRefreshToken) {
-        const response = await fetch("/api/settings/integrations", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`
-          },
-          body: JSON.stringify({
-            calendar_provider: "google",
-            mail_provider: "gmail",
-            calendar_account_email: userEmail,
-            mail_from_email: userEmail,
-            google_access_token: providerAccessToken ?? "",
-            google_refresh_token: providerRefreshToken ?? ""
-          })
-        });
-
-        if (response.ok) {
-          setSyncMessage("Google tokeny byly synchronizovány do nastavení.");
-        }
-      }
+      void fetch("/api/auth/sync-account", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` }
+      }).catch(() => {});
 
       const convResponse = await fetch("/api/conversations", {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -229,7 +208,6 @@ export default function DashboardPage() {
       <p>
         <a href="/storage">Storage browser</a>
       </p>
-      {syncMessage ? <p style={{ color: "green" }}>{syncMessage}</p> : null}
       <button onClick={logout} type="button">
         Odhlásit se
       </button>

@@ -23,6 +23,7 @@ const tool: McpTool<z.infer<typeof inputSchema>, z.infer<typeof outputSchema>> =
     name: "browseCalendarAvailability",
     description:
       "Prohlížení kalendáře uživatele: obsazené úseky (Google Calendar free/busy) a časové okno dotazu. " +
+      "Respektuje nastavení uživatele: Google Calendar nebo Microsoft (Outlook) podle calendar_provider. " +
       "Nepočítá návrhy konkrétních slotů prohlídky — k tomu použij suggestViewingSlots nebo odvození v kódu. " +
       "Vhodné pro experta na e-maily, který si nejdřív ověří obsazenost.",
     inputSchema,

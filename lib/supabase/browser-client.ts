@@ -14,6 +14,13 @@ export function getSupabaseBrowserClient() {
     throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY.");
   }
 
-  browserClient = createClient(url, key);
+  browserClient = createClient(url, key, {
+    auth: {
+      flowType: "pkce",
+      detectSessionInUrl: true,
+      persistSession: true,
+      autoRefreshToken: true
+    }
+  });
   return browserClient;
 }

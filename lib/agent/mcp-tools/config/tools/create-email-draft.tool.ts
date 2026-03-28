@@ -23,7 +23,7 @@ const tool: McpTool<z.infer<typeof inputSchema>, z.infer<typeof outputSchema>> =
     role: "tool",
     name: "createEmailDraft",
     description:
-      "Vytvoří draft e-mailu v Gmailu (neodesílá); zapíše audit draft_created. Odeslání: sendGmailOutbound (mode from_draft | direct). " +
+      "Vytvoří draft e-mailu (Gmail nebo Outlook podle mail_provider; neodesílá); zapíše audit draft_created. Odeslání: sendGmailOutbound (mode from_draft | direct). " +
       "Volitelně leadIds pro propojení s leady. Příchozí pošta: listGmailMessages + getGmailMessage.",
     inputSchema,
     outputSchema,

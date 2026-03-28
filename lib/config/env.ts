@@ -30,6 +30,12 @@ const envSchema = z.object({
   GOOGLE_IMPERSONATED_USER: optionalEmail,
   GOOGLE_OAUTH_CLIENT_ID: optionalString,
   GOOGLE_OAUTH_CLIENT_SECRET: optionalString,
+  /** Volitelné: kanonická veřejná URL pro OAuth redirect (např. https://app.example.com). Jinak se bere origin z požadavku. */
+  NEXT_PUBLIC_APP_URL: optionalString,
+  MICROSOFT_OAUTH_CLIENT_ID: optionalString,
+  MICROSOFT_OAUTH_CLIENT_SECRET: optionalString,
+  /** Entra tenant: common | organizations | nebo tenant GUID. Výchozí common. */
+  MICROSOFT_OAUTH_TENANT: z.string().default("common"),
   GOOGLE_CALENDAR_ID: z.string().default("primary"),
   AGENT_MAX_QUERY_ROWS: z.coerce.number().default(500),
   AGENT_QUERY_TIMEOUT_MS: z.coerce.number().default(15_000),
