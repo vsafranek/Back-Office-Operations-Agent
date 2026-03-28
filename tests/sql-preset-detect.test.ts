@@ -31,6 +31,21 @@ describe("fallbackPlanFromQuestion (záloha bez LLM)", () => {
     expect(p.dataset).toBe("missing_reconstruction");
   });
 
+  it("nemovitosti + rekonstrukce + stavební úpravy (vzorová věta uživatele)", () => {
+    const p = fallbackPlanFromQuestion(
+      "Najdi nemovitosti, u kterých nám v systému chybí data o rekonstrukci a stavebních úpravách a připrav jejich seznam k doplnění."
+    );
+    expect(p.dataset).toBe("missing_reconstruction");
+    expect(p.filter_label).toContain("Nemovitosti");
+  });
+
+  it("nemovitosti + stavební úpravy bez slova rekonstrukce", () => {
+    const p = fallbackPlanFromQuestion(
+      "Vylistuj nemovitosti, kde chybí údaje o stavebních úpravách v CRM."
+    );
+    expect(p.dataset).toBe("missing_reconstruction");
+  });
+
   it("lead / prodeje", () => {
     const p = fallbackPlanFromQuestion("Porovnej leady a prodané byty za 6 měsíců");
     expect(p.dataset).toBe("leads_vs_sales_6m");
@@ -63,5 +78,42 @@ describe("narrowRowsByText", () => {
     const out = narrowRowsByText(rows, "Dejvice");
     expect(out).toHaveLength(1);
     expect(out[0]!.full_name).toBe("B");
+  });
+
+  it("řádky z fn_missing_reconstruction_data: shoda v městě / internal_ref / UUID", () => {
+    const rows = [
+      {
+        property_id: "01cc0001-01cc-41cc-81cc-010000000001",
+        title: "TEST Byt",
+        city: "Plzeň",
+        internal_ref: "TEST-DQI-001",
+        missing_reconstruction: true,
+        missing_structural_changes: true
+      },
+      {
+        property_id: "01cc0002-01cc-41cc-81cc-010000000002",
+        title: "Jiný",
+        city: "Brno",
+        internal_ref: "X",
+        missing_reconstruction: false,
+        missing_structural_changes: true
+      }
+    ];
+    expect(narrowRowsByText(rows, "Plzeň")).toHaveLength(1);
+    expect(narrowRowsByText(rows, "TEST-DQI-001")).toHaveLength(1);
+    expect(narrowRowsByText(rows, "01cc0002")).toHaveLength(1);
+  });
+
+  it("shoda v address jsonb (město / čtvrť bez samostatného sloupce city)", () => {
+    const rows = [
+      {
+        property_id: "p1",
+        title: "Byt",
+        address: { city: "Ostrava", district: "Centrum", country: "CZ" },
+        internal_ref: "PF-X"
+      }
+    ];
+    expect(narrowRowsByText(rows, "Ostrava")).toHaveLength(1);
+    expect(narrowRowsByText(rows, "Centrum")).toHaveLength(1);
   });
 });

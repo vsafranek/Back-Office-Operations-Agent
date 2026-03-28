@@ -115,7 +115,7 @@ export async function runAnalyticsSubAgent(params: {
       JSON.stringify(sampleRows, null, 2),
       `Artefakty: CSV ${report.csvPublic}, prehled MD ${report.mdPublic}, Excel ${report.xlsxPublic}${
         extraSheets?.length
-          ? " (workbook ma listy Data + Properties + Leads z interni DB)."
+          ? " (workbook ma listy Data + Properties + Leads + Deals z interni DB)."
           : ""
       }${chartPngPublicUrl ? `, graf PNG ${chartPngPublicUrl}` : ""}`,
       "Shrnut vysledky pro uzivatele (cisla musi sedet s daty vyse) a navrhni dalsi kroky."

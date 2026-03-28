@@ -43,16 +43,62 @@ const ROW_TEXT_COLUMNS = [
   "property_type_interest"
 ] as const;
 
+/** Sloupce řádků z `fn_missing_reconstruction_data` a obdobných výpisů nemovitostí. */
+const PROPERTY_ROW_TEXT_COLUMNS = ["title", "city", "district", "internal_ref"] as const;
+
+const ADDRESS_SEARCH_KEYS = [
+  "city",
+  "district",
+  "street",
+  "postal_code",
+  "postalCode",
+  "region",
+  "country"
+] as const;
+
+/** Texty z `address` (jsonb) pro textové zúžení řádků. */
+function addressJsonSearchStrings(addr: unknown): string[] {
+  let o: Record<string, unknown> | null = null;
+  if (typeof addr === "object" && addr !== null && !Array.isArray(addr)) {
+    o = addr as Record<string, unknown>;
+  } else if (typeof addr === "string") {
+    try {
+      const p = JSON.parse(addr) as unknown;
+      if (typeof p === "object" && p !== null && !Array.isArray(p)) o = p as Record<string, unknown>;
+    } catch {
+      return [addr];
+    }
+  }
+  if (!o) return [];
+  return ADDRESS_SEARCH_KEYS.flatMap((k) => {
+    const v = o![k];
+    return typeof v === "string" ? [v] : [];
+  });
+}
+
+function rowMatchesTextNarrowing(row: Record<string, unknown>, t: string): boolean {
+  const includesTerm = (s: string) => normalizeAsciiForSearch(s).includes(t);
+  for (const c of ROW_TEXT_COLUMNS) {
+    const v = row[c];
+    if (typeof v === "string" && includesTerm(v)) return true;
+  }
+  for (const c of PROPERTY_ROW_TEXT_COLUMNS) {
+    const v = row[c];
+    if (typeof v === "string" && includesTerm(v)) return true;
+  }
+  for (const s of addressJsonSearchStrings(row.address)) {
+    if (includesTerm(s)) return true;
+  }
+  const pid = row.property_id;
+  if (pid != null && includesTerm(String(pid))) return true;
+  return false;
+}
+
 /** Zúžení již načtených řádků (views) podle volného textu — bez nových SQL presetů. */
 export function narrowRowsByText(rows: Record<string, unknown>[], term: string): Record<string, unknown>[] {
   const t = normalizeAsciiForSearch(term.trim());
   if (!t) return rows;
-  return rows.filter((row) =>
-    ROW_TEXT_COLUMNS.some((c) => {
-      const v = row[c];
-      return typeof v === "string" && normalizeAsciiForSearch(v).includes(t);
-    })
-  );
+  return rows.filter((row) => rowMatchesTextNarrowing(row, t));
 }
 
 /** Známe čtvrti / města — pro heuristický fallback bez LLM. */
@@ -85,15 +131,29 @@ export function extractClientAreaSearchTerm(question: string): string | null {
 /**
  * Záložní plán bez LLM (síť Down / neplatný JSON) — krátké heuristiky, ne rostoucí seznam presetů.
  */
+const MISSING_RECONSTRUCTION_FILTER_LABEL =
+  "Nemovitosti — chybějící údaje o rekonstrukci / stavebních úpravách";
+
+function wantsMissingReconstructionDataset(n: string): boolean {
+  if (n.includes("rekonstruk")) return true;
+  const mentionsProperty =
+    n.includes("nemovitost") || n.includes("portfolio") || n.includes("inzerat");
+  const mentionsStructuralWork = n.includes("stavebn") && n.includes("uprav");
+  const mentionsMissingData = n.includes("chyb") && (n.includes("data") || n.includes("udaj"));
+  if (mentionsStructuralWork && mentionsProperty) return true;
+  if (mentionsMissingData && (n.includes("rekonstruk") || mentionsStructuralWork)) return true;
+  return false;
+}
+
 export function fallbackPlanFromQuestion(question: string): DataPullPlan {
   const n = normalizeAsciiForSearch(question);
 
-  if (n.includes("rekonstruk")) {
+  if (wantsMissingReconstructionDataset(n)) {
     return {
       dataset: "missing_reconstruction",
       row_text_narrowing: null,
       client_filters: null,
-      filter_label: "Klienti — chybějící údaje k rekonstrukci",
+      filter_label: MISSING_RECONSTRUCTION_FILTER_LABEL,
       suggest_source_channel_chart: false
     };
   }
@@ -208,9 +268,9 @@ export async function inferDataPullPlan(params: {
     "- new_clients_q1: novi klienti v 1. kvartalu aktualniho roku (view ma source_channel).",
     "- leads_vs_sales_6m: leady vs prodane byty za 6 mesicu.",
     "- clients: tabulka clients v DB — pro obecne dotazy na klienty, filtry, budget, kanal.",
-    "- missing_reconstruction: klienti s chybejicimi poznamkami k rekonstrukci.",
+    "- missing_reconstruction: nemovitosti s prazdnym reconstruction_notes a/nebo structural_changes; ve vystupu i reconstruction_status, building_works_checklist (JSON pole planovanych uprav), reconstruction_budget_estimate_czk, reconstruction_last_reviewed_at.",
     "",
-    "row_text_narrowing: jednoduche OR vyhledani v preferred_district, preferred_city, property_notes (napr. Dejvice). null pokud pouzivas jen client_filters nebo zadny text.",
+    "row_text_narrowing: u clients/... OR v preferred_district, preferred_city, ... u missing_reconstruction OR v title, city (odvozene z address), district/street v address (jsonb), internal_ref, property_id. Priklady: Dejvice, Praha, cast UUID. null pokud pouzivas jen client_filters nebo zadny text.",
     "",
     "client_filters: pole az 15 podminek pro dataset clients — kazda polozka ma \"kind\" a dalsi pole:",
     '- text_ilike: { "kind":"text_ilike", "column": <full_name|email|phone|source_channel|preferred_city|preferred_district|property_type_interest|property_notes>, "value": string }',

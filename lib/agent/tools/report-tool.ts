@@ -52,7 +52,7 @@ export async function generateReportArtifacts(params: {
   runId: string;
   title: string;
   rows: Record<string, unknown>[];
-  /** Další listy (.xlsx), např. Properties + Leads pro CRM export. */
+  /** Další listy (.xlsx), např. Properties + Leads + Deals pro CRM export. */
   extraSheets?: ReportExtraSheet[];
 }) {
   const env = getEnv();

@@ -225,13 +225,13 @@ where not exists (
   select 1 from public.clients c where c.id = ve.id
 );
 
-insert into public.properties (id, title, city, district, listed_price, reconstruction_notes, structural_changes, created_at)
+insert into public.properties (id, title, address, listed_price, reconstruction_notes, structural_changes, created_at)
 select * from (
   values
-    ('aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaa1'::uuid, 'Byt 2+kk Tusarova', 'Praha', 'Holesovice', 7990000, 'Nova koupelna 2022', 'Dispozicni upravy ne', now() - interval '120 days'),
-    ('aaaaaaa2-aaaa-aaaa-aaaa-aaaaaaaaaaa2'::uuid, 'Byt 3+1 Ortenovo namesti', 'Praha', 'Holesovice', 11490000, null, null, now() - interval '90 days'),
-    ('aaaaaaa3-aaaa-aaaa-aaaa-aaaaaaaaaaa3'::uuid, 'Byt 1+kk Delnicka', 'Praha', 'Holesovice', 5490000, '', null, now() - interval '60 days')
-) as v(id, title, city, district, listed_price, reconstruction_notes, structural_changes, created_at)
+    ('aaaaaaa1-aaaa-aaaa-aaaa-aaaaaaaaaaa1'::uuid, 'Byt 2+kk Tusarova', '{"city":"Praha","district":"Holesovice","country":"CZ"}'::jsonb, 7990000, 'Nova koupelna 2022', 'Dispozicni upravy ne', now() - interval '120 days'),
+    ('aaaaaaa2-aaaa-aaaa-aaaa-aaaaaaaaaaa2'::uuid, 'Byt 3+1 Ortenovo namesti', '{"city":"Praha","district":"Holesovice","country":"CZ"}'::jsonb, 11490000, null, null, now() - interval '90 days'),
+    ('aaaaaaa3-aaaa-aaaa-aaaa-aaaaaaaaaaa3'::uuid, 'Byt 1+kk Delnicka', '{"city":"Praha","district":"Holesovice","country":"CZ"}'::jsonb, 5490000, '', null, now() - interval '60 days')
+) as v(id, title, address, listed_price, reconstruction_notes, structural_changes, created_at)
 where not exists (
   select 1 from public.properties p where p.id = v.id
 );
