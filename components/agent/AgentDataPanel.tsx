@@ -7,6 +7,7 @@ import type {
 } from "@/lib/agent/types";
 import { MarketListingsDataPanelSection } from "@/components/agent/MarketListingsDataPanelSection";
 import { ViewingEmailDraftPanel } from "@/components/agent/ViewingEmailDraftPanel";
+import { ScheduledTaskConfirmationPanel } from "@/components/agent/ScheduledTaskConfirmationPanel";
 
 function formatCell(value: unknown): string {
   if (value == null) return "—";
@@ -180,6 +181,10 @@ export function AgentDataPanel({
         getAccessToken={getAccessToken}
       />
     );
+  }
+
+  if (panel.kind === "scheduled_task_confirmation") {
+    return <ScheduledTaskConfirmationPanel draft={panel.draft} getAccessToken={getAccessToken} />;
   }
 
   if (panel.kind === "viewing_email_draft") {

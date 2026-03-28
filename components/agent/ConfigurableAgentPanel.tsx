@@ -231,9 +231,11 @@ export function ConfigurableAgentPanel({
                   ? "1fr minmax(320px, 520px)"
                   : result.dataPanel?.kind === "viewing_email_draft"
                     ? "1fr minmax(340px, 560px)"
-                    : result.dataPanel
-                      ? "1fr minmax(300px, 420px)"
-                      : "1fr",
+                    : result.dataPanel?.kind === "scheduled_task_confirmation"
+                      ? "1fr minmax(340px, 520px)"
+                      : result.dataPanel
+                        ? "1fr minmax(300px, 420px)"
+                        : "1fr",
               gap: 20,
               alignItems: "start"
             }}
@@ -353,6 +355,11 @@ export function ConfigurableAgentPanel({
                   soubory jsou v sekci Artefakty výše (odkaz = otevření nebo stažení v prohlížeči).
                 </p>
               )}
+              {result.dataPanel?.kind === "scheduled_task_confirmation" ? (
+                <p style={{ margin: 0, fontSize: 13, color: "#6b21a8" }}>
+                  V pravém panelu potvrďte nebo zrušte uložení naplánované úlohy (cron na straně Supabase volá aplikaci podle návodu v Nastavení).
+                </p>
+              ) : null}
             </div>
 
             {result.dataPanel ? (

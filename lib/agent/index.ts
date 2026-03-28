@@ -42,6 +42,15 @@ export async function runBackOfficeAgent(input: {
   conversationId?: string;
   /** Viz `lib/agent/config/registry.ts` – např. basic | thinking-orchestrator */
   agentId?: string;
+  /**
+   * Předřazení ke klasifikaci a subagentům (např. systémové zadání naplánované úlohy).
+   * Samotná otázka v konverzaci (pokud je) zůstává `question`.
+   */
+  orchestratorQuestionPrefix?: string;
+  /**
+   * Běh z uložené cron úlohy — klasifikátor nesmí zvolit `scheduled_agent_task` (jinak by se zacyklil návrh úlohy).
+   */
+  scheduledTaskExecution?: boolean;
   options?: {
     presentation?: {
       slideCount?: number;
@@ -60,6 +69,15 @@ export async function runBackOfficeAgent(input: {
   const startedAt = new Date().toISOString();
   const supabase = getSupabaseAdminClient();
   const conversationId = input.conversationId ?? null;
+  const prefix = input.orchestratorQuestionPrefix?.trim();
+  const effectiveQuestion = prefix
+    ? `${prefix}\n\n--- Dotaz / šablona úlohy ---\n${input.question}`
+    : input.question;
+  const classifierQuestion =
+    effectiveQuestion +
+    (input.scheduledTaskExecution
+      ? "\n\n(Interní pokyn pro klasifikaci: probíhá vykonání již uložené naplánované úlohy. Intent scheduled_agent_task NEPOUŽÍVEJ — zařaď požadavek podle obsahu mezi analytics, calendar_email, presentation, weekly_report, web_search, market_listings.)"
+      : "");
 
   await emit("Zpracovávám dotaz…");
   const contextText = await loadConversationContext({ supabase, conversationId });
@@ -78,7 +96,7 @@ export async function runBackOfficeAgent(input: {
     input: {
       agentId: agentDef.id,
       mode: agentDef.mode,
-      questionPreview: input.question.slice(0, 600),
+      questionPreview: effectiveQuestion.slice(0, 600),
       hasConversation: Boolean(conversationId)
     },
     meta: {
@@ -98,7 +116,7 @@ export async function runBackOfficeAgent(input: {
     await emit("Orchestrátor promýšlí zadání a vhodné nástroje…");
     const thinking = await classifyWithThinkingOrchestrator({
       runId,
-      question: input.question,
+      question: classifierQuestion,
       contextText: contextText || undefined,
       extraInstructions: agentDef.orchestratorInstructions,
       trace: traceRef,
@@ -110,7 +128,7 @@ export async function runBackOfficeAgent(input: {
     await emit("Klasifikuji typ požadavku…");
     classified = await classifyAgentIntent({
       runId,
-      question: input.question,
+      question: classifierQuestion,
       contextText: contextText || undefined,
       trace: traceRef
     });
@@ -155,7 +173,7 @@ export async function runBackOfficeAgent(input: {
     await supabase.from("conversation_messages").insert({
       conversation_id: conversationId,
       role: "user",
-      content: input.question,
+      content: input.question.trim() ? input.question : effectiveQuestion,
       metadata: { runId, intent, agentId: agentDef.id, agentMode: agentDef.mode }
     });
     await supabase
@@ -177,7 +195,7 @@ export async function runBackOfficeAgent(input: {
       userId: input.userId,
       conversationId
     },
-    question: input.question,
+    question: effectiveQuestion,
     contextText,
     slideCount: resolvedSlideCount,
     trace: handle.trace,
@@ -200,7 +218,7 @@ export async function runBackOfficeAgent(input: {
   const { error } = await supabase.from("agent_runs").insert({
     run_id: runId,
     user_id: input.userId,
-    question: input.question,
+    question: effectiveQuestion,
     intent,
     answer: answer.answer_text,
     confidence: answer.confidence,
@@ -234,7 +252,7 @@ export async function runBackOfficeAgent(input: {
       .from("conversations")
       .update({
         updated_at: new Date().toISOString(),
-        title: input.question.slice(0, 60)
+        title: (input.question.trim() ? input.question : effectiveQuestion).slice(0, 60)
       })
       .eq("id", conversationId)
       .eq("user_id", input.userId);
@@ -252,7 +270,8 @@ function intentProgressLabel(intent: ClassifiedAgentIntent["intent"]): string {
     presentation: "Záměr: prezentace — připravuji odpověď…",
     weekly_report: "Záměr: týdenní report — připravuji odpověď…",
     web_search: "Záměr: vyhledávání na webu — připravuji odpověď…",
-    market_listings: "Záměr: nabídky Sreality / Bezrealitky — stahuji data…"
+    market_listings: "Záměr: nabídky Sreality / Bezrealitky — stahuji data…",
+    scheduled_agent_task: "Záměr: naplánovaná opakovaná úloha agenta — připravuji návrh pro potvrzení…"
   };
   return labels[intent];
 }

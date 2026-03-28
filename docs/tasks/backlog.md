@@ -1,6 +1,6 @@
 # Back Office Agent Backlog
 
-Last updated: 2026-03-27 (BOA-003: market monitor bez mock + filtr lokality)
+Last updated: 2026-03-27 (provoz cronu naplánovaných úloh + backlog sync)
 
 ## How to use
 - `status`: `todo` | `in_progress` | `blocked` | `done`
@@ -21,7 +21,7 @@ Last updated: 2026-03-27 (BOA-003: market monitor bez mock + filtr lokality)
 | BOA-008 | Improve chat UX from raw JSON to message bubbles with artifact cards | todo | P2 | Add readable rendering for tables/charts/links/actions. |
 | BOA-009 | Add soft-delete and undo support for conversations | todo | P2 | Replace hard delete with deleted_at and recovery window. |
 | BOA-010 | Add pagination and lazy loading for long conversation histories | todo | P2 | Prevent full-history payload on each switch. |
-| BOA-011 | Add scheduler verification runbook and automated health checks | todo | P2 | Validate cron execution and workflow freshness daily. |
+| BOA-011 | Add scheduler verification runbook and automated health checks | todo | P2 | Tik z Supabase na Next (`/api/cron/scheduled-agent-tasks`, `x-cron-secret` = `CRON_SECRET`) — provozovatel nasadil. Zbývá: krátký runbook (kontrola jobu, očekávaná odpověď JSON `results`), alerting / log při `status: error` v `results`. |
 | BOA-012 | Add disconnect/reconnect Google integration diagnostics in UI | in_progress | P2 | Disconnect implemented. Remaining: token health, last refresh timestamp, guided reconnect. |
 | BOA-013 | Scrapers for major Czech listing portals (Sreality.cz, Reality.iDNES.cz, Bezrealitky.cz) | in_progress | P0 | Hotovo první vlna: Sreality (API), Bezrealitky (GraphQL přes env + šablona). Zbývá iDNES / detail parsing / meziportálový dedupe — navazuje na BOA-003. |
 | BOA-014 | Agent-callable Clients DB query tool | done | P1 | Rozšířen `runSqlPreset`: preset `new_clients_q1` → view `vw_new_clients_q1` (migrace 008: Q1 + aktuální rok Europe/Prague), lepší detekce z NL (`detectQueryPresetFromQuestion`). Service-role beze změny. |
@@ -30,8 +30,10 @@ Last updated: 2026-03-27 (BOA-003: market monitor bez mock + filtr lokality)
 | BOA-017 | Rozšíření DB pro realitní provoz (lead pipeline, deal detaily) | todo | P1 | Hotovo: migrace **016** — `leads` (`updated_at`, `last_contact_at`, `expected_value_czk`, `lost_reason`, `notes`, FK `property_id`), `deals` (`lead_id`, `commission_*`, `deal_source`, `status`), `vw_lead_pipeline_summary`, backfill; Excel list **Deals** + heuristika v `crm-excel-sheets.ts`. Dál: tvrdší enum `status`, UI pipeline, materializované agregace BI. |
 | BOA-018 | Excel (.xlsx) z analytiky + extra listy Properties/Leads | done | P1 | `exceljs`, `generateReportArtifacts` → Storage `report.xlsx`, MCP `xlsxPublic`; heuristika „excel/xlsx/portfolio/nemovitosti“ → `fetchCrmSheetsForReport`; weekly report má Excel artefakt; Vitest `tests/report-tool.test.ts`. Migrace: `011_leads_portfolio_scale.sql`. |
 | BOA-019 | E-mail panel: výběr leadů z CRM (místo ručního UUID) | todo | P2 | Vyhledání leadů podle jména/e-mailu, multi-select, zápis do `leadIds` při draft/send. Volitelně auto-doplnění z kontextu agenta. |
+| BOA-020 | Naplánované úlohy agenta (cron + system prompt + potvrzení v panelu) | done | P1 | Migrace **019** (remote). API `/api/settings/scheduled-tasks`, `POST /api/cron/scheduled-agent-tasks` + `x-cron-secret`. UI `/settings` + agent `scheduled_agent_task` + panel potvrzení. **Provoz:** `CRON_SECRET` na hostu + Supabase HTTP cron na produkční URL — nasazení potvrzeno. |
 
 ## Nedávno dodáno (mimo tabulku)
 
+- **Naplánované úlohy agenta (BOA-020):** tabulka + RLS, tik z Supabase na Next, uživatelské úlohy v nastavení / potvrzení v chatu.
 - **Kalendář / prohlídka:** MCP `browseCalendarAvailability`, náhled v `CalendarPreviewStrip`, podpis odesílatele, expert na maily v `calendar-email-subagent`.
 - **Gmail:** čtení schránky (`listGmailMessages`, `getGmailMessage`), sloučené odeslání `sendGmailOutbound`.

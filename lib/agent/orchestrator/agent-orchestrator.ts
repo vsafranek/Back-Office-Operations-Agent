@@ -8,6 +8,7 @@ import { runPresentationSubAgent } from "@/lib/agent/subagents/presentation-suba
 import { runWeeklyReportSubAgent } from "@/lib/agent/subagents/weekly-report-subagent";
 import { runWebSearchSubAgent } from "@/lib/agent/subagents/web-search-subagent";
 import { runMarketListingsChatSubAgent } from "@/lib/agent/subagents/market-listings-chat-subagent";
+import { runScheduledTaskProposalSubAgent } from "@/lib/agent/subagents/scheduled-task-proposal-subagent";
 
 export type AgentIntent =
   | "analytics"
@@ -15,7 +16,8 @@ export type AgentIntent =
   | "presentation"
   | "weekly_report"
   | "web_search"
-  | "market_listings";
+  | "market_listings"
+  | "scheduled_agent_task";
 
 export async function runAgentOrchestrator(params: {
   intent: AgentIntent;
@@ -87,6 +89,10 @@ export async function runAgentOrchestrator(params: {
 
   if (params.intent === "market_listings") {
     return runMarketListingsChatSubAgent({ toolRunner, ctx, question: params.question });
+  }
+
+  if (params.intent === "scheduled_agent_task") {
+    return runScheduledTaskProposalSubAgent({ toolRunner, ctx, question: params.question, contextText: params.contextText });
   }
 
   return runAnalyticsSubAgent({

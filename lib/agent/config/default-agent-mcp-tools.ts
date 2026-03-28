@@ -18,5 +18,6 @@ export const DEFAULT_AGENT_MCP_TOOL_KEYS = [
   "fetchMarketListings",
   "upsertMarketListings",
   "webSearch",
-  "fetchWebPageText"
+  "fetchWebPageText",
+  "proposeScheduledAgentTask"
 ] as const satisfies ReadonlyArray<McpToolRegistryKey>;

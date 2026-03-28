@@ -87,6 +87,18 @@ export type AgentDataPanel =
       /** Korelace pro audit (BOA-004 Volitelné u starších odpovědí bez těchto polí.) */
       conversationId?: string | null;
       agentRunId?: string | null;
+    }
+  | {
+      kind: "scheduled_task_confirmation";
+      /** Návrh úlohy k uložení po potvrzení v panelu (POST /api/settings/scheduled-tasks). */
+      draft: {
+        title: string;
+        cron_expression: string;
+        timezone: string;
+        system_prompt: string;
+        user_question: string;
+        agent_id: string;
+      };
     };
 
 export type AgentAnswer = {

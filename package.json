@@ -18,6 +18,7 @@
     "@supabase/supabase-js": "^2.100.1",
     "ai": "^6.0.138",
     "cheerio": "^1.2.0",
+    "cron-parser": "^5.5.0",
     "exceljs": "^4.4.0",
     "googleapis": "^171.4.0",
     "next": "^16.2.1",

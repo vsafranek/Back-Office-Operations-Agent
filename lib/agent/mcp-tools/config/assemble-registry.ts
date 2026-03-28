@@ -14,6 +14,7 @@ import { fetchMarketListingsTool } from "@/lib/agent/mcp-tools/config/tools/fetc
 import { upsertMarketListingsTool } from "@/lib/agent/mcp-tools/config/tools/upsert-market-listings.tool";
 import { webSearchTool } from "@/lib/agent/mcp-tools/config/tools/web-search.tool";
 import { fetchWebPageTextTool } from "@/lib/agent/mcp-tools/config/tools/fetch-web-page-text.tool";
+import { proposeScheduledAgentTaskTool } from "@/lib/agent/mcp-tools/config/tools/propose-scheduled-agent-task.tool";
 
 /** Pevny seznam MCP polozek (bez listMcpCapabilities — ten se dosadi). */
 export const MCP_TOOL_CONFIG_ENTRIES = [
@@ -30,7 +31,8 @@ export const MCP_TOOL_CONFIG_ENTRIES = [
   fetchMarketListingsTool,
   upsertMarketListingsTool,
   webSearchTool,
-  fetchWebPageTextTool
+  fetchWebPageTextTool,
+  proposeScheduledAgentTaskTool
 ] as const;
 
 export type McpToolRegistryKey = (typeof MCP_TOOL_CONFIG_ENTRIES)[number]["registryKey"];
