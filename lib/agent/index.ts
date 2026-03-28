@@ -80,6 +80,12 @@ export async function runBackOfficeAgent(input: {
       mode: agentDef.mode,
       questionPreview: input.question.slice(0, 600),
       hasConversation: Boolean(conversationId)
+    },
+    meta: {
+      actorType: "user",
+      action: "agent.run.start",
+      targetType: conversationId ? "conversation" : "adhoc",
+      targetId: conversationId ?? undefined
     }
   });
 
@@ -127,7 +133,13 @@ export async function runBackOfficeAgent(input: {
       intent,
       reasoningPreview: orchestrationReasoning?.slice(0, 3000)
     },
-    output: { slideCount: resolvedSlideCount }
+    output: { slideCount: resolvedSlideCount },
+    meta: {
+      actorType: "user",
+      action: "agent.intent.selected",
+      targetType: "intent",
+      targetId: intent
+    }
   });
 
   logger.info("agent_run_started", {

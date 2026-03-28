@@ -1,6 +1,6 @@
 # Back Office Agent Backlog
 
-Last updated: 2026-03-27 (BOA-004 dokončeno: draft + odeslání + audit)
+Last updated: 2026-03-27 (BOA-007 audit: agregát API, workflow enqueue, ops trace, purge, PII serialize)
 
 ## How to use
 - `status`: `todo` | `in_progress` | `blocked` | `done`
@@ -14,10 +14,10 @@ Last updated: 2026-03-27 (BOA-004 dokončeno: draft + odeslání + audit)
 | BOA-001 | Weekly report: generate 3-slide presentation artifact | done | P0 | PPTX+PDF do Supabase Storage, verejne URL v artefaktech. Vychozi pocet slidu 3 (`WEEKLY_REPORT_DEFAULT_SLIDE_COUNT`). |
 | BOA-002 | Generate chart images (PNG) for analytics outputs | done | P0 | Q1 kanálový graf: SVG (`chart-png-svg.ts`) → PNG (`sharp`) → `reports/{runId}/q1-source-channel.png`, veřejná URL v artefaktu typu `chart`; analytický subagent. |
 | BOA-003 | Replace market monitor mock feed with real property sources | in_progress | P0 | Sreality: `sreality-listings.ts`. Bezrealitky: `bezrealitky-listings.ts` — výchozí `https://api.bezrealitky.cz/graphql/`, volitelně `BEZREALITKY_GRAPHQL_QUERY` z DevTools. Dedup/relevance Holešovice zůstává. |
-| BOA-004 | Add explicit approval workflow for outbound email sending | done | P1 | Panel: draft v Gmailu nebo „Odeslat rovnou“; `POST /api/google/email-send` s `strategy` `from_draft` \| `direct`. Jeden MCP nástroj `sendGmailOutbound` (místo dvou). Vazba leadů: migrace `013_outbound_email_event_leads.sql`, pole `leadIds` v API + `relatedLeadIds` v `dataPanel`. |
+| BOA-004 | Add explicit approval workflow for outbound email sending | done | P1 | Panel: draft v Gmailu nebo „Odeslat rovnou“; `POST /api/google/email-send` s `strategy` `from_draft` \| `direct`. MCP: `sendGmailOutbound`, `createEmailDraft` (+ audit draftu), `listGmailMessages`, `getGmailMessage`. Vazba leadů: `013_outbound_email_leads` (**nasazeno na remote**), `leadIds` v API, `relatedLeadIds` v `dataPanel` (zatím ruční UUID — viz BOA-019). |
 | BOA-005 | Create data-quality task queue for missing property fields | todo | P1 | Auto-create tasks from missing reconstruction analysis with owner/priority. |
 | BOA-006 | Add role model (admin, broker, management) and enforce RLS/UI permissions | todo | P1 | Restrict reports and settings by role. |
-| BOA-007 | Extend audit trail for all agent/tool/workflow actions | in_progress | P1 | Basic run logs exist; complete actor/action/target/outcome coverage and export view. |
+| BOA-007 | Extend audit trail for all agent/tool/workflow actions | done | P1 | `GET /api/audit/run` + panel `AuditRunSummary`; CSV export; `workflow_runs` sloupce (migrace 014) + enqueue audit; cron workflow metadata/chyby; `GET /api/agent/trace/ops` + `AUDIT_OPS_SECRET`; `POST /api/cron/purge-audit` + retence; `meta` actor/action u `run.start` / `intent.selected`; PII v `serializeForTrace`; docs `audit-meta-conventions.md`. |
 | BOA-008 | Improve chat UX from raw JSON to message bubbles with artifact cards | todo | P2 | Add readable rendering for tables/charts/links/actions. |
 | BOA-009 | Add soft-delete and undo support for conversations | todo | P2 | Replace hard delete with deleted_at and recovery window. |
 | BOA-010 | Add pagination and lazy loading for long conversation histories | todo | P2 | Prevent full-history payload on each switch. |
@@ -29,3 +29,9 @@ Last updated: 2026-03-27 (BOA-004 dokončeno: draft + odeslání + audit)
 | BOA-016 | Analytics: graf + panel pro leady vs prodané (6 měsíců) | done | P1 | `dataPanel` `leads_sales_6m`: dvojité sloupce v UI + tabulka; LLM instrukce neomlouvají absenci grafu. Volitelný follow-up: PNG do Storage jako u Q1 (`chart-png`). |
 | BOA-017 | Rozšíření DB pro realitní provoz (lead pipeline, deal detaily) | todo | P1 | Migrace **011** doplnila portfoliové sloupce na `properties`, indexy a hromadný seed leadů/nemovitostí/deals v čase. Dál: enum/KPI pipeline, `deals` (provize, zdroj obchodu), materializované agregace podle potřeby BI. |
 | BOA-018 | Excel (.xlsx) z analytiky + extra listy Properties/Leads | done | P1 | `exceljs`, `generateReportArtifacts` → Storage `report.xlsx`, MCP `xlsxPublic`; heuristika „excel/xlsx/portfolio/nemovitosti“ → `fetchCrmSheetsForReport`; weekly report má Excel artefakt; Vitest `tests/report-tool.test.ts`. Migrace: `011_leads_portfolio_scale.sql`. |
+| BOA-019 | E-mail panel: výběr leadů z CRM (místo ručního UUID) | todo | P2 | Vyhledání leadů podle jména/e-mailu, multi-select, zápis do `leadIds` při draft/send. Volitelně auto-doplnění z kontextu agenta. |
+
+## Nedávno dodáno (mimo tabulku)
+
+- **Kalendář / prohlídka:** MCP `browseCalendarAvailability`, náhled v `CalendarPreviewStrip`, podpis odesílatele, expert na maily v `calendar-email-subagent`.
+- **Gmail:** čtení schránky (`listGmailMessages`, `getGmailMessage`), sloučené odeslání `sendGmailOutbound`.

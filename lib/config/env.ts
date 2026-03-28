@@ -35,6 +35,10 @@ const envSchema = z.object({
   AGENT_QUERY_TIMEOUT_MS: z.coerce.number().default(15_000),
   TOKEN_ENCRYPTION_KEY: z.string().min(16),
   CRON_SECRET: z.string().optional(),
+  /** Tajný klíč pro GET /api/agent/trace/ops (trace cron/automation_worker). */
+  AUDIT_OPS_SECRET: optionalString,
+  /** Po kolika dnech mazat agent_trace_events v cron purge (výchozí 90). */
+  AGENT_TRACE_RETENTION_DAYS: z.coerce.number().int().min(7).max(730).optional(),
   /** Relative to cwd or absolute; default blue-white deck in assets/. */
   PRESENTATION_TEMPLATE_PATH: optionalString,
   /** When unset, template is used if the resolved file exists. */

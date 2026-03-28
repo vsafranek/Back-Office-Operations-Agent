@@ -19,9 +19,18 @@ const tool: McpTool<z.infer<typeof inputSchema>, unknown> = {
     inputSchema,
     outputSchema,
     auth: "service-role",
-    sideEffects: ["External HTTP POST"]
+    sideEffects: ["External HTTP POST", "workflow_runs audit"]
   },
-  run: async (_ctx: AgentToolContext, input) => enqueueWorkflowTask({ endpoint: input.endpoint, payload: input.payload })
+  run: async (ctx: AgentToolContext, input) =>
+    enqueueWorkflowTask({
+      endpoint: input.endpoint,
+      payload: input.payload,
+      agentContext: {
+        runId: ctx.runId,
+        userId: ctx.userId,
+        conversationId: ctx.conversationId ?? null
+      }
+    })
 };
 
 export const enqueueWorkflowTaskTool: McpToolConfigEntry = {

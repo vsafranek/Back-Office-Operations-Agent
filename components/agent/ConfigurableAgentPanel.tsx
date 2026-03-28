@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { useState } from "react";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
+import { AuditRunSummary } from "@/components/agent/AuditRunSummary";
 import { AgentTraceTree } from "@/components/agent/AgentTraceTree";
 import type { AgentUiOption } from "@/lib/agent/config/types";
 import type { AgentAnswer } from "@/lib/agent/types";
@@ -343,6 +344,7 @@ export function ConfigurableAgentPanel({
                 </div>
               ) : null}
 
+              {result.runId ? <AuditRunSummary runId={result.runId} getAccessToken={getAccessToken} /> : null}
               {result.runId ? <AgentTraceTree runId={result.runId} getAccessToken={getAccessToken} /> : null}
 
               {result.dataPanel ? null : (

@@ -13,45 +13,69 @@ export async function runWeeklyExecutiveReport(options?: { slideCount?: number; 
   await supabase.from("workflow_runs").insert({
     workflow_name: "weekly_exec_report",
     run_ref: runId,
-    status: "started"
+    status: "started",
+    triggered_by: "cron",
+    actor_user_id: "automation_worker"
   });
 
   const toolRunner = getToolRunner();
   const automationCtx = { runId, userId: "automation_worker" };
-  const answer = await runWeeklyReportSubAgent({
-    toolRunner,
-    ctx: automationCtx,
-    slideCount: resolvedSlideCount,
-    question: deckContext,
-    title: deckTitle
-  });
 
-  // sources[0] holds the SQL preset used by analytics
-  const source = answer.sources[0] ?? "unknown_source";
+  try {
+    const answer = await runWeeklyReportSubAgent({
+      toolRunner,
+      ctx: automationCtx,
+      slideCount: resolvedSlideCount,
+      question: deckContext,
+      title: deckTitle
+    });
 
-  logger.info("weekly_exec_report_finished", { runId, source });
-  await supabase
-    .from("workflow_runs")
-    .update({ status: "completed", finished_at: new Date().toISOString() })
-    .eq("run_ref", runId);
+    const source = answer.sources[0] ?? "unknown_source";
 
-  const csvPublic = answer.generated_artifacts.find((a) => a.type === "report" && a.label === "CSV dataset")?.url;
-  const mdPublic = answer.generated_artifacts.find((a) => a.type === "report" && a.label === "Markdown summary")?.url;
-  const presentationPublic = answer.generated_artifacts.find(
-    (a) => a.type === "presentation" && a.label.includes("PPTX")
-  )?.url;
-  const presentationPdfPublic = answer.generated_artifacts.find(
-    (a) => a.type === "presentation" && a.label.includes("PDF")
-  )?.url;
+    const csvPublic = answer.generated_artifacts.find((a) => a.type === "report" && a.label === "CSV dataset")?.url;
+    const mdPublic = answer.generated_artifacts.find((a) => a.type === "report" && a.label === "Markdown summary")?.url;
+    const presentationPublic = answer.generated_artifacts.find(
+      (a) => a.type === "presentation" && a.label.includes("PPTX")
+    )?.url;
+    const presentationPdfPublic = answer.generated_artifacts.find(
+      (a) => a.type === "presentation" && a.label.includes("PDF")
+    )?.url;
 
-  return {
-    runId,
-    source,
-    artifacts: {
-      csvPublic,
-      mdPublic,
-      presentationPublic,
-      presentationPdfPublic
-    }
-  };
+    logger.info("weekly_exec_report_finished", { runId, source });
+    await supabase
+      .from("workflow_runs")
+      .update({
+        status: "completed",
+        finished_at: new Date().toISOString(),
+        metadata: {
+          source,
+          slideCount: resolvedSlideCount,
+          artifacts: { csvPublic, mdPublic, presentationPublic, presentationPdfPublic }
+        }
+      })
+      .eq("run_ref", runId);
+
+    return {
+      runId,
+      source,
+      artifacts: {
+        csvPublic,
+        mdPublic,
+        presentationPublic,
+        presentationPdfPublic
+      }
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message.slice(0, 4000) : String(e);
+    logger.error("weekly_exec_report_failed", { runId, message: msg });
+    await supabase
+      .from("workflow_runs")
+      .update({
+        status: "failed",
+        finished_at: new Date().toISOString(),
+        error_message: msg
+      })
+      .eq("run_ref", runId);
+    throw e;
+  }
 }

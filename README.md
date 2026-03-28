@@ -15,6 +15,9 @@ Back-office agent for real-estate operations built on:
 ## Main endpoints
 - `POST /api/agent` - natural-language prompt for analytics/workflows. Body: `question`, optional `conversationId`, optional `agentId` (`basic` / `thinking-orchestrator`, default = thinking orchestrator), optional `options.presentation.slideCount` (weekly report defaults to **3** slides).
 - `GET /api/agent/trace?runId=...` - strom LLM + nástrojů pro jeden běh (stejný uživatel jako Bearer token).
+- `GET /api/audit/run?runId=...` - agregát auditu běhu (agent run + outbound e-maily + počet trace); `format=csv` pro export.
+- `GET /api/agent/trace/ops?runId=...&traceUserId=automation_worker` + hlavička `X-Audit-Ops-Secret` - trace pro cron (vyžaduje `AUDIT_OPS_SECRET`).
+- `POST /api/cron/purge-audit` - mazání starých `agent_trace_events` (stejná autorizace jako `x-cron-secret`; volitelně `AGENT_TRACE_RETENTION_DAYS`).
 - `POST /api/cron/daily` - daily market monitoring job.
 - `POST /api/workflows/weekly-report` - weekly executive report trigger (optional: `slideCount` default **3**, `title`, `context`).
 - `GET /api/storage/list` - list files in Supabase Storage (auth required).

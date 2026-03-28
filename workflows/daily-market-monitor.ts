@@ -9,22 +9,47 @@ export async function runDailyMarketMonitor() {
   await supabase.from("workflow_runs").insert({
     workflow_name: "daily_market_monitor",
     run_ref: runRef,
-    status: "started"
+    status: "started",
+    triggered_by: "cron",
+    actor_user_id: "automation_worker"
   });
 
   const toolRunner = getToolRunner();
   const automationCtx = { runId: runRef, userId: "automation_worker" };
-  const metrics = await runDailyMarketMonitorSubAgent({
-    toolRunner,
-    ctx: automationCtx,
-    location: "Praha Holešovice"
-  });
 
-  logger.info("daily_market_monitor_finished", { inserted: metrics.upserted, failed: metrics.failed });
-  await supabase
-    .from("workflow_runs")
-    .update({ status: "completed", finished_at: new Date().toISOString() })
-    .eq("run_ref", runRef);
+  try {
+    const metrics = await runDailyMarketMonitorSubAgent({
+      toolRunner,
+      ctx: automationCtx,
+      location: "Praha Holešovice"
+    });
 
-  return { inserted: metrics.upserted, failed: metrics.failed, listingsCount: metrics.listingsCount };
+    logger.info("daily_market_monitor_finished", { inserted: metrics.upserted, failed: metrics.failed });
+    await supabase
+      .from("workflow_runs")
+      .update({
+        status: "completed",
+        finished_at: new Date().toISOString(),
+        metadata: {
+          inserted: metrics.upserted,
+          failed: metrics.failed,
+          listingsCount: metrics.listingsCount
+        }
+      })
+      .eq("run_ref", runRef);
+
+    return { inserted: metrics.upserted, failed: metrics.failed, listingsCount: metrics.listingsCount };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message.slice(0, 4000) : String(e);
+    logger.error("daily_market_monitor_failed", { runRef, message: msg });
+    await supabase
+      .from("workflow_runs")
+      .update({
+        status: "failed",
+        finished_at: new Date().toISOString(),
+        error_message: msg
+      })
+      .eq("run_ref", runRef);
+    throw e;
+  }
 }
