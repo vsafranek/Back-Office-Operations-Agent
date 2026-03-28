@@ -175,10 +175,12 @@ export default function DashboardPage() {
     router.push("/auth/login");
   }
 
+  const activeConversationTitle = conversations.find((c) => c.id === activeConversationId)?.title;
+
   return (
     <main style={{ maxWidth: 1480, display: "grid", gridTemplateColumns: "280px 1fr", gap: 20 }}>
-      <aside>
-        <h2>Konverzace</h2>
+      <aside id="conversation-sidebar" aria-label="Seznam konverzací">
+        <h2 id="conversation-sidebar-heading">Konverzace</h2>
         <button type="button" onClick={createConversation}>
           Nova konverzace
         </button>
@@ -190,12 +192,16 @@ export default function DashboardPage() {
             {deleting ? "Mažu..." : "Smazat aktivní"}
           </button>
         </div>
-        <ul style={{ paddingLeft: 18 }}>
+        <ul style={{ paddingLeft: 18 }} aria-labelledby="conversation-sidebar-heading">
           {conversations.map((conv) => (
             <li key={conv.id}>
               <button
                 type="button"
+                id={`conversation-nav--${conv.id}`}
                 style={{ fontWeight: activeConversationId === conv.id ? 700 : 400 }}
+                aria-current={activeConversationId === conv.id ? "true" : undefined}
+                data-conversation-id={conv.id}
+                data-conversation-title={conv.title}
                 onClick={() => setActiveConversationId(conv.id)}
               >
                 {conv.title}
@@ -204,7 +210,18 @@ export default function DashboardPage() {
           ))}
         </ul>
       </aside>
-      <section>
+      <section
+        id={
+          activeConversationId
+            ? `dashboard-main--conv--${activeConversationId}`
+            : "dashboard-main--no-conv"
+        }
+        aria-label={
+          activeConversationTitle
+            ? `Obsah konverzace: ${activeConversationTitle}`
+            : "Obsah dashboardu bez konverzace"
+        }
+      >
       <h1>Back Office Dashboard</h1>
       <p>
         <a href="/settings">Nastavení integrací</a>
@@ -220,6 +237,10 @@ export default function DashboardPage() {
         key={activeConversationId ?? "new"}
         agents={listAgentUiOptions()}
         defaultAgentId={DEFAULT_AGENT_ID}
+        conversationContext={{
+          id: activeConversationId,
+          title: activeConversationTitle
+        }}
         getAccessToken={async () => {
           const sessionResult = await supabase.auth.getSession();
           return sessionResult.data.session?.access_token ?? null;
@@ -300,15 +321,43 @@ export default function DashboardPage() {
           return payload as AgentAnswer;
         }}
       />
-      <section style={{ marginTop: 16 }}>
-        <h2>Historie</h2>
+      <section
+        id={
+          activeConversationId
+            ? `conversation-history--conv--${activeConversationId}`
+            : "conversation-history--empty"
+        }
+        style={{ marginTop: 16 }}
+        aria-label={
+          activeConversationTitle
+            ? `Historie zpráv konverzace: ${activeConversationTitle}`
+            : "Historie zpráv"
+        }
+        data-conversation-id={activeConversationId ?? undefined}
+        data-conversation-title={activeConversationTitle}
+      >
+        <h2 id={activeConversationId ? `history-heading--${activeConversationId}` : "history-heading-empty"}>
+          Historie
+        </h2>
         {messages.length === 0 ? <p>Zatim bez zpráv v této konverzaci.</p> : null}
-        <ul style={{ paddingLeft: 18, listStyle: "none" }}>
+        <ul
+          style={{ paddingLeft: 18, listStyle: "none" }}
+          aria-labelledby={
+            activeConversationId ? `history-heading--${activeConversationId}` : "history-heading-empty"
+          }
+        >
           {messages.map((msg) => {
             const meta = msg.metadata as { runId?: string };
             const traceRunId = typeof meta?.runId === "string" ? meta.runId : undefined;
             return (
-              <li key={msg.id} style={{ marginBottom: 12 }}>
+              <li
+                key={msg.id}
+                id={`chat-message--conv--${activeConversationId ?? "none"}--msg--${msg.id}`}
+                style={{ marginBottom: 12 }}
+                data-message-id={msg.id}
+                data-conversation-id={activeConversationId ?? undefined}
+                data-role={msg.role}
+              >
                 <div>
                   <strong>{msg.role}:</strong> {msg.content}
                 </div>

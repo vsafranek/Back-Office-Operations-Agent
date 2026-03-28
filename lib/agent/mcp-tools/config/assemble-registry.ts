@@ -3,8 +3,12 @@ import { createListMcpCapabilitiesTool } from "@/lib/agent/mcp-tools/list-capabi
 import { runSqlPresetTool } from "@/lib/agent/mcp-tools/config/tools/run-sql-preset.tool";
 import { generateReportArtifactsTool } from "@/lib/agent/mcp-tools/config/tools/generate-report-artifacts.tool";
 import { runPresentationAgentTool } from "@/lib/agent/mcp-tools/config/tools/run-presentation-agent.tool";
+import { browseCalendarAvailabilityTool } from "@/lib/agent/mcp-tools/config/tools/browse-calendar-availability.tool";
 import { suggestViewingSlotsTool } from "@/lib/agent/mcp-tools/config/tools/suggest-viewing-slots.tool";
 import { createEmailDraftTool } from "@/lib/agent/mcp-tools/config/tools/create-email-draft.tool";
+import { getGmailMessageTool } from "@/lib/agent/mcp-tools/config/tools/get-gmail-message.tool";
+import { listGmailMessagesTool } from "@/lib/agent/mcp-tools/config/tools/list-gmail-messages.tool";
+import { sendGmailOutboundTool } from "@/lib/agent/mcp-tools/config/tools/send-gmail-outbound.tool";
 import { enqueueWorkflowTaskTool } from "@/lib/agent/mcp-tools/config/tools/enqueue-workflow-task.tool";
 import { fetchMarketListingsTool } from "@/lib/agent/mcp-tools/config/tools/fetch-market-listings.tool";
 import { upsertMarketListingsTool } from "@/lib/agent/mcp-tools/config/tools/upsert-market-listings.tool";
@@ -16,8 +20,12 @@ export const MCP_TOOL_CONFIG_ENTRIES = [
   runSqlPresetTool,
   generateReportArtifactsTool,
   runPresentationAgentTool,
+  browseCalendarAvailabilityTool,
   suggestViewingSlotsTool,
   createEmailDraftTool,
+  listGmailMessagesTool,
+  getGmailMessageTool,
+  sendGmailOutboundTool,
   enqueueWorkflowTaskTool,
   fetchMarketListingsTool,
   upsertMarketListingsTool,

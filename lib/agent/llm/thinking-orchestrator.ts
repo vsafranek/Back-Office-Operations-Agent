@@ -23,7 +23,7 @@ function intentRulesBlock(): string {
   return (
     "intent:\n" +
     "- analytics: interni data, KPI, SQL — tabulka, souhrn, graf nad daty v aplikaci (slovo 'graf' u klientu/leadu = analytics).\n" +
-    "- calendar_email: e-mail, prohlidka, kalendář, draft do Gmailu.\n" +
+    "- calendar_email: e-mail, prohlidka, kalendář, draft do Gmailu — dalsi krok je specialista na maily; v uvaze strucne vystihni JADRO zpravy (co ma klient dostat), formu nech na nem.\n" +
     "- presentation: hlavni vystup je PPTX / slidovy deck (PowerPoint), ne pouhy graf z databaze.\n" +
     "- weekly_report: komplexni manazersky balicek — CSV, Markdown a prezentace.\n" +
     "- market_listings: Sreality/Bezrealitky, fetchMarketListings, nabidky z portálu — neni SQL ani obecny webovy search.\n" +

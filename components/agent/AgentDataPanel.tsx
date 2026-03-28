@@ -6,6 +6,7 @@ import type {
   AgentDataPanelDownloads
 } from "@/lib/agent/types";
 import { MarketListingsDataPanelSection } from "@/components/agent/MarketListingsDataPanelSection";
+import { ViewingEmailDraftPanel } from "@/components/agent/ViewingEmailDraftPanel";
 
 function formatCell(value: unknown): string {
   if (value == null) return "—";
@@ -177,6 +178,21 @@ export function AgentDataPanel({
         fetchParams={panel.fetchParams}
         initialListings={panel.listings}
         getAccessToken={getAccessToken}
+      />
+    );
+  }
+
+  if (panel.kind === "viewing_email_draft") {
+    return (
+      <ViewingEmailDraftPanel
+        slots={panel.slots}
+        calendarPreview={panel.calendarPreview}
+        senderDisplayName={panel.senderDisplayName}
+        draft={panel.draft}
+        relatedLeadIds={panel.relatedLeadIds}
+        getAccessToken={getAccessToken}
+        conversationId={panel.conversationId}
+        agentRunId={panel.agentRunId}
       />
     );
   }

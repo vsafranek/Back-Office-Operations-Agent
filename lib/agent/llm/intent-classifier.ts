@@ -36,7 +36,7 @@ export async function classifyAgentIntent(params: {
             "Zarad pozadavek uzivatele do jedne kategorie. Vrat POUZE JSON bez markdownu nebo vysvetlovani, tvar:\n" +
             '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings","slideCount":<cislo 2-15 nebo vynechej>}\n\n' +
             "analytics: interni data, SQL, KPI, klienti, leady, dashboard — tabulka, CSV, graf nebo Markdown z dat (i kdyz uzivatel chce 'graf', jde o analytics, ne PPTX).\n" +
-            "calendar_email: e-mail, prohlidka, termin schuzky, kalendář, Gmail draft.\n" +
+            "calendar_email: e-mail, prohlidka, termin schuzky, kalendář, Gmail draft — text pak zušlechťuje specialista na oficiální maily.\n" +
             "presentation: hlavne PPTX/slidova prezentace / slidovy deck (PowerPoint); NE jen graf nad daty v aplikaci — to je analytics.\n" +
             "weekly_report: komplexni report pro vedeni — dataset CSV, souhrn MD a prezentace dohromady.\n" +
             "market_listings: nabidky z realitnich portálu (Sreality, Bezrealitky), stazeni inzeratu pres interni nastroj fetchMarketListings, monitoring trhu. I kdyz uzivatel napise 'internet'. NENI to obecne DDG/Google ani SQL nad CRM.\n" +

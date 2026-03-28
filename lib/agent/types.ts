@@ -67,6 +67,26 @@ export type AgentDataPanel =
        * Může zůstat prázdné v odpovědi agenta.
        */
       listings: AgentMarketListingCard[];
+    }
+  | {
+      kind: "viewing_email_draft";
+      /** Volné sloty z Google Calendar (free/busy). */
+      slots: { start: string; end: string }[];
+      /** Obsazené úseky + okno pro náhled v UI (volitelné u starších uložených odpovědí). */
+      calendarPreview?: {
+        busy: { start: string; end: string }[];
+        rangeStart: string;
+        rangeEnd: string;
+      };
+      /** Jméno odesílatele (podpis v e-mailu). */
+      senderDisplayName?: string;
+      /** Předvyplněný draft; uživatel upraví a schválí v panelu → POST /api/google/email-draft. */
+      draft: { to: string; subject: string; body: string };
+      /** Volitelné UUID leadů k propojení s auditním záznamem odchozího e-mailu. */
+      relatedLeadIds?: string[];
+      /** Korelace pro audit (BOA-004 Volitelné u starších odpovědí bez těchto polí.) */
+      conversationId?: string | null;
+      agentRunId?: string | null;
     };
 
 export type AgentAnswer = {

@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { useState } from "react";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
 import { AgentTraceTree } from "@/components/agent/AgentTraceTree";
@@ -21,9 +22,33 @@ export type ConfigurableAgentPanelProps = {
     options?: AgentPanelRunOptions
   ) => Promise<AgentAnswer>;
   getAccessToken: () => Promise<string | null>;
+  /** Pro DOM id / přístupnost: práce v kontextu konkrétní konverzace. */
+  conversationContext?: { id: string | null; title?: string };
 };
 
-export function ConfigurableAgentPanel({ agents, defaultAgentId, onRun, getAccessToken }: ConfigurableAgentPanelProps) {
+const visuallyHidden: CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: "hidden",
+  clip: "rect(0,0,0,0)",
+  whiteSpace: "nowrap",
+  border: 0
+};
+
+function convSlug(id: string | null | undefined): string {
+  return id ?? "no-conv";
+}
+
+export function ConfigurableAgentPanel({
+  agents,
+  defaultAgentId,
+  onRun,
+  getAccessToken,
+  conversationContext
+}: ConfigurableAgentPanelProps) {
   const [agentId, setAgentId] = useState(defaultAgentId);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
@@ -63,9 +88,27 @@ export function ConfigurableAgentPanel({ agents, defaultAgentId, onRun, getAcces
     }
   }
 
+  const cId = convSlug(conversationContext?.id);
+  const convLabel =
+    conversationContext?.title?.trim() ||
+    (conversationContext?.id ? `Konverzace ${conversationContext.id.slice(0, 8)}…` : "Bez vybrané konverzace");
+
   return (
-    <div style={{ display: "grid", gap: 16 }}>
-      <form onSubmit={(e) => void handleSubmit(e)} style={{ display: "grid", gap: 12 }}>
+    <div
+      id={`agent-workspace--conv--${cId}`}
+      style={{ display: "grid", gap: 16 }}
+      data-conversation-id={conversationContext?.id ?? undefined}
+      data-conversation-label={convLabel}
+    >
+      <span id={`agent-workspace-context--conv--${cId}`} style={visuallyHidden}>
+        Chatbot a výsledek — {convLabel}
+      </span>
+      <form
+        id={`chat-composer--conv--${cId}`}
+        onSubmit={(e) => void handleSubmit(e)}
+        style={{ display: "grid", gap: 12 }}
+        aria-describedby={`agent-workspace-context--conv--${cId}`}
+      >
         <fieldset style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: 12 }}>
           <legend style={{ fontWeight: 600 }}>Profil agenta</legend>
           <div style={{ display: "grid", gap: 10 }}>
@@ -116,6 +159,8 @@ export function ConfigurableAgentPanel({ agents, defaultAgentId, onRun, getAcces
 
       {loading || phaseLog.length > 0 ? (
         <section
+          id={`agent-progress--conv--${cId}`}
+          data-conversation-id={conversationContext?.id ?? undefined}
           style={{
             border: "1px dashed #94a3b8",
             borderRadius: 8,
@@ -141,6 +186,8 @@ export function ConfigurableAgentPanel({ agents, defaultAgentId, onRun, getAcces
 
       {agentId === "thinking-orchestrator" && (loading || orchestratorStreamText.length > 0) ? (
         <section
+          id={`agent-orchestrator-stream--conv--${cId}`}
+          data-conversation-id={conversationContext?.id ?? undefined}
           style={{
             border: "1px solid #bfdbfe",
             borderRadius: 8,
@@ -160,30 +207,59 @@ export function ConfigurableAgentPanel({ agents, defaultAgentId, onRun, getAcces
       ) : null}
 
       {result ? (
-        <section style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
-          <h2 style={{ margin: "0 0 12px" }}>Výsledek</h2>
+        <section
+          id={
+            result.runId
+              ? `agent-answer--conv--${cId}--run--${result.runId}`
+              : `agent-answer--conv--${cId}--pending`
+          }
+          style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}
+          data-conversation-id={conversationContext?.id ?? undefined}
+          data-run-id={result.runId ?? undefined}
+          aria-labelledby={`agent-answer-heading--conv--${cId}`}
+        >
+          <h2 id={`agent-answer-heading--conv--${cId}`} style={{ margin: "0 0 12px" }}>
+            Výsledek ({convLabel}
+            {result.runId ? ` · běh ${result.runId.slice(0, 8)}…` : ""})
+          </h2>
           <div
             style={{
               display: "grid",
               gridTemplateColumns:
                 result.dataPanel?.kind === "market_listings"
                   ? "1fr minmax(320px, 520px)"
-                  : result.dataPanel
-                    ? "1fr minmax(300px, 420px)"
-                    : "1fr",
+                  : result.dataPanel?.kind === "viewing_email_draft"
+                    ? "1fr minmax(340px, 560px)"
+                    : result.dataPanel
+                      ? "1fr minmax(300px, 420px)"
+                      : "1fr",
               gap: 20,
               alignItems: "start"
             }}
           >
-            <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
+            <div
+              id={
+                result.runId
+                  ? `agent-answer-main--conv--${cId}--run--${result.runId}`
+                  : `agent-answer-main--conv--${cId}`
+              }
+              style={{ display: "grid", gap: 12, minWidth: 0 }}
+              data-conversation-id={conversationContext?.id ?? undefined}
+            >
               {result.orchestration ? (
                 <div
+                  id={
+                    result.runId
+                      ? `agent-orchestration-meta--conv--${cId}--run--${result.runId}`
+                      : undefined
+                  }
                   style={{
                     background: "#f1f5f9",
                     borderRadius: 8,
                     padding: 12,
                     fontSize: 14
                   }}
+                  data-conversation-id={conversationContext?.id ?? undefined}
                 >
                   <div style={{ fontWeight: 600, marginBottom: 6 }}>
                     Orchestrace: {result.orchestration.agentId} ({result.orchestration.mode})
@@ -199,7 +275,14 @@ export function ConfigurableAgentPanel({ agents, defaultAgentId, onRun, getAcces
                 </div>
               ) : null}
 
-              <div>
+              <div
+                id={
+                  result.runId
+                    ? `agent-answer-text--conv--${cId}--run--${result.runId}`
+                    : `agent-answer-text--conv--${cId}`
+                }
+                data-conversation-id={conversationContext?.id ?? undefined}
+              >
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>Odpověď</div>
                 <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{result.answer_text}</p>
               </div>
@@ -220,11 +303,25 @@ export function ConfigurableAgentPanel({ agents, defaultAgentId, onRun, getAcces
               ) : null}
 
               {result.generated_artifacts.length > 0 ? (
-                <div>
+                <div
+                  id={
+                    result.runId
+                      ? `agent-artifacts--conv--${cId}--run--${result.runId}`
+                      : `agent-artifacts--conv--${cId}`
+                  }
+                  data-conversation-id={conversationContext?.id ?? undefined}
+                >
                   <div style={{ fontWeight: 600, marginBottom: 4 }}>Artefakty</div>
                   <ul style={{ margin: 0, paddingLeft: 20 }}>
                     {result.generated_artifacts.map((art, i) => (
-                      <li key={i}>
+                <li
+                  key={i}
+                  id={
+                    result.runId
+                      ? `agent-artifact--conv--${cId}--run--${result.runId}--${i}`
+                      : `agent-artifact--conv--${cId}--${i}`
+                  }
+                >
                         {art.label}
                         {art.url ? (
                           <>
@@ -257,11 +354,21 @@ export function ConfigurableAgentPanel({ agents, defaultAgentId, onRun, getAcces
             </div>
 
             {result.dataPanel ? (
-              <AgentDataPanel
-                panel={result.dataPanel}
-                getAccessToken={getAccessToken}
-                dataPanelDownloads={result.dataPanelDownloads}
-              />
+              <div
+                id={
+                  result.runId
+                    ? `agent-data-panel--conv--${cId}--run--${result.runId}`
+                    : `agent-data-panel--conv--${cId}`
+                }
+                data-conversation-id={conversationContext?.id ?? undefined}
+                data-panel-kind={result.dataPanel.kind}
+              >
+                <AgentDataPanel
+                  panel={result.dataPanel}
+                  getAccessToken={getAccessToken}
+                  dataPanelDownloads={result.dataPanelDownloads}
+                />
+              </div>
             ) : null}
           </div>
         </section>

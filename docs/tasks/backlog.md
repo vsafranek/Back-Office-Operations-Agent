@@ -1,6 +1,6 @@
 # Back Office Agent Backlog
 
-Last updated: 2026-03-27 (úkoly: Excel export + migrace 011)
+Last updated: 2026-03-27 (BOA-004 dokončeno: draft + odeslání + audit)
 
 ## How to use
 - `status`: `todo` | `in_progress` | `blocked` | `done`
@@ -14,7 +14,7 @@ Last updated: 2026-03-27 (úkoly: Excel export + migrace 011)
 | BOA-001 | Weekly report: generate 3-slide presentation artifact | done | P0 | PPTX+PDF do Supabase Storage, verejne URL v artefaktech. Vychozi pocet slidu 3 (`WEEKLY_REPORT_DEFAULT_SLIDE_COUNT`). |
 | BOA-002 | Generate chart images (PNG) for analytics outputs | done | P0 | Q1 kanálový graf: SVG (`chart-png-svg.ts`) → PNG (`sharp`) → `reports/{runId}/q1-source-channel.png`, veřejná URL v artefaktu typu `chart`; analytický subagent. |
 | BOA-003 | Replace market monitor mock feed with real property sources | in_progress | P0 | Sreality: `sreality-listings.ts`. Bezrealitky: `bezrealitky-listings.ts` — výchozí `https://api.bezrealitky.cz/graphql/`, volitelně `BEZREALITKY_GRAPHQL_QUERY` z DevTools. Dedup/relevance Holešovice zůstává. |
-| BOA-004 | Add explicit approval workflow for outbound email sending | todo | P1 | Keep draft-first and add approve/send state transition. |
+| BOA-004 | Add explicit approval workflow for outbound email sending | done | P1 | Panel: draft v Gmailu nebo „Odeslat rovnou“; `POST /api/google/email-send` s `strategy` `from_draft` \| `direct`. Jeden MCP nástroj `sendGmailOutbound` (místo dvou). Vazba leadů: migrace `013_outbound_email_event_leads.sql`, pole `leadIds` v API + `relatedLeadIds` v `dataPanel`. |
 | BOA-005 | Create data-quality task queue for missing property fields | todo | P1 | Auto-create tasks from missing reconstruction analysis with owner/priority. |
 | BOA-006 | Add role model (admin, broker, management) and enforce RLS/UI permissions | todo | P1 | Restrict reports and settings by role. |
 | BOA-007 | Extend audit trail for all agent/tool/workflow actions | in_progress | P1 | Basic run logs exist; complete actor/action/target/outcome coverage and export view. |
