@@ -30,4 +30,21 @@ describe("getAnalyticsTableDisplayKeys", () => {
     expect(keys).toContain("full_name");
     expect(keys).toContain("email");
   });
+
+  it("deal_sales_detail prefers transaction and property columns", () => {
+    const rows = [
+      {
+        deal_id: "d1",
+        sold_at: "2026-01-01",
+        title: "Byt 1",
+        city: "Praha",
+        full_name: "Jan",
+        sold_price: 5_000_000,
+        buyer_snapshot: { note: "x" }
+      }
+    ];
+    const keys = getAnalyticsTableDisplayKeys("deal_sales_detail", rows);
+    expect(keys).not.toContain("buyer_snapshot");
+    expect(keys.indexOf("sold_at")).toBeLessThan(keys.indexOf("full_name"));
+  });
 });

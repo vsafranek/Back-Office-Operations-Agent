@@ -132,7 +132,7 @@ export async function runAnalyticsSubAgent(params: {
 
   if (showLeadsSalesChart) {
     chartSummary +=
-      " U leadů vs prodeje za 6 měsíců je v grafu dvojserie (leady / prodané) — v answer_text popiš trend z čísel a kladně zmíni graf v panelu.";
+      " U leadů vs prodané byty za 6 měsíců je v grafu dvojserie (leady / prodané byty) — v answer_text popiš trend z čísel a kladně zmíni graf v panelu.";
   }
 
   const dataScopeNote =
@@ -142,8 +142,10 @@ export async function runAnalyticsSubAgent(params: {
           "Pokud uživatel mínil jiný kalendářní rok nebo širší období, upřímně uveď, že aktuální výpis to neobsahuje, a navrhni upřesnění dotazu."
         ].join(" ")
       : data.preset === "leads_vs_sales_6m"
-        ? "Časové okno: view posledních ~6 měsíců leady vs prodané (interní view) — není libovolné období od–do zadané uživatelem."
-        : "";
+        ? "Časové okno: view posledních ~6 měsíců — leady (všechny) vs. prodané byty (obchody bez cancelled, nemovitost typu byt nebo bez vazby na nemovitost); není libovolné období od–do zadané uživatelem."
+        : data.preset === "deal_sales_detail"
+          ? "Dataset: jednotlivé uzavřené obchody (kdo koupil, jaká nemovitost, datum, cena) z interního pohledu vw_deal_sales_detail."
+          : "";
 
   const sampleRows = data.rows.slice(0, 50);
   const pngList =
@@ -198,14 +200,23 @@ export async function runAnalyticsSubAgent(params: {
             charts: derivedCharts,
             ...(hideChartUi ? { hideChart: true as const } : {})
           }
-        : {
-            kind: "clients_filtered" as const,
-            source: data.source,
-            title: tableTitle,
-            rows: data.rows,
-            ...(derivedCharts.length > 0 ? { charts: derivedCharts } : {}),
-            ...(hideChartUi ? { hideChart: true as const } : {})
-          };
+        : data.preset === "deal_sales_detail"
+          ? {
+              kind: "deal_sales_detail" as const,
+              source: data.source,
+              title: tableTitle,
+              rows: data.rows,
+              ...(derivedCharts.length > 0 ? { charts: derivedCharts } : {}),
+              ...(hideChartUi ? { hideChart: true as const } : {})
+            }
+          : {
+              kind: "clients_filtered" as const,
+              source: data.source,
+              title: tableTitle,
+              rows: data.rows,
+              ...(derivedCharts.length > 0 ? { charts: derivedCharts } : {}),
+              ...(hideChartUi ? { hideChart: true as const } : {})
+            };
 
   return {
     answer_text: reply.answer_text,

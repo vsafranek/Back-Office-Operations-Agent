@@ -21,7 +21,12 @@ export type AgentPanelPersistPayloadV1 = {
 };
 
 function rowCountForPanel(panel: AgentDataPanel): number {
-  if (panel.kind === "clients_q1" || panel.kind === "leads_sales_6m" || panel.kind === "clients_filtered") {
+  if (
+    panel.kind === "clients_q1" ||
+    panel.kind === "leads_sales_6m" ||
+    panel.kind === "clients_filtered" ||
+    panel.kind === "deal_sales_detail"
+  ) {
     return panel.rows.length;
   }
   if (panel.kind === "market_listings") return panel.listings.length;
@@ -29,7 +34,12 @@ function rowCountForPanel(panel: AgentDataPanel): number {
 }
 
 function truncateRowsInPanel(panel: AgentDataPanel, maxRows: number, fullRowCount: number): AgentDataPanel {
-  if (panel.kind === "clients_q1" || panel.kind === "leads_sales_6m" || panel.kind === "clients_filtered") {
+  if (
+    panel.kind === "clients_q1" ||
+    panel.kind === "leads_sales_6m" ||
+    panel.kind === "clients_filtered" ||
+    panel.kind === "deal_sales_detail"
+  ) {
     if (panel.rows.length <= maxRows) return panel;
     const note = `Zobrazeno prvních ${maxRows} z ${fullRowCount} řádků; úplná data jsou v Excel / CSV.`;
     return { ...panel, rows: panel.rows.slice(0, maxRows), rowsTruncationNote: note };

@@ -20,7 +20,19 @@ export const COLUMN_LABEL_CS: Record<string, string> = {
   city: "Město",
   district: "Čtvrť",
   title: "Název",
-  internal_ref: "Interní reference"
+  internal_ref: "Interní reference",
+  deal_id: "Obchod (ID)",
+  sold_at: "Datum prodeje",
+  contract_signed_at: "Podpis smlouvy",
+  sold_price: "Prodejní cena",
+  deal_status: "Stav obchodu",
+  buyer_legal_name: "Kupec (právní jméno)",
+  internal_deal_ref: "Interní číslo obchodu",
+  listing_ref: "Reference inzerátu",
+  deal_source: "Zdroj obchodu",
+  property_kind: "Druh nemovitosti",
+  client_id: "Klient (ID)",
+  property_id: "Nemovitost (ID)"
 };
 
 /** Krátké popisky jednotek / metrik podle sloupce a kontextu. */

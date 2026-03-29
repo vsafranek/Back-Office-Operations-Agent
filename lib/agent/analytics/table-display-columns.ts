@@ -2,6 +2,29 @@
  * Výběr sloupců jen pro náhled v UI — exporty (CSV/Xlsx) vždy berou kompletní řádky z dat.
  */
 
+/** Sloupce detailu obchodů (vw_deal_sales_detail) — pořadí náhledu v UI. */
+const DEAL_SALES_COLUMN_ORDER = [
+  "sold_at",
+  "contract_signed_at",
+  "title",
+  "city",
+  "district",
+  "property_kind",
+  "full_name",
+  "buyer_legal_name",
+  "email",
+  "phone",
+  "sold_price",
+  "deal_status",
+  "internal_deal_ref",
+  "listing_ref",
+  "deal_source",
+  "deal_id",
+  "client_id",
+  "property_id",
+  "internal_ref"
+] as const;
+
 const CLIENT_TABLE_COLUMN_ORDER = [
   "full_name",
   "email",
@@ -22,6 +45,15 @@ function orderedKeysFromRows(rows: Record<string, unknown>[]): string[] {
   return [
     ...CLIENT_TABLE_COLUMN_ORDER.filter((k) => keysFromRow.includes(k)),
     ...keysFromRow.filter((k) => !CLIENT_TABLE_COLUMN_ORDER.includes(k as (typeof CLIENT_TABLE_COLUMN_ORDER)[number]))
+  ];
+}
+
+function orderedKeysFromDealRows(rows: Record<string, unknown>[]): string[] {
+  const keysFromRow =
+    rows.length > 0 ? Object.keys(rows[0]!) : [...DEAL_SALES_COLUMN_ORDER];
+  return [
+    ...DEAL_SALES_COLUMN_ORDER.filter((k) => keysFromRow.includes(k)),
+    ...keysFromRow.filter((k) => !DEAL_SALES_COLUMN_ORDER.includes(k as (typeof DEAL_SALES_COLUMN_ORDER)[number]))
   ];
 }
 
@@ -55,7 +87,11 @@ function shouldIncludeVerboseColumn(key: string, rows: Record<string, unknown>[]
   return maxLen <= 120;
 }
 
-export type AnalyticsTablePanelKind = "clients_q1" | "leads_sales_6m" | "clients_filtered";
+export type AnalyticsTablePanelKind =
+  | "clients_q1"
+  | "leads_sales_6m"
+  | "clients_filtered"
+  | "deal_sales_detail";
 
 export function getAnalyticsTableDisplayKeys(
   panelKind: AnalyticsTablePanelKind,
@@ -67,6 +103,11 @@ export function getAnalyticsTableDisplayKeys(
     const prefer = ["month", "leads_count", "sold_count"] as const;
     const keys = orderedKeysFromRows(rows);
     return prefer.filter((k) => keys.includes(k) && columnHasAnyValue(rows, k));
+  }
+
+  if (panelKind === "deal_sales_detail") {
+    const keys = orderedKeysFromDealRows(rows).filter((k) => k !== "buyer_snapshot");
+    return keys.filter((k) => columnHasAnyValue(rows, k));
   }
 
   const keys = orderedKeysFromRows(rows);

@@ -37,6 +37,7 @@ import {
 } from "@/components/agent/companion/CompanionToolPanels";
 import type { AgentUiOption } from "@/lib/agent/config/types";
 import type { AgentAnswer } from "@/lib/agent/types";
+import type { VizAnswerRunOption } from "@/components/agent/companion/CompanionToolPanels";
 
 export type CompanionSectionId =
   | "context"
@@ -61,6 +62,9 @@ export type ChatCompanionSidebarProps = {
   focusRunId: string | null;
   getAccessToken: () => Promise<string | null>;
   lastAgentAnswer: AgentAnswer | null;
+  /** Odpovědi s datovým panelem (nejnovější první) — navigace šipkami v sekci Tabulka/graf. */
+  vizAnswerRuns?: VizAnswerRunOption[];
+  onSelectVizAnswerRun?: (runId: string) => void;
   onNavigateConversation: (conversationId: string, runId?: string | null) => void;
   /** Šířka rozbaleného panelu (px). */
   expandedWidthPx?: number;
@@ -81,6 +85,8 @@ export function ChatCompanionSidebar({
   focusRunId,
   getAccessToken,
   lastAgentAnswer,
+  vizAnswerRuns = [],
+  onSelectVizAnswerRun,
   onNavigateConversation,
   expandedWidthPx = 680,
   collapsedWidthPx = 52,
@@ -168,6 +174,8 @@ export function ChatCompanionSidebar({
             conversationId={conversationId}
             getAccessToken={getAccessToken}
             onNavigateConversation={onNavigateConversation}
+            vizAnswerRuns={vizAnswerRuns}
+            onSelectVizAnswerRun={onSelectVizAnswerRun}
           />
         );
       case "market":
@@ -220,7 +228,7 @@ export function ChatCompanionSidebar({
               <Text span fw={600}>
                 Odkazy do chatu
               </Text>{" "}
-              — u odchozích e-mailů a u tabulky/grafu použijte „Otevřít konverzaci“ / „Přejít na odpověď v chatu“.
+              — u tabulky/grafu použijte šipky nahoře (odpovědi / části výsledku) a „Přejít na odpověď v chatu“.
             </Text>
           </Stack>
         );

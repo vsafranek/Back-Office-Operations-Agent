@@ -50,13 +50,27 @@ async function executePlan(plan: DataPullPlan, limit: number) {
       return { rows: data ?? [], source: sourceLabel };
     }
     case "leads_vs_sales_6m": {
-      let { data, error } = await supabase.from("vw_leads_vs_sales_6m").select("*").limit(fetchCap);
+      const { data, error } = await supabase.from("vw_leads_vs_sales_6m").select("*").limit(limit);
       if (error) throw new Error(`vw_leads_vs_sales_6m query failed: ${error.message}`);
+      let rows = data ?? [];
+      if (narrowing) {
+        logger.warn("sql_leads_vs_sales_6m_narrowing_ignored", { term: narrowing });
+      }
+      rows = rows.slice(0, limit);
+      return { rows, source: "vw_leads_vs_sales_6m" };
+    }
+    case "deal_sales_detail": {
+      let { data, error } = await supabase
+        .from("vw_deal_sales_detail")
+        .select("*")
+        .order("sold_at", { ascending: false, nullsFirst: false })
+        .limit(fetchCap);
+      if (error) throw new Error(`vw_deal_sales_detail query failed: ${error.message}`);
       let rows = data ?? [];
       if (narrowing) rows = narrowRowsByText(rows, narrowing).slice(0, limit);
       else rows = rows.slice(0, limit);
       const source =
-        narrowing != null ? `vw_leads_vs_sales_6m · text «${narrowing}»` : "vw_leads_vs_sales_6m";
+        narrowing != null ? `vw_deal_sales_detail · text «${narrowing}»` : "vw_deal_sales_detail";
       return { rows, source };
     }
     case "missing_reconstruction": {

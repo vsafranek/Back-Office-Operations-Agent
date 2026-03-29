@@ -93,6 +93,24 @@ export default function DashboardPage() {
   const [panelResizeActive, setPanelResizeActive] = useState(false);
   const layoutRowRef = useRef<HTMLDivElement>(null);
 
+  /** Asistentovy odpovědi s uloženým panelem (nejnovější první) — pro přepínání v nástrojích Tabulka/graf. */
+  const vizAnswerRuns = useMemo(() => {
+    const assistants = messages.filter((m) => m.role === "assistant");
+    const ordered = [...assistants].reverse();
+    const out: { runId: string; preview: string }[] = [];
+    for (const m of ordered) {
+      const meta = m.metadata as Record<string, unknown>;
+      const runId = meta.runId;
+      if (typeof runId !== "string" || !runId.trim()) continue;
+      if (!agentAnswerSliceFromPersistPayload(meta[AGENT_PANEL_PAYLOAD_KEY])) continue;
+      const full = m.content.replace(/\s+/g, " ").trim();
+      const short = full.slice(0, 56);
+      const preview = full.length > 56 ? `${short}…` : short || "Odpověď asistenta";
+      out.push({ runId, preview });
+    }
+    return out;
+  }, [messages]);
+
   useEffect(() => {
     setConvWidthPx(clamp(readWidth(LS_CONV_W, 280), MIN_CONV_W, MAX_CONV_W));
     setCompanionWidthPx(clamp(readWidth(LS_COMP_W, DEFAULT_COMP_W), MIN_COMP_W, MAX_COMP_W));
@@ -727,6 +745,8 @@ export default function DashboardPage() {
             agentOptions={listAgentUiOptions()}
             focusRunId={companionRunId}
             lastAgentAnswer={lastAgentAnswer}
+            vizAnswerRuns={vizAnswerRuns}
+            onSelectVizAnswerRun={setCompanionRunId}
             onNavigateConversation={navigateToConversation}
             expandedWidthPx={companionWidthPx}
             collapsedWidthPx={COLLAPSED_COMP_W}

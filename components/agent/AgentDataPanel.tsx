@@ -626,7 +626,7 @@ export function AgentDataPanel({
         hideChart={panel.hideChart}
         rowsTruncationNote={panel.rowsTruncationNote}
         dataPanelDownloads={dataPanelDownloads}
-        title="Leady vs prodeje"
+        title="Leady vs prodané byty"
         analyticsTableKind="leads_sales_6m"
       />
     );
@@ -643,6 +643,21 @@ export function AgentDataPanel({
         dataPanelDownloads={dataPanelDownloads}
         title={panel.title}
         analyticsTableKind="clients_filtered"
+      />
+    );
+  }
+
+  if (panel.kind === "deal_sales_detail") {
+    return (
+      <AnalyticsDataPanelTabs
+        source={panel.source}
+        rows={panel.rows}
+        charts={panel.charts ?? []}
+        hideChart={panel.hideChart}
+        rowsTruncationNote={panel.rowsTruncationNote}
+        dataPanelDownloads={dataPanelDownloads}
+        title={panel.title}
+        analyticsTableKind="deal_sales_detail"
       />
     );
   }

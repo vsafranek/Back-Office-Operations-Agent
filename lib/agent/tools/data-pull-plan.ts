@@ -8,6 +8,7 @@ import { ClientFiltersSchema } from "@/lib/agent/tools/clients-table-query";
 export const DATASET_IDS = [
   "new_clients_q1",
   "leads_vs_sales_6m",
+  "deal_sales_detail",
   "clients",
   "missing_reconstruction"
 ] as const;
@@ -46,7 +47,10 @@ const ROW_TEXT_COLUMNS = [
   "email",
   "source_channel",
   "phone",
-  "property_type_interest"
+  "property_type_interest",
+  "buyer_legal_name",
+  "internal_deal_ref",
+  "listing_ref"
 ] as const;
 
 /** Sloupce řádků z `fn_missing_reconstruction_data` a obdobných výpisů nemovitostí. */
@@ -95,8 +99,10 @@ function rowMatchesTextNarrowing(row: Record<string, unknown>, t: string): boole
   for (const s of addressJsonSearchStrings(row.address)) {
     if (includesTerm(s)) return true;
   }
-  const pid = row.property_id;
-  if (pid != null && includesTerm(String(pid))) return true;
+  for (const idKey of ["property_id", "deal_id", "client_id"] as const) {
+    const v = row[idKey];
+    if (v != null && includesTerm(String(v))) return true;
+  }
   return false;
 }
 
@@ -180,6 +186,22 @@ export function fallbackPlanFromQuestion(question: string): DataPullPlan {
       row_text_narrowing: null,
       client_filters: null,
       filter_label: null,
+      suggest_source_channel_chart: false,
+      suggest_derived_charts: false,
+      derived_chart_kind_hint: null
+    };
+  }
+
+  if (
+    (n.includes("prodan") || n.includes("prodej") || n.includes("obchod")) &&
+    (n.includes("koupil") || n.includes("kupec") || n.includes("kdo") || n.includes("seznam") || n.includes("detail")) &&
+    !n.includes("mesic")
+  ) {
+    return {
+      dataset: "deal_sales_detail",
+      row_text_narrowing: null,
+      client_filters: null,
+      filter_label: "Prodané nemovitosti — detail obchodů (kdo, kdy, co)",
       suggest_source_channel_chart: false,
       suggest_derived_charts: false,
       derived_chart_kind_hint: null
@@ -330,11 +352,12 @@ export async function inferDataPullPlan(params: {
     "Z uzivatele otazky vyber JEDEN zpusob dotazu nad daty v aplikaci. Vrat POUZE jeden JSON objekt (bez markdownu).",
     "Povinne klice: dataset, row_text_narrowing (string|null), client_filters (pole|null), filter_label (string|null), suggest_source_channel_chart (boolean), suggest_derived_charts (boolean), derived_chart_kind_hint (\"bar\"|\"line\"|\"pie\"|null).",
     "",
-    'dataset: presne jedna z retezcu: "new_clients_q1" | "leads_vs_sales_6m" | "clients" | "missing_reconstruction".',
+    'dataset: presne jedna z retezcu: "new_clients_q1" | "leads_vs_sales_6m" | "deal_sales_detail" | "clients" | "missing_reconstruction".',
     "",
     "Dostupne datasety:",
     "- new_clients_q1: rychla kohorta „novi v Q1 bezného roku“ pres view (Europe/Prague). Pouze kdyz presne sedi toto okno; jinak vzdy dataset clients + filtry na created_at.",
-    "- leads_vs_sales_6m: leady vs prodane byty za poslednich ~6 mesicu (view).",
+    "- leads_vs_sales_6m: mesicni souhrn — leady (vsechny) vs prodane byty za poslednich ~6 mesicu (agregacni view; prodane = deals s nemovitosti kind byt, bez cancelled).",
+    "- deal_sales_detail: seznam jednotlivych uzavrenych obchodu — nemovitost, kupec (clients), sold_at, cena, volitelne pravni jmeno kupce; view vw_deal_sales_detail. Pouzij pri „kdo koupil“, „seznam prodanych“, detailu prodeju bez casove osy po mesicich.",
     "- clients: primarni zdroj pro klienty — vsechny sloupce tabulky; kombinuj client_filters (viz nize) a/nebo row_text_narrowing. Pro libovolne obdobi / rok / kvartal: ts_gte a ts_lte na created_at (ISO 8601, napr. 2025-01-01T00:00:00.000Z). Tim obejdes nutnost mit view pro kazdy use case.",
     "- missing_reconstruction: nemovitosti bez rekonstrukcnich udaju / stavebnich uprav ve smyslu interniho checku.",
     "",
@@ -362,7 +385,7 @@ export async function inferDataPullPlan(params: {
     "",
     "suggest_derived_charts:",
     "- true jen pro dataset clients, kdy uzivatel chce graf / rozklad / podil / srovnani podle mesta, kanalu, typu nemovitosti, casove osy (mesice) apod. nad vytazenou tabulkou — backend z stejnych radku agreguje, bez dalsiho SQL.",
-    "- false pro new_clients_q1, leads_vs_sales_6m, missing_reconstruction i kdyby v JSON omylem prislo true (ignoruje se mimo clients).",
+    "- false pro new_clients_q1, leads_vs_sales_6m, deal_sales_detail, missing_reconstruction i kdyby v JSON omylem prislo true (ignoruje se mimo clients).",
     "",
     "derived_chart_kind_hint: jen pro clients a kdyz suggest_derived_charts true — volitelne \"bar\" | \"line\" | \"pie\" podle slov jako kolac/podil (pie), casova osa (line), jinak null."
   ].join("\n");

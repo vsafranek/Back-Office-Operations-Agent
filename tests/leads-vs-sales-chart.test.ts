@@ -11,6 +11,7 @@ describe("buildLeadsVsSalesChart", () => {
     expect(chart.labels).toHaveLength(3);
     expect(chart.leads).toEqual([2, 3, 6]);
     expect(chart.sold).toEqual([0, 1, 2]);
+    expect(chart.title).toContain("byt");
     expect(chart.title).toContain("6 měsíců");
   });
 

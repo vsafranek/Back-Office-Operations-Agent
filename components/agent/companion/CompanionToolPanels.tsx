@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ActionIcon,
   Anchor,
   Button,
   Code,
@@ -15,16 +16,20 @@ import {
   Text,
   Textarea,
   TextInput,
+  Tooltip,
   UnstyledButton
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import Link from "next/link";
+import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
 import { MarketListingsDataPanelSection } from "@/components/agent/MarketListingsDataPanelSection";
 import { DATASET_IDS } from "@/lib/agent/tools/data-pull-plan";
 import type { FetchMarketListingsInput } from "@/lib/agent/tools/market-listings-tool";
 import type { AgentAnswer } from "@/lib/agent/types";
+
+export type VizAnswerRunOption = { runId: string; preview: string };
 
 type GmailRow = {
   id: string;
@@ -520,8 +525,17 @@ export function VizPanel(props: {
   conversationId: string | null;
   getAccessToken: () => Promise<string | null>;
   onNavigateConversation: (conversationId: string, runId?: string | null) => void;
+  vizAnswerRuns?: VizAnswerRunOption[];
+  onSelectVizAnswerRun?: (runId: string) => void;
 }) {
-  const { lastAgentAnswer, conversationId, getAccessToken, onNavigateConversation } = props;
+  const {
+    lastAgentAnswer,
+    conversationId,
+    getAccessToken,
+    onNavigateConversation,
+    vizAnswerRuns = [],
+    onSelectVizAnswerRun
+  } = props;
 
   const bundles =
     lastAgentAnswer?.dataPanelBundles && lastAgentAnswer.dataPanelBundles.length > 0
@@ -535,6 +549,32 @@ export function VizPanel(props: {
           ]
         : [];
 
+  const [bundleIndex, setBundleIndex] = useState(0);
+
+  useEffect(() => {
+    setBundleIndex(0);
+  }, [lastAgentAnswer?.runId]);
+
+  useEffect(() => {
+    setBundleIndex((i) => Math.min(i, Math.max(0, bundles.length - 1)));
+  }, [bundles.length]);
+
+  const activeRunId = lastAgentAnswer?.runId ?? null;
+  const answerIndex =
+    activeRunId != null ? vizAnswerRuns.findIndex((r) => r.runId === activeRunId) : -1;
+  const answerCount = vizAnswerRuns.length;
+  const showAnswerNav = answerCount > 1 && onSelectVizAnswerRun != null && answerIndex >= 0;
+  const showBundleNav = bundles.length > 1;
+
+  const goOlderAnswer = () => {
+    if (!onSelectVizAnswerRun || answerIndex < 0 || answerIndex >= answerCount - 1) return;
+    onSelectVizAnswerRun(vizAnswerRuns[answerIndex + 1]!.runId);
+  };
+  const goNewerAnswer = () => {
+    if (!onSelectVizAnswerRun || answerIndex <= 0) return;
+    onSelectVizAnswerRun(vizAnswerRuns[answerIndex - 1]!.runId);
+  };
+
   if (!lastAgentAnswer || bundles.length === 0) {
     return (
       <Text size="sm" c="dimmed">
@@ -543,8 +583,83 @@ export function VizPanel(props: {
     );
   }
 
+  const safeBundleIndex = Math.min(bundleIndex, Math.max(0, bundles.length - 1));
+  const bundle = bundles[safeBundleIndex]!;
+
   return (
     <Stack gap="sm">
+      {(showAnswerNav || showBundleNav) && (
+        <Stack gap={6}>
+          {showAnswerNav ? (
+            <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
+              <Tooltip label="Starší odpověď (dříve v konverzaci)">
+                <ActionIcon
+                  variant="default"
+                  size="sm"
+                  aria-label="Starší odpověď"
+                  disabled={answerIndex >= answerCount - 1}
+                  onClick={goOlderAnswer}
+                >
+                  <IconChevronLeft size={18} stroke={1.5} />
+                </ActionIcon>
+              </Tooltip>
+              <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+                <Text size="xs" ta="center" fw={600} lineClamp={1}>
+                  Odpověď {answerIndex + 1} / {answerCount}
+                </Text>
+                {vizAnswerRuns[answerIndex]?.preview ? (
+                  <Text size="xs" c="dimmed" ta="center" lineClamp={2} style={{ wordBreak: "break-word" }}>
+                    {vizAnswerRuns[answerIndex]!.preview}
+                  </Text>
+                ) : null}
+              </Stack>
+              <Tooltip label="Novější odpověď">
+                <ActionIcon
+                  variant="default"
+                  size="sm"
+                  aria-label="Novější odpověď"
+                  disabled={answerIndex <= 0}
+                  onClick={goNewerAnswer}
+                >
+                  <IconChevronRight size={18} stroke={1.5} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+          ) : null}
+          {showBundleNav ? (
+            <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
+              <Tooltip label="Předchozí zobrazení (část výsledku)">
+                <ActionIcon
+                  variant="light"
+                  size="sm"
+                  color="gray"
+                  aria-label="Předchozí část výsledku"
+                  disabled={safeBundleIndex <= 0}
+                  onClick={() => setBundleIndex((i) => Math.max(0, i - 1))}
+                >
+                  <IconChevronLeft size={18} stroke={1.5} />
+                </ActionIcon>
+              </Tooltip>
+              <Text size="xs" ta="center" fw={500} style={{ flex: 1 }}>
+                Zobrazení {safeBundleIndex + 1} / {bundles.length}
+              </Text>
+              <Tooltip label="Další zobrazení (část výsledku)">
+                <ActionIcon
+                  variant="light"
+                  size="sm"
+                  color="gray"
+                  aria-label="Další část výsledku"
+                  disabled={safeBundleIndex >= bundles.length - 1}
+                  onClick={() => setBundleIndex((i) => Math.min(bundles.length - 1, i + 1))}
+                >
+                  <IconChevronRight size={18} stroke={1.5} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+          ) : null}
+        </Stack>
+      )}
+
       {lastAgentAnswer.runId && conversationId ? (
         <Button
           size="xs"
@@ -554,14 +669,13 @@ export function VizPanel(props: {
           Přejít na odpověď v chatu
         </Button>
       ) : null}
-      {bundles.map((bundle, bi) => (
-        <AgentDataPanel
-          key={`${lastAgentAnswer.runId ?? "run"}-viz-${bi}`}
-          panel={bundle.dataPanel}
-          getAccessToken={getAccessToken}
-          dataPanelDownloads={bundle.dataPanelDownloads}
-        />
-      ))}
+
+      <AgentDataPanel
+        key={`${lastAgentAnswer.runId ?? "run"}-viz-${safeBundleIndex}`}
+        panel={bundle.dataPanel}
+        getAccessToken={getAccessToken}
+        dataPanelDownloads={bundle.dataPanelDownloads}
+      />
     </Stack>
   );
 }

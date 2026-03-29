@@ -51,6 +51,19 @@ describe("fallbackPlanFromQuestion (záloha bez LLM)", () => {
     expect(p.dataset).toBe("leads_vs_sales_6m");
   });
 
+  it("graf vývoje leadů a prodaných za 6 měsíců (přesná uživatelská věta)", () => {
+    const p = fallbackPlanFromQuestion(
+      "Vytvoř graf vývoje počtu leadů a prodaných nemovitostí za posledních 6 měsíců."
+    );
+    expect(p.dataset).toBe("leads_vs_sales_6m");
+  });
+
+  it("kdo koupil / seznam prodaných bez měsíční agregace → deal_sales_detail", () => {
+    const p = fallbackPlanFromQuestion("Kdo koupil naše prodané byty? Vypiš seznam obchodů.");
+    expect(p.dataset).toBe("deal_sales_detail");
+    expect(p.filter_label).toContain("detail");
+  });
+
   it("preferovaná oblast — tabulka klientů + textový filtr", () => {
     const p = fallbackPlanFromQuestion("Kdo z klientů preferuje Dejvice? (Preferovaná oblast)");
     expect(p.dataset).toBe("clients");

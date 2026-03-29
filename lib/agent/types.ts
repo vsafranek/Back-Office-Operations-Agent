@@ -112,6 +112,15 @@ export type AgentDataPanel =
       rowsTruncationNote?: string;
     }
   | {
+      kind: "deal_sales_detail";
+      source: string;
+      title: string;
+      rows: Record<string, unknown>[];
+      charts?: DerivedChartModel[];
+      hideChart?: boolean;
+      rowsTruncationNote?: string;
+    }
+  | {
       kind: "market_listings";
       title: string;
       /**

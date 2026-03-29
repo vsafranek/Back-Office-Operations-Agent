@@ -43,7 +43,7 @@ export function buildLeadsVsSalesChart(rows: Record<string, unknown>[]): LeadsVs
     .sort((a, b) => a.t - b.t);
 
   return {
-    title: "Vývoj leadů a prodaných nemovitostí (posledních 6 měsíců)",
+    title: "Vývoj leadů a prodaných bytů (posledních 6 měsíců)",
     labels: parsed.map((p) => p.label),
     leads: parsed.map((p) => p.leads),
     sold: parsed.map((p) => p.sold)
