@@ -8,10 +8,59 @@ export type AgentArtifact = {
   content?: string;
 };
 
+export type ChartKind = "bar" | "line" | "pie";
+
+export type DerivedChartLegendItem = { label: string };
+
+/** Graf odvozený jen z agregace řádků tabulky (server + UI + export PNG). */
+export type DerivedChartModel =
+  | {
+      kind: "bar";
+      title: string;
+      subtitle?: string;
+      axisLabelX: string;
+      axisLabelY: string;
+      valueUnit: string;
+      labels: string[];
+      values: number[];
+      legend?: DerivedChartLegendItem[];
+      rowCountInTable: number;
+    }
+  | {
+      kind: "line";
+      title: string;
+      subtitle?: string;
+      axisLabelX: string;
+      axisLabelY: string;
+      valueUnit: string;
+      labels: string[];
+      values: number[];
+      series2Values?: number[];
+      series2Label?: string;
+      legend?: DerivedChartLegendItem[];
+      rowCountInTable: number;
+    }
+  | {
+      kind: "pie";
+      title: string;
+      subtitle?: string;
+      axisLabelX: string;
+      axisLabelY: string;
+      valueUnit: string;
+      labels: string[];
+      values: number[];
+      legend?: DerivedChartLegendItem[];
+      rowCountInTable: number;
+    };
+
+export type AgentDataPanelChartPng = { label: string; url: string; kind?: ChartKind };
+
 /** Odkazy k exportu dat zobrazených vedle tabulky/grafu v pravém panelu. */
 export type AgentDataPanelDownloads = {
   excel?: string;
   csv?: string;
+  /** PNG grafů (stejné soubory jako v artefaktech). */
+  chartPngs?: AgentDataPanelChartPng[];
 };
 
 export type AgentOrchestrationMeta = {
@@ -37,16 +86,19 @@ export type AgentDataPanel =
       kind: "clients_q1";
       source: string;
       rows: Record<string, unknown>[];
-      chart: { title: string; labels: string[]; values: number[] };
+      charts: DerivedChartModel[];
       /** Skryje blok grafu v UI (např. „jen tabulka“). */
       hideChart?: boolean;
+      /** Po obnovení z konverzace: tabulka může být ořezaná (viz Excel/CSV). */
+      rowsTruncationNote?: string;
     }
   | {
       kind: "leads_sales_6m";
       source: string;
       rows: Record<string, unknown>[];
-      chart: { title: string; labels: string[]; leads: number[]; sold: number[] };
+      charts: DerivedChartModel[];
       hideChart?: boolean;
+      rowsTruncationNote?: string;
     }
   | {
       kind: "clients_filtered";
@@ -54,6 +106,10 @@ export type AgentDataPanel =
       /** Nadpis nad tabulkou (např. vyhledaná oblast). */
       title: string;
       rows: Record<string, unknown>[];
+      /** Odvozené grafy z týchž řádků (volitelné). */
+      charts?: DerivedChartModel[];
+      hideChart?: boolean;
+      rowsTruncationNote?: string;
     }
   | {
       kind: "market_listings";
@@ -102,6 +158,12 @@ export type AgentDataPanel =
       };
     };
 
+/** Jedna datová / UI sada pod odpovědí (např. po sloučení více podotázek). */
+export type AgentDataPanelBundle = {
+  dataPanel: AgentDataPanel;
+  dataPanelDownloads?: AgentDataPanelDownloads;
+};
+
 export type AgentAnswer = {
   /** Korelace s řádky v agent_trace_events; doplní `runBackOfficeAgent`. */
   runId?: string;
@@ -117,6 +179,8 @@ export type AgentAnswer = {
   dataPanel?: AgentDataPanel;
   /** Volitelné: tlačítka stažení vedle panelu (např. Excel z report artefaktů). */
   dataPanelDownloads?: AgentDataPanelDownloads;
+  /** Více panelů pod jednou odpovědí (sloučené podotázky); pokud je pole neprázdné, UI je vykreslí všechny. */
+  dataPanelBundles?: AgentDataPanelBundle[];
 };
 
 export type AgentToolContext = {
@@ -125,7 +189,18 @@ export type AgentToolContext = {
   conversationId?: string | null;
   trace?: AgentTraceRecorder;
   traceParentId?: string | null;
+  /**
+   * Klíč pro cesty v Storage (`reports/{key}/…`). Odliší artefakty více podúloh v jednom běhu agenta.
+   * Když chybí, použije se `runId`.
+   */
+  artifactStorageKey?: string | null;
 };
+
+/** Jednoznačný prefix souborů reportů / grafů v bucketu pro aktuální podúlohu. */
+export function agentArtifactStoragePathKey(ctx: AgentToolContext): string {
+  const k = ctx.artifactStorageKey?.trim();
+  return k && k.length > 0 ? k : ctx.runId;
+}
 
 /** Řádek NDJSON z POST /api/agent/stream. */
 export type AgentStreamLine =

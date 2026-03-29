@@ -10,6 +10,12 @@ import { WEEKLY_REPORT_DEFAULT_SLIDE_COUNT } from "@/lib/agent/defaults";
 import { runAgentOrchestrator } from "@/lib/agent/orchestrator/agent-orchestrator";
 import { getMcpToolRunnerForAgent } from "@/lib/agent/mcp-tools/tool-registry";
 import type { AgentRunProgress } from "@/lib/agent/types";
+import { splitCompoundUserTasks } from "@/lib/agent/llm/compound-question-split";
+import { mergeCompoundAgentAnswers } from "@/lib/agent/merge-compound-answers";
+import {
+  AGENT_PANEL_PAYLOAD_KEY,
+  buildAgentPanelPersistPayload
+} from "@/lib/agent/conversation/agent-panel-persist";
 
 function safeText(value: unknown): string {
   if (typeof value === "string") return value;
@@ -73,11 +79,10 @@ export async function runBackOfficeAgent(input: {
   const effectiveQuestion = prefix
     ? `${prefix}\n\n--- Dotaz / šablona úlohy ---\n${input.question}`
     : input.question;
-  const classifierQuestion =
-    effectiveQuestion +
-    (input.scheduledTaskExecution
-      ? "\n\n(Interní pokyn pro klasifikaci: probíhá vykonání již uložené naplánované úlohy. Intent scheduled_agent_task ani casual_chat NEPOUŽÍVEJ — zařaď požadavek podle obsahu mezi analytics, calendar_email, presentation, weekly_report, web_search, market_listings.)"
-      : "");
+
+  const scheduledClassifierSuffix = input.scheduledTaskExecution
+    ? "\n\n(Interní pokyn pro klasifikaci: probíhá vykonání již uložené naplánované úlohy. Intent scheduled_agent_task ani casual_chat NEPOUŽÍVEJ — zařaď požadavek podle obsahu mezi analytics, calendar_email, presentation, weekly_report, web_search, market_listings.)"
+    : "";
 
   await emit("Zpracovávám dotaz…");
   const contextText = await loadConversationContext({ supabase, conversationId });
@@ -88,6 +93,8 @@ export async function runBackOfficeAgent(input: {
     userId: input.userId,
     conversationId
   });
+
+  const seedQuestionForSplit = input.question.trim() || effectiveQuestion;
 
   const rootId = await handle.trace.record({
     parentId: null,
@@ -109,99 +116,238 @@ export async function runBackOfficeAgent(input: {
 
   const traceRef = { recorder: handle.trace, parentId: rootId };
 
+  const taskSeeds =
+    input.scheduledTaskExecution || Boolean(prefix)
+      ? [seedQuestionForSplit]
+      : await splitCompoundUserTasks({
+          question: seedQuestionForSplit,
+          runId,
+          trace: traceRef
+        });
+
+  const effectiveTasks = taskSeeds.map((t) =>
+    prefix ? `${prefix}\n\n--- Dotaz / šablona úlohy ---\n${t}` : t
+  );
+
   let classified: ClassifiedAgentIntent;
   let orchestrationReasoning: string | undefined;
-
-  if (agentDef.mode === "thinking") {
-    await emit("Orchestrátor promýšlí zadání a vhodné nástroje…");
-    const thinking = await classifyWithThinkingOrchestrator({
-      runId,
-      question: classifierQuestion,
-      contextText: contextText || undefined,
-      extraInstructions: agentDef.orchestratorInstructions,
-      trace: traceRef,
-      onReasoningDelta: input.onOrchestratorDelta
-    });
-    classified = { intent: thinking.intent, slideCount: thinking.slideCount };
-    orchestrationReasoning = thinking.reasoning;
-  } else {
-    await emit("Klasifikuji typ požadavku…");
-    classified = await classifyAgentIntent({
-      runId,
-      question: classifierQuestion,
-      contextText: contextText || undefined,
-      trace: traceRef
-    });
-  }
-
-  const intent = classified.intent;
-  await emit(intentProgressLabel(intent));
-
-  const explicitSlideCount = input.options?.presentation?.slideCount;
-  const fromClassifier = classified.slideCount;
-  const slideDefault =
-    intent === "weekly_report" || intent === "presentation" ? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT : 5;
-  const resolvedSlideCount = Math.min(15, Math.max(2, explicitSlideCount ?? fromClassifier ?? slideDefault));
-
-  const dispatchId = await handle.trace.record({
-    parentId: rootId,
-    kind: "orchestrator",
-    name: "intent.selected",
-    input: {
-      intent,
-      reasoningPreview: orchestrationReasoning?.slice(0, 3000)
-    },
-    output: { slideCount: resolvedSlideCount },
-    meta: {
-      actorType: "user",
-      action: "agent.intent.selected",
-      targetType: "intent",
-      targetId: intent
-    }
-  });
-
-  logger.info("agent_run_started", {
-    runId,
-    userId: input.userId,
-    intent,
-    agentId: agentDef.id,
-    mode: agentDef.mode,
-    traceRootId: rootId
-  });
-
-  if (conversationId) {
-    await supabase.from("conversation_messages").insert({
-      conversation_id: conversationId,
-      role: "user",
-      content: input.question.trim() ? input.question : effectiveQuestion,
-      metadata: { runId, intent, agentId: agentDef.id, agentMode: agentDef.mode }
-    });
-    await supabase
-      .from("conversations")
-      .update({ updated_at: new Date().toISOString() })
-      .eq("id", conversationId)
-      .eq("user_id", input.userId);
-  }
-
+  let intent: ClassifiedAgentIntent["intent"];
   let answer: AgentAnswer;
 
   const toolRunner = getMcpToolRunnerForAgent(agentDef);
 
-  await emit("Spouštím podagenta a nástroje (může chvíli trvat)…");
-  answer = await runAgentOrchestrator({
-    intent,
-    ctx: {
+  async function classifyOne(clsQuestion: string): Promise<{
+    classified: ClassifiedAgentIntent;
+    reasoning?: string;
+  }> {
+    if (agentDef.mode === "thinking") {
+      const thinking = await classifyWithThinkingOrchestrator({
+        runId,
+        question: clsQuestion,
+        contextText: contextText || undefined,
+        extraInstructions: agentDef.orchestratorInstructions,
+        trace: traceRef,
+        onReasoningDelta: input.onOrchestratorDelta
+      });
+      return {
+        classified: { intent: thinking.intent, slideCount: thinking.slideCount },
+        reasoning: thinking.reasoning
+      };
+    }
+    const c = await classifyAgentIntent({
+      runId,
+      question: clsQuestion,
+      contextText: contextText || undefined,
+      trace: traceRef
+    });
+    return { classified: c };
+  }
+
+  function resolveSlides(
+    c: ClassifiedAgentIntent,
+    intentVal: ClassifiedAgentIntent["intent"]
+  ): number {
+    const explicitSlideCount = input.options?.presentation?.slideCount;
+    const fromClassifier = c.slideCount;
+    const slideDefault =
+      intentVal === "weekly_report" || intentVal === "presentation"
+        ? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT
+        : 5;
+    return Math.min(15, Math.max(2, explicitSlideCount ?? fromClassifier ?? slideDefault));
+  }
+
+  if (effectiveTasks.length === 1) {
+    const effectiveQuestionSingle = effectiveTasks[0]!;
+    const classifierQuestion = effectiveQuestionSingle + scheduledClassifierSuffix;
+
+    if (agentDef.mode === "thinking") {
+      await emit("Orchestrátor promýšlí zadání a vhodné nástroje…");
+    } else {
+      await emit("Klasifikuji typ požadavku…");
+    }
+
+    const one = await classifyOne(classifierQuestion);
+    classified = one.classified;
+    orchestrationReasoning = one.reasoning;
+    intent = classified.intent;
+    await emit(intentProgressLabel(intent));
+
+    const resolvedSlideCount = resolveSlides(classified, intent);
+
+    const dispatchId = await handle.trace.record({
+      parentId: rootId,
+      kind: "orchestrator",
+      name: "intent.selected",
+      input: {
+        intent,
+        reasoningPreview: orchestrationReasoning?.slice(0, 3000)
+      },
+      output: { slideCount: resolvedSlideCount },
+      meta: {
+        actorType: "user",
+        action: "agent.intent.selected",
+        targetType: "intent",
+        targetId: intent
+      }
+    });
+
+    logger.info("agent_run_started", {
       runId,
       userId: input.userId,
-      conversationId
-    },
-    question: effectiveQuestion,
-    contextText,
-    slideCount: resolvedSlideCount,
-    trace: handle.trace,
-    traceDispatchId: dispatchId,
-    toolRunner
-  });
+      intent,
+      agentId: agentDef.id,
+      mode: agentDef.mode,
+      traceRootId: rootId
+    });
+
+    if (conversationId) {
+      await supabase.from("conversation_messages").insert({
+        conversation_id: conversationId,
+        role: "user",
+        content: input.question.trim() ? input.question : effectiveQuestionSingle,
+        metadata: { runId, intent, agentId: agentDef.id, agentMode: agentDef.mode }
+      });
+      await supabase
+        .from("conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId)
+        .eq("user_id", input.userId);
+    }
+
+    await emit("Spouštím podagenta a nástroje (může chvíli trvat)…");
+    answer = await runAgentOrchestrator({
+      intent,
+      ctx: {
+        runId,
+        userId: input.userId,
+        conversationId
+      },
+      question: effectiveQuestionSingle,
+      contextText,
+      slideCount: resolvedSlideCount,
+      trace: handle.trace,
+      traceDispatchId: dispatchId,
+      toolRunner
+    });
+  } else {
+    await emit(`Rozloženo na ${effectiveTasks.length} podotázky…`);
+
+    logger.info("agent_run_started", {
+      runId,
+      userId: input.userId,
+      intent: "compound",
+      agentId: agentDef.id,
+      mode: agentDef.mode,
+      traceRootId: rootId,
+      compoundParts: effectiveTasks.length
+    });
+
+    if (conversationId) {
+      await supabase.from("conversation_messages").insert({
+        conversation_id: conversationId,
+        role: "user",
+        content: input.question.trim() ? input.question : seedQuestionForSplit,
+        metadata: {
+          runId,
+          agentId: agentDef.id,
+          agentMode: agentDef.mode,
+          compoundTasks: effectiveTasks.length
+        }
+      });
+      await supabase
+        .from("conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId)
+        .eq("user_id", input.userId);
+    }
+
+    const reasoningChunks: string[] = [];
+    const mergedParts: {
+      taskLabel: string;
+      answer: AgentAnswer;
+      intent: ClassifiedAgentIntent["intent"];
+    }[] = [];
+
+    for (let i = 0; i < effectiveTasks.length; i++) {
+      const eff = effectiveTasks[i]!;
+      const clsQ = eff + scheduledClassifierSuffix;
+
+      if (agentDef.mode === "thinking") {
+        await emit(`Podotázka ${i + 1}/${effectiveTasks.length}: orchestrátor promýšlí…`);
+      } else {
+        await emit(`Podotázka ${i + 1}/${effectiveTasks.length}: klasifikuji…`);
+      }
+
+      const partMeta = await classifyOne(clsQ);
+      if (partMeta.reasoning) reasoningChunks.push(partMeta.reasoning);
+
+      const partIntent = partMeta.classified.intent;
+      await emit(
+        `Podotázka ${i + 1}/${effectiveTasks.length}: ${intentProgressLabel(partIntent)}`
+      );
+
+      const partSlideCount = resolveSlides(partMeta.classified, partIntent);
+
+      const partDispatchId = await handle.trace.record({
+        parentId: rootId,
+        kind: "orchestrator",
+        name: "intent.selected.compound_part",
+        input: { partIndex: i, intent: partIntent },
+        output: { slideCount: partSlideCount },
+        meta: {
+          actorType: "user",
+          action: "agent.intent.selected.compound",
+          targetType: "intent",
+          targetId: partIntent
+        }
+      });
+
+      await emit(`Podotázka ${i + 1}/${effectiveTasks.length}: spouštím podagenta…`);
+      const partAnswer = await runAgentOrchestrator({
+        intent: partIntent,
+        ctx: {
+          runId,
+          userId: input.userId,
+          conversationId,
+          artifactStorageKey: `${runId}-p${i}`
+        },
+        question: eff,
+        contextText,
+        slideCount: partSlideCount,
+        trace: handle.trace,
+        traceDispatchId: partDispatchId,
+        toolRunner
+      });
+
+      const labelRaw = taskSeeds[i] ?? eff;
+      const shortLabel = labelRaw.length > 100 ? `${labelRaw.slice(0, 97)}…` : labelRaw;
+      mergedParts.push({ taskLabel: shortLabel, answer: partAnswer, intent: partIntent });
+    }
+
+    answer = mergeCompoundAgentAnswers({ parts: mergedParts });
+    intent = answer.intent ?? "analytics";
+    orchestrationReasoning = reasoningChunks.length ? reasoningChunks.join("\n---\n") : undefined;
+  }
 
   answer = {
     ...answer,
@@ -216,10 +362,12 @@ export async function runBackOfficeAgent(input: {
 
   await emit("Ukládám výsledek a audit…");
   const finishedAt = new Date().toISOString();
+  const auditQuestion =
+    effectiveTasks.length > 1 ? taskSeeds.join(" · ") : effectiveTasks[0] ?? effectiveQuestion;
   const { error } = await supabase.from("agent_runs").insert({
     run_id: runId,
     user_id: input.userId,
-    question: effectiveQuestion,
+    question: auditQuestion,
     intent,
     answer: answer.answer_text,
     confidence: answer.confidence,
@@ -233,6 +381,7 @@ export async function runBackOfficeAgent(input: {
   }
 
   if (conversationId) {
+    const panelPayload = buildAgentPanelPersistPayload(answer);
     await supabase.from("conversation_messages").insert({
       conversation_id: conversationId,
       role: "assistant",
@@ -246,7 +395,8 @@ export async function runBackOfficeAgent(input: {
         confidence: answer.confidence,
         sources: answer.sources,
         generated_artifacts: answer.generated_artifacts,
-        next_actions: answer.next_actions
+        next_actions: answer.next_actions,
+        ...(panelPayload ? { [AGENT_PANEL_PAYLOAD_KEY]: panelPayload } : {})
       }
     });
     await supabase

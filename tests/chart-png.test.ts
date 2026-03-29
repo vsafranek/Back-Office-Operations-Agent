@@ -22,6 +22,6 @@ describe("buildBarChartSvg", () => {
 
   it("prázdná data — zpráva", () => {
     const svg = buildBarChartSvg({ title: "T", labels: [], values: [] });
-    expect(svg).toContain("Žádná data");
+    expect(svg).toContain("Nedostatek dat pro graf");
   });
 });

@@ -3,6 +3,7 @@
 import { Anchor, Box, Button, Collapse, Group, List, Paper, Text } from "@mantine/core";
 import { useState } from "react";
 import { AgentTraceTree } from "@/components/agent/AgentTraceTree";
+import { FormattedAssistantContent } from "@/components/agent/FormattedAssistantContent";
 
 export type ChatThreadMessage = {
   id: string;
@@ -120,7 +121,7 @@ export function ChatMessageBubble({ message, getAccessToken, agentLabelById }: P
   const hideTraceForCasualChat = intent === "casual_chat" && artifacts.length === 0;
 
   return (
-    <Box style={{ display: "flex", justifyContent: "flex-start" }}>
+    <Box id={runId ? `chat-assistant-run-${runId}` : undefined} style={{ display: "flex", justifyContent: "flex-start" }}>
       <Paper
         radius="lg"
         px="md"
@@ -130,9 +131,7 @@ export function ChatMessageBubble({ message, getAccessToken, agentLabelById }: P
         bg="gray.0"
         style={{ borderBottomLeftRadius: 6 }}
       >
-        <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-          {message.content}
-        </Text>
+        <FormattedAssistantContent content={message.content} />
 
         {reasoning ? (
           <Box mt="sm">

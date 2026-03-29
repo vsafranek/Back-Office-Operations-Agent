@@ -57,6 +57,24 @@ describe("fallbackPlanFromQuestion (záloha bez LLM)", () => {
     expect(p.row_text_narrowing).toBe("Dejvice");
     expect(p.suggest_source_channel_chart).toBe(false);
   });
+
+  it("obecný dotaz bez signálu presetu — default clients (ne Q1 view)", () => {
+    const p = fallbackPlanFromQuestion("Jak overit ze bezi migrace databaze?");
+    expect(p.dataset).toBe("clients");
+    expect(p.suggest_source_channel_chart).toBe(false);
+  });
+
+  it("parafráze: první čtvrtletí + odkud (české ctn)", () => {
+    const p = fallbackPlanFromQuestion("Klienti za první čtvrtletí — odkud jsou?");
+    expect(p.dataset).toBe("new_clients_q1");
+    expect(p.suggest_source_channel_chart).toBe(true);
+  });
+
+  it("parafráze: nováčci + Q1 bez slova kvartal", () => {
+    const p = fallbackPlanFromQuestion("Kolik máme nováčků v Q1 a jaký mají zdroj?");
+    expect(p.dataset).toBe("new_clients_q1");
+    expect(p.suggest_source_channel_chart).toBe(true);
+  });
 });
 
 describe("extractClientAreaSearchTerm", () => {

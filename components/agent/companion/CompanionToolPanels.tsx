@@ -523,7 +523,19 @@ export function VizPanel(props: {
 }) {
   const { lastAgentAnswer, conversationId, getAccessToken, onNavigateConversation } = props;
 
-  if (!lastAgentAnswer?.dataPanel) {
+  const bundles =
+    lastAgentAnswer?.dataPanelBundles && lastAgentAnswer.dataPanelBundles.length > 0
+      ? lastAgentAnswer.dataPanelBundles
+      : lastAgentAnswer?.dataPanel
+        ? [
+            {
+              dataPanel: lastAgentAnswer.dataPanel,
+              dataPanelDownloads: lastAgentAnswer.dataPanelDownloads
+            }
+          ]
+        : [];
+
+  if (!lastAgentAnswer || bundles.length === 0) {
     return (
       <Text size="sm" c="dimmed">
         Tabulka nebo graf se zde objeví po posledním běhu agenta s datovým panelem. Použijte středový chat nebo sekci Data.
@@ -539,14 +551,17 @@ export function VizPanel(props: {
           variant="light"
           onClick={() => onNavigateConversation(conversationId, lastAgentAnswer.runId ?? null)}
         >
-          Zobrazit v kontextu chatu
+          Přejít na odpověď v chatu
         </Button>
       ) : null}
-      <AgentDataPanel
-        panel={lastAgentAnswer.dataPanel}
-        getAccessToken={getAccessToken}
-        dataPanelDownloads={lastAgentAnswer.dataPanelDownloads}
-      />
+      {bundles.map((bundle, bi) => (
+        <AgentDataPanel
+          key={`${lastAgentAnswer.runId ?? "run"}-viz-${bi}`}
+          panel={bundle.dataPanel}
+          getAccessToken={getAccessToken}
+          dataPanelDownloads={bundle.dataPanelDownloads}
+        />
+      ))}
     </Stack>
   );
 }

@@ -6,6 +6,7 @@ import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
 import { getEnv } from "@/lib/config/env";
 import { resolvePresentationTemplate } from "@/lib/config/presentation-template";
 import { logger } from "@/lib/observability/logger";
+import { ensurePublicStorageBucket } from "@/lib/supabase/ensure-storage-bucket";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 import { generatePptxFromBlueWhiteTemplate } from "@/lib/agent/tools/presentation-from-template";
 
@@ -310,11 +311,7 @@ export async function generatePresentationArtifact(params: PresentationArtifactI
   const env = getEnv();
   const supabase = getSupabaseAdminClient();
   const bucketName = env.SUPABASE_STORAGE_BUCKET;
-  const bucketCheck = await supabase.storage.getBucket(bucketName);
-  if (bucketCheck.error) {
-    const created = await supabase.storage.createBucket(bucketName, { public: true });
-    if (created.error) throw new Error(`STORAGE_BUCKET_INIT_FAILED: ${created.error.message}`);
-  }
+  await ensurePublicStorageBucket(supabase, bucketName);
 
   const slideCount = Math.min(15, Math.max(2, parsedInput.data.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT));
   const templateCfg = resolvePresentationTemplate(env);

@@ -9,6 +9,7 @@ import {
   narrowRowsByText
 } from "@/lib/agent/tools/data-pull-plan";
 import { buildClientsTableQuery } from "@/lib/agent/tools/clients-table-query";
+import type { ChartKind } from "@/lib/agent/types";
 
 /** Identifikátor zvoleného datového zdroje (pro logy a UI); doplňuje ho plán dotahu, ne soupis presetů. */
 export type SqlQueryResultMeta = {
@@ -16,6 +17,8 @@ export type SqlQueryResultMeta = {
   rowTextNarrowing?: string;
   filterLabel?: string;
   suggestSourceChannelChart: boolean;
+  suggestDerivedCharts: boolean;
+  derivedChartKindHint?: ChartKind | null;
 };
 
 async function executePlan(plan: DataPullPlan, limit: number) {
@@ -84,6 +87,8 @@ export async function runDataPullPlanDirect(
   source: string;
   preset: string;
   suggestSourceChannelChart: boolean;
+  suggestDerivedCharts: boolean;
+  derivedChartKindHint?: ChartKind | null;
   filterLabel?: string;
 }> {
   const plan = DataPullPlanSchema.parse(planInput);
@@ -95,6 +100,8 @@ export async function runDataPullPlanDirect(
     source,
     preset: plan.dataset,
     suggestSourceChannelChart: plan.suggest_source_channel_chart ?? false,
+    suggestDerivedCharts: plan.suggest_derived_charts ?? false,
+    derivedChartKindHint: plan.derived_chart_kind_hint ?? null,
     filterLabel: plan.filter_label ?? undefined
   };
 }
@@ -126,6 +133,7 @@ export async function runSqlPreset(params: {
     hasNarrowing: Boolean(plan.row_text_narrowing),
     clientFilterCount: plan.client_filters?.length ?? 0,
     chart: plan.suggest_source_channel_chart,
+    derivedCharts: plan.suggest_derived_charts,
     limit
   });
 
@@ -137,6 +145,8 @@ export async function runSqlPreset(params: {
     preset: plan.dataset,
     rowTextNarrowing: plan.row_text_narrowing ?? undefined,
     filterLabel: plan.filter_label ?? undefined,
-    suggestSourceChannelChart: plan.suggest_source_channel_chart ?? false
+    suggestSourceChannelChart: plan.suggest_source_channel_chart ?? false,
+    suggestDerivedCharts: plan.suggest_derived_charts ?? false,
+    derivedChartKindHint: plan.derived_chart_kind_hint ?? null
   };
 }

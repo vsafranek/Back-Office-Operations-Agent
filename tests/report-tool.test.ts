@@ -4,6 +4,7 @@ import { generateReportArtifacts } from "@/lib/agent/tools/report-tool";
 
 const uploadMock = vi.fn();
 const getBucketMock = vi.fn();
+const createBucketMock = vi.fn();
 
 vi.mock("@/lib/config/env", () => ({
   getEnv: () => ({ SUPABASE_STORAGE_BUCKET: "test-bucket" })
@@ -13,6 +14,7 @@ vi.mock("@/lib/supabase/server-client", () => ({
   getSupabaseAdminClient: () => ({
     storage: {
       getBucket: getBucketMock,
+      createBucket: createBucketMock,
       from: () => ({
         upload: uploadMock,
         getPublicUrl: (path: string) => ({
@@ -26,6 +28,7 @@ vi.mock("@/lib/supabase/server-client", () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   getBucketMock.mockResolvedValue({ data: {}, error: null });
+  createBucketMock.mockResolvedValue({ data: {}, error: null });
   uploadMock.mockResolvedValue({ data: {}, error: null });
 });
 

@@ -13,14 +13,12 @@ import {
   Menu,
   Paper,
   ScrollArea,
-  SimpleGrid,
   Stack,
   Text,
   Textarea,
   Title
 } from "@mantine/core";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
-import { AuditRunSummary } from "@/components/agent/AuditRunSummary";
 import { ChatMessageBubble, type ChatThreadMessage } from "@/components/agent/ChatMessageBubble";
 import type { AgentUiOption } from "@/lib/agent/config/types";
 import type { AgentAnswer } from "@/lib/agent/types";
@@ -45,6 +43,11 @@ export type ConfigurableAgentPanelProps = {
   conversationContext?: { id: string | null; title?: string };
   onRunComplete?: (answer: AgentAnswer) => void;
   onAgentChange?: (agentId: string) => void;
+  /**
+   * Stejná data jako v postranním panelu (obnova z DB / `lastAgentAnswer` na dashboardu).
+   * Doplňuje `result` po F5 nebo pro tlačítko „Přejít na odpověď v chatu“.
+   */
+  syncedAgentAnswer?: AgentAnswer | null;
 };
 
 const visuallyHidden: CSSProperties = {
@@ -65,7 +68,9 @@ function convSlug(id: string | null | undefined): string {
 
 /** Sekce audit / panely pod odpovědí — u čistého small talku bez artefaktů ji nezobrazujeme. */
 function shouldShowRelatedOutputs(result: AgentAnswer): boolean {
+  if (result.dataPanelBundles?.length) return true;
   if (result.dataPanel) return true;
+  if (result.dataPanelDownloads?.chartPngs?.length) return true;
   if (result.dataPanelDownloads?.excel || result.dataPanelDownloads?.csv) return true;
   if (result.generated_artifacts && result.generated_artifacts.length > 0) return true;
   if (result.intent === "casual_chat") return false;
@@ -201,7 +206,8 @@ export function ConfigurableAgentPanel({
   getAccessToken,
   conversationContext,
   onRunComplete,
-  onAgentChange
+  onAgentChange,
+  syncedAgentAnswer = null
 }: ConfigurableAgentPanelProps) {
   const [agentId, setAgentId] = useState(defaultAgentId);
   const [question, setQuestion] = useState("");
@@ -220,9 +226,15 @@ export function ConfigurableAgentPanel({
   const agentLabelById = useMemo(() => Object.fromEntries(agents.map((a) => [a.id, a.label])), [agents]);
   const selectedAgent = useMemo(() => agents.find((a) => a.id === agentId), [agents, agentId]);
 
+  /** Během načítání nového běhu neukazovat starý synchronizovaný panel (předejde „míchání“ výsledků). */
+  const displayResult = useMemo<AgentAnswer | null>(() => {
+    if (loading) return result;
+    return result ?? syncedAgentAnswer ?? null;
+  }, [loading, result, syncedAgentAnswer]);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [threadMessages, loading, phaseLog.length, orchestratorStreamText, result?.runId]);
+  }, [threadMessages, loading, phaseLog.length, orchestratorStreamText, displayResult?.runId]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -350,68 +362,78 @@ export function ConfigurableAgentPanel({
                 />
               ) : null}
 
-              {result && shouldShowRelatedOutputs(result) ? (
+              {displayResult && shouldShowRelatedOutputs(displayResult) ? (
                 <Stack gap="md" pt="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
                   <Title order={4} size="h5" fw={600}>
-                    Související výstupy poslední odpovědi
+                    Data a grafy
                   </Title>
                   <section
                     id={
-                      result.runId
-                        ? `agent-extras--conv--${cId}--run--${result.runId}`
+                      displayResult.runId
+                        ? `agent-extras--conv--${cId}--run--${displayResult.runId}`
                         : `agent-extras--conv--${cId}--pending`
                     }
                     data-conversation-id={conversationContext?.id ?? undefined}
-                    data-run-id={result.runId ?? undefined}
-                    aria-label="Rozšířený výstup posledního běhu"
+                    data-run-id={displayResult.runId ?? undefined}
+                    aria-label="Tabulka a grafy posledního běhu"
                   >
-                    <SimpleGrid
-                      cols={{ base: 1, lg: result.dataPanel ? 2 : 1 }}
-                      spacing="lg"
-                      verticalSpacing="lg"
-                      styles={{
-                        root: {
-                          alignItems: "flex-start"
-                        }
-                      }}
-                    >
-                      <Stack gap="md" miw={0}>
-                        {result.dataPanel?.kind === "scheduled_task_confirmation" ? (
-                          <Text size="sm" c="violet.8">
-                            V pravém panelu potvrďte nebo zrušte uložení naplánované úlohy (cron na straně Supabase volá
-                            aplikaci podle návodu v Nastavení).
-                          </Text>
-                        ) : null}
-
-                        {result.runId ? (
-                          <AuditRunSummary runId={result.runId} getAccessToken={getAccessToken} />
-                        ) : null}
-
-                        {!result.dataPanel ? (
+                    {(() => {
+                      const bundles =
+                        displayResult.dataPanelBundles && displayResult.dataPanelBundles.length > 0
+                          ? displayResult.dataPanelBundles
+                          : displayResult.dataPanel
+                            ? [
+                                {
+                                  dataPanel: displayResult.dataPanel,
+                                  dataPanelDownloads: displayResult.dataPanelDownloads
+                                }
+                              ]
+                            : [];
+                      const hasPanel = bundles.length > 0;
+                      const primaryKind = bundles[0]?.dataPanel.kind;
+                      if (!hasPanel) {
+                        return (
                           <Text size="xs" c="dimmed">
-                            U tohoto dotazu nejsou další panely — text a artefakty jsou v bublině asistenta výše.
+                            U tohoto dotazu nejsou tabulka ani grafy — text a odkazy jsou v bublině asistenta výše. Audit
+                            běhu je v postranním panelu záložka „Audit“.
                           </Text>
-                        ) : null}
-                      </Stack>
-
-                      {result.dataPanel ? (
-                        <div
-                          id={
-                            result.runId
-                              ? `agent-data-panel--conv--${cId}--run--${result.runId}`
-                              : `agent-data-panel--conv--${cId}`
-                          }
-                          data-conversation-id={conversationContext?.id ?? undefined}
-                          data-panel-kind={result.dataPanel.kind}
-                        >
-                          <AgentDataPanel
-                            panel={result.dataPanel}
-                            getAccessToken={getAccessToken}
-                            dataPanelDownloads={result.dataPanelDownloads}
-                          />
-                        </div>
-                      ) : null}
-                    </SimpleGrid>
+                        );
+                      }
+                      return (
+                        <Stack gap="xl" w="100%" maw="100%" style={{ minWidth: 0 }}>
+                          {primaryKind === "scheduled_task_confirmation" ? (
+                            <Text size="sm" c="violet.8">
+                              V postranním panelu Nástroje potvrďte nebo zrušte uložení naplánované úlohy (cron na
+                              straně Supabase volá aplikaci podle návodu v Nastavení).
+                            </Text>
+                          ) : null}
+                          {bundles.map((bundle, bi) => (
+                            <div
+                              key={`${displayResult.runId ?? "run"}-panel-${bi}-${bundle.dataPanel.kind}`}
+                              id={
+                                displayResult.runId
+                                  ? `agent-data-panel--conv--${cId}--run--${displayResult.runId}--${bi}`
+                                  : `agent-data-panel--conv--${cId}--${bi}`
+                              }
+                              data-conversation-id={conversationContext?.id ?? undefined}
+                              data-panel-kind={bundle.dataPanel.kind}
+                              data-panel-index={bi}
+                            >
+                              {bundles.length > 1 ? (
+                                <Title order={5} size="sm" mb="sm" c="dimmed">
+                                  Část {bi + 1}
+                                </Title>
+                              ) : null}
+                              <AgentDataPanel
+                                panel={bundle.dataPanel}
+                                getAccessToken={getAccessToken}
+                                dataPanelDownloads={bundle.dataPanelDownloads}
+                              />
+                            </div>
+                          ))}
+                        </Stack>
+                      );
+                    })()}
                   </section>
                 </Stack>
               ) : null}

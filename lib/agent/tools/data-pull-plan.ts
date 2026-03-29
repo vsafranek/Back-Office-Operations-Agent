@@ -14,13 +14,19 @@ export const DATASET_IDS = [
 
 export type DataPullDataset = (typeof DATASET_IDS)[number];
 
+const chartKindHint = z.enum(["bar", "line", "pie"]);
+
 export const DataPullPlanSchema = z.object({
   dataset: z.enum(DATASET_IDS),
   row_text_narrowing: z.string().max(160).nullable().optional(),
   /** Strukturované filtry tabulky `clients` (whitelist sloupců v ClientFilterSchema). */
   client_filters: ClientFiltersSchema.nullable().optional(),
   filter_label: z.string().max(220).nullable().optional(),
-  suggest_source_channel_chart: z.boolean().optional()
+  suggest_source_channel_chart: z.boolean().optional(),
+  /** U datasetu `clients`: zda navrhnout odvozené grafy z načtených řádků (bez dalšího SQL). */
+  suggest_derived_charts: z.boolean().optional(),
+  /** U `clients`: preferovaný typ vizualizace (jen hint; agregace zůstává stejná). */
+  derived_chart_kind_hint: chartKindHint.nullable().optional()
 });
 
 export type DataPullPlan = z.infer<typeof DataPullPlanSchema>;
@@ -134,6 +140,14 @@ export function extractClientAreaSearchTerm(question: string): string | null {
 const MISSING_RECONSTRUCTION_FILTER_LABEL =
   "Nemovitosti — chybějící údaje o rekonstrukci / stavebních úpravách";
 
+/*
+ * Fáze B (časový horizont „cokoliv“) — návrh bez implementace:
+ * - Rozšířit plán o volitelné date_from / date_to (Europe/Prague) a mapovat je na RPC
+ *   např. fn_clients_in_range(from, to) nebo predikáty v client_filters (ts_gte, ts_lte na created_at).
+ * - new_clients_q1 zůstává view jen pro Q1 běžného roku; obecné období obsluhovat přes clients + filtry nebo nový view.
+ * - executePlan v sql-tool volá jen allowlistované zdroje; žádné volné SQL z NL.
+ */
+
 function wantsMissingReconstructionDataset(n: string): boolean {
   if (n.includes("rekonstruk")) return true;
   const mentionsProperty =
@@ -154,7 +168,9 @@ export function fallbackPlanFromQuestion(question: string): DataPullPlan {
       row_text_narrowing: null,
       client_filters: null,
       filter_label: MISSING_RECONSTRUCTION_FILTER_LABEL,
-      suggest_source_channel_chart: false
+      suggest_source_channel_chart: false,
+      suggest_derived_charts: false,
+      derived_chart_kind_hint: null
     };
   }
 
@@ -164,8 +180,36 @@ export function fallbackPlanFromQuestion(question: string): DataPullPlan {
       row_text_narrowing: null,
       client_filters: null,
       filter_label: null,
-      suggest_source_channel_chart: false
+      suggest_source_channel_chart: false,
+      suggest_derived_charts: false,
+      derived_chart_kind_hint: null
     };
+  }
+
+  if (n.includes("ctvrtleti") || n.includes("ctvrtlet")) {
+    const q1Like =
+      n.includes("1.") ||
+      n.includes("prvni") ||
+      n.includes("prvniho") ||
+      n.includes("i.") ||
+      n.includes(" q1") ||
+      n.startsWith("q1");
+    const mentionsClientLoose =
+      n.includes("klient") ||
+      n.includes("zakaznik") ||
+      n.includes("zakaznici") ||
+      n.includes("zakaznic");
+    if (q1Like && mentionsClientLoose) {
+      return {
+        dataset: "new_clients_q1",
+        row_text_narrowing: null,
+        client_filters: null,
+        filter_label: "Noví klienti — Q1 (view)",
+        suggest_source_channel_chart: true,
+        suggest_derived_charts: false,
+        derived_chart_kind_hint: null
+      };
+    }
   }
 
   const mentionsClient = n.includes("klient") || n.includes("zakaznik") || n.includes("zakaznici");
@@ -177,7 +221,9 @@ export function fallbackPlanFromQuestion(question: string): DataPullPlan {
       row_text_narrowing: areaTerm,
       client_filters: null,
       filter_label: `Klienti — shoda v oblasti / městě / poznámkách („${areaTerm}“)`,
-      suggest_source_channel_chart: false
+      suggest_source_channel_chart: false,
+      suggest_derived_charts: false,
+      derived_chart_kind_hint: null
     };
   }
 
@@ -199,9 +245,22 @@ export function fallbackPlanFromQuestion(question: string): DataPullPlan {
     !n.includes("pptx") &&
     !n.includes("slid");
 
+  const wantsPie =
+    n.includes("kolac") || n.includes("podil") || n.includes("rozlozeni");
+
+  const mentionsNovCustomers =
+    (n.includes("nov") && (n.includes("klient") || n.includes("zakaznik") || n.includes("zakaznici"))) ||
+    n.includes("novack") ||
+    n.includes("novacek");
+
   const wantsQ1NewClients =
-    mentionsClient &&
-    (mentionsQuarter || mentionsAcquisition || wantsChartNotDeck || (n.includes("nov") && mentionsQuarter));
+    (mentionsClient &&
+      (mentionsQuarter ||
+        mentionsAcquisition ||
+        wantsChartNotDeck ||
+        mentionsNovCustomers ||
+        (n.includes("nov") && mentionsQuarter))) ||
+    (mentionsNovCustomers && (mentionsQuarter || n.includes("q1")));
 
   if (wantsQ1NewClients) {
     return {
@@ -209,7 +268,9 @@ export function fallbackPlanFromQuestion(question: string): DataPullPlan {
       row_text_narrowing: null,
       client_filters: null,
       filter_label: "Noví klienti — Q1 (view)",
-      suggest_source_channel_chart: true
+      suggest_source_channel_chart: mentionsQuarter || mentionsAcquisition || wantsChartNotDeck,
+      suggest_derived_charts: false,
+      derived_chart_kind_hint: null
     };
   }
 
@@ -219,21 +280,25 @@ export function fallbackPlanFromQuestion(question: string): DataPullPlan {
       row_text_narrowing: null,
       client_filters: null,
       filter_label: "Klienti (tabulka)",
-      suggest_source_channel_chart: false
+      suggest_source_channel_chart: false,
+      suggest_derived_charts: wantsChartNotDeck || wantsPie,
+      derived_chart_kind_hint: wantsPie ? ("pie" as const) : null
     };
   }
 
   return {
-    dataset: "new_clients_q1",
+    dataset: "clients",
     row_text_narrowing: null,
     client_filters: null,
-    filter_label: "Noví klienti — Q1 (view)",
-    suggest_source_channel_chart: true
+    filter_label: "Klienti (tabulka) — obecný dotaz bez jasného datového presetu",
+    suggest_source_channel_chart: false,
+    suggest_derived_charts: false,
+    derived_chart_kind_hint: null
   };
 }
 
-function coercePlan(raw: DataPullPlan): DataPullPlan {
-  const cf = raw.client_filters?.length ? raw.client_filters.slice(0, 15) : null;
+export function coercePlan(raw: DataPullPlan): DataPullPlan {
+  const cf = raw.client_filters?.length ? raw.client_filters.slice(0, 20) : null;
   return {
     dataset: raw.dataset,
     row_text_narrowing: raw.row_text_narrowing?.trim() || null,
@@ -244,7 +309,9 @@ function coercePlan(raw: DataPullPlan): DataPullPlan {
         ? raw.suggest_source_channel_chart == null
           ? true
           : raw.suggest_source_channel_chart
-        : false
+        : false,
+    suggest_derived_charts: raw.dataset === "clients" ? raw.suggest_derived_charts === true : false,
+    derived_chart_kind_hint: raw.dataset === "clients" ? raw.derived_chart_kind_hint ?? null : null
   };
 }
 
@@ -259,34 +326,51 @@ export async function inferDataPullPlan(params: {
     : undefined;
 
   const system = [
-    "Navrhni jeden interni dotaz nad daty v aplikaci. Vrat POUZE jeden JSON objekt (bez markdownu).",
-    "Povinne klice: dataset, row_text_narrowing (string|null), client_filters (pole|null), filter_label (string|null), suggest_source_channel_chart (boolean).",
+    "Jsi planovac internich dotazu pro back office realitni firmy (CRM klienti, leady, nemovitosti).",
+    "Z uzivatele otazky vyber JEDEN zpusob dotazu nad daty v aplikaci. Vrat POUZE jeden JSON objekt (bez markdownu).",
+    "Povinne klice: dataset, row_text_narrowing (string|null), client_filters (pole|null), filter_label (string|null), suggest_source_channel_chart (boolean), suggest_derived_charts (boolean), derived_chart_kind_hint (\"bar\"|\"line\"|\"pie\"|null).",
     "",
     'dataset: presne jedna z retezcu: "new_clients_q1" | "leads_vs_sales_6m" | "clients" | "missing_reconstruction".',
     "",
     "Dostupne datasety:",
-    "- new_clients_q1: novi klienti v 1. kvartalu aktualniho roku (view ma source_channel).",
-    "- leads_vs_sales_6m: leady vs prodane byty za 6 mesicu.",
-    "- clients: tabulka clients v DB — pro obecne dotazy na klienty, filtry, budget, kanal.",
-    "- missing_reconstruction: nemovitosti s prazdnym reconstruction_notes a/nebo structural_changes; ve vystupu i reconstruction_status, building_works_checklist (JSON pole planovanych uprav), reconstruction_budget_estimate_czk, reconstruction_last_reviewed_at.",
+    "- new_clients_q1: rychla kohorta „novi v Q1 bezného roku“ pres view (Europe/Prague). Pouze kdyz presne sedi toto okno; jinak vzdy dataset clients + filtry na created_at.",
+    "- leads_vs_sales_6m: leady vs prodane byty za poslednich ~6 mesicu (view).",
+    "- clients: primarni zdroj pro klienty — vsechny sloupce tabulky; kombinuj client_filters (viz nize) a/nebo row_text_narrowing. Pro libovolne obdobi / rok / kvartal: ts_gte a ts_lte na created_at (ISO 8601, napr. 2025-01-01T00:00:00.000Z). Tim obejdes nutnost mit view pro kazdy use case.",
+    "- missing_reconstruction: nemovitosti bez rekonstrukcnich udaju / stavebnich uprav ve smyslu interniho checku.",
     "",
-    "row_text_narrowing: u clients/... OR v preferred_district, preferred_city, ... u missing_reconstruction OR v title, city (odvozene z address), district/street v address (jsonb), internal_ref, property_id. Priklady: Dejvice, Praha, cast UUID. null pokud pouzivas jen client_filters nebo zadny text.",
+    "Vyber dataset podle SMYSLU entity a obdobi, ne podle klicovych slov:",
+    "- striktne „novi v Q1 tohoto roku“ jako ve view → new_clients_q1.",
+    "- jiny rok, jine kvartal, rozsah od-do, poslednich N dni (vyjadreno datumy) → clients + ts_gte/ts_lte na created_at.",
+    "- obecny dotaz na klienty → clients.",
     "",
-    "client_filters: pole az 15 podminek pro dataset clients — kazda polozka ma \"kind\" a dalsi pole:",
-    '- text_ilike: { "kind":"text_ilike", "column": <full_name|email|phone|source_channel|preferred_city|preferred_district|property_type_interest|property_notes>, "value": string }',
-    '- text_eq: { "kind":"text_eq", "column": <stejne jako vyse>, "value": string }',
-    '- is_null: { "kind":"is_null", "column": <textovy nebo budget_min_czk|budget_max_czk> }',
-    '- num_gte | num_lte | num_eq: { "kind":"num_gte", "column": budget_min_czk|budget_max_czk, "value": number }',
+    "row_text_narrowing: u clients volitelne OR pres full_name, email, phone, source_channel, preferred_*, property_* (stejna logika jako backend). u missing_reconstruction OR v title, city, address jsonb, internal_ref, property_id. null pokud staci jen client_filters.",
+    "",
+    "client_filters: pole az 20 podminek pro dataset clients — kazda polozka ma \"kind\":",
+    '- text_ilike | text_eq | text_starts_with: column = full_name|email|phone|source_channel|preferred_city|preferred_district|property_type_interest|property_notes; value string',
+    '- text_in: column jako vyse, "values": [string, ...] (presna shoda, napr. vice kanalu)',
+    '- is_null: column textovy nebo budget_min_czk|budget_max_czk',
+    '- num_gte | num_lte | num_gt | num_lt | num_eq: column budget_min_czk|budget_max_czk; value number',
+    '- ts_gte | ts_lte | ts_eq: column jen "created_at"; value ISO 8601 (UTC nebo offset)',
+    '- id_eq: { "kind":"id_eq", "value": "<uuid>" }',
     "Pokud nefiltrujes strukturovane, nastav client_filters na null.",
     "",
     "filter_label: strucny cesky popis vystupu pro uzivatele; muze byt null.",
-    "suggest_source_channel_chart: true jen kdyz dataset je new_clients_q1 a smysl ma graf podle zdroje (kanalu); jinak false."
+    "suggest_source_channel_chart:",
+    "- true: dataset new_clients_q1 a smysl otazky opravdu potrebuje rozklad nebo srovnani podle zdroje/kanalu nebo vizualni trend po kategorii (sloupce, prehled odkud prisli) — i bez slova „graf“.",
+    "- false: cisty seznam, export, jednotlive jmeno, textove zuzeni, nebo dataset neni new_clients_q1; NIKOLI jen proto, ze vete je slovo „tabulka“.",
+    "- prezentace / PowerPoint / deck nad daty je jiny produkt — tady res jen databazovy vystup.",
+    "",
+    "suggest_derived_charts:",
+    "- true jen pro dataset clients, kdy uzivatel chce graf / rozklad / podil / srovnani podle mesta, kanalu, typu nemovitosti, casove osy (mesice) apod. nad vytazenou tabulkou — backend z stejnych radku agreguje, bez dalsiho SQL.",
+    "- false pro new_clients_q1, leads_vs_sales_6m, missing_reconstruction i kdyby v JSON omylem prislo true (ignoruje se mimo clients).",
+    "",
+    "derived_chart_kind_hint: jen pro clients a kdyz suggest_derived_charts true — volitelne \"bar\" | \"line\" | \"pie\" podle slov jako kolac/podil (pie), casova osa (line), jinak null."
   ].join("\n");
 
   const ask = async () =>
     generateWithAzureProxy({
       runId: params.runId,
-      maxTokens: 320,
+      maxTokens: 420,
       trace: traceParams,
       messages: [
         { role: "system", content: system },
@@ -308,7 +392,7 @@ export async function inferDataPullPlan(params: {
       {
         role: "system",
         content:
-          "Predchozi vystup nebyl validni JSON. Oprav na jediny JSON objekt: dataset, row_text_narrowing, client_filters (pole nebo null), filter_label, suggest_source_channel_chart."
+          "Predchozi vystup nebyl validni JSON. Oprav na jediny JSON objekt: dataset, row_text_narrowing, client_filters (pole nebo null), filter_label, suggest_source_channel_chart, suggest_derived_charts, derived_chart_kind_hint (bar|line|pie nebo null)."
       },
       { role: "user", content: llm.text }
     ]

@@ -1,4 +1,4 @@
-import type { AgentAnswer, AgentToolContext } from "@/lib/agent/types";
+import { type AgentAnswer, type AgentToolContext, agentArtifactStoragePathKey } from "@/lib/agent/types";
 import type { ToolRunner } from "@/lib/agent/mcp-tools/tool-runner";
 import { generateUserFacingReply } from "@/lib/agent/llm/user-facing-reply";
 
@@ -9,16 +9,17 @@ export async function runWeeklyReportSubAgent(params: {
   question: string;
   title: string;
 }): Promise<AgentAnswer> {
+  const storageKey = agentArtifactStoragePathKey(params.ctx);
   const data = await params.toolRunner.run<{ rows: Record<string, unknown>[]; source: string }>("runSqlPreset", params.ctx, {
     question: params.question,
-    runId: params.ctx.runId
+    runId: storageKey
   });
 
   const report = await params.toolRunner.run<{ csvPublic: string; mdPublic: string; xlsxPublic: string }>(
     "generateReportArtifacts",
     params.ctx,
     {
-      runId: params.ctx.runId,
+      runId: storageKey,
       title: params.title,
       rows: data.rows
     }
@@ -36,7 +37,7 @@ export async function runWeeklyReportSubAgent(params: {
     "runPresentationAgent",
     params.ctx,
     {
-      runId: params.ctx.runId,
+      runId: storageKey,
       title: params.title,
       rows: data.rows,
       context: presentationContext,

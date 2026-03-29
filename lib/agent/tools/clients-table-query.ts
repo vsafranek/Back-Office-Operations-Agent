@@ -15,6 +15,9 @@ export const ClientQueryableTextColumnSchema = z.enum([
 
 export const ClientQueryableNumericColumnSchema = z.enum(["budget_min_czk", "budget_max_czk"]);
 
+/** Jediny casovy sloupec v tabulce `clients` pro strukturovane filtry (timestamptz). */
+export const ClientQueryableTimestamptzColumnSchema = z.literal("created_at");
+
 const ClientColumnForNullSchema = z.union([ClientQueryableTextColumnSchema, ClientQueryableNumericColumnSchema]);
 
 export const ClientFilterSchema = z.discriminatedUnion("kind", [
@@ -27,6 +30,16 @@ export const ClientFilterSchema = z.discriminatedUnion("kind", [
     kind: z.literal("text_eq"),
     column: ClientQueryableTextColumnSchema,
     value: z.string().max(200)
+  }),
+  z.object({
+    kind: z.literal("text_starts_with"),
+    column: ClientQueryableTextColumnSchema,
+    value: z.string().max(120)
+  }),
+  z.object({
+    kind: z.literal("text_in"),
+    column: ClientQueryableTextColumnSchema,
+    values: z.array(z.string().min(1).max(200)).min(1).max(20)
   }),
   z.object({
     kind: z.literal("is_null"),
@@ -46,10 +59,39 @@ export const ClientFilterSchema = z.discriminatedUnion("kind", [
     kind: z.literal("num_eq"),
     column: ClientQueryableNumericColumnSchema,
     value: z.number()
+  }),
+  z.object({
+    kind: z.literal("num_gt"),
+    column: ClientQueryableNumericColumnSchema,
+    value: z.number()
+  }),
+  z.object({
+    kind: z.literal("num_lt"),
+    column: ClientQueryableNumericColumnSchema,
+    value: z.number()
+  }),
+  z.object({
+    kind: z.literal("ts_gte"),
+    column: ClientQueryableTimestamptzColumnSchema,
+    value: z.string().min(8).max(40)
+  }),
+  z.object({
+    kind: z.literal("ts_lte"),
+    column: ClientQueryableTimestamptzColumnSchema,
+    value: z.string().min(8).max(40)
+  }),
+  z.object({
+    kind: z.literal("ts_eq"),
+    column: ClientQueryableTimestamptzColumnSchema,
+    value: z.string().min(8).max(40)
+  }),
+  z.object({
+    kind: z.literal("id_eq"),
+    value: z.string().uuid()
   })
 ]);
 
-export const ClientFiltersSchema = z.array(ClientFilterSchema).max(15);
+export const ClientFiltersSchema = z.array(ClientFilterSchema).max(20);
 
 export type ClientFilter = z.infer<typeof ClientFilterSchema>;
 
@@ -65,13 +107,26 @@ export function sanitizeClientSearchFragment(raw: string): string {
     .slice(0, 160);
 }
 
+/** Normalizace na ISO pro PostgREST; neplatne retezce ignoruj (filter se neaplikuje). */
+export function coerceTimestamptzFilterValue(raw: string): string | null {
+  const t = raw.trim();
+  if (!t) return null;
+  const ms = Date.parse(t);
+  if (Number.isNaN(ms)) return null;
+  return new Date(ms).toISOString();
+}
+
+function sanitizeTextInValue(raw: string): string {
+  return raw.replace(/%/g, "").replace(/,/g, " ").trim().slice(0, 200);
+}
+
 /**
- * Volný text stejně jako dřívější RPC: OR přes čtvrť, město, poznámky (parametry, ne skládání SQL řetězce).
+ * Volný text: OR přes jméno, kontakt, kanál, preference a poznámky (parametry, ne skládání SQL).
  */
 export function buildClientsTableQuery(
   supabase: SupabaseClient,
   params: {
-    /** OR přes preferred_district, preferred_city, property_notes */
+    /** OR přes hlavní textové sloupce řádku klienta */
     freeTextAreaOrNotes?: string | null;
     filters?: ClientFilter[] | null;
     limit: number;
@@ -86,9 +141,20 @@ export function buildClientsTableQuery(
     if (inner) {
       const p = `%${inner}%`;
       q = q.or(
-        `preferred_district.ilike.${p},preferred_city.ilike.${p},property_notes.ilike.${p}`
+        [
+          "full_name",
+          "email",
+          "phone",
+          "source_channel",
+          "preferred_district",
+          "preferred_city",
+          "property_notes",
+          "property_type_interest"
+        ]
+          .map((col) => `${col}.ilike.${p}`)
+          .join(",")
       );
-      parts.push(`or_ilike_area·«${inner}»`);
+      parts.push(`or_ilike_client·«${inner}»`);
     }
   }
 
@@ -103,6 +169,22 @@ export function buildClientsTableQuery(
         if (v) {
           q = q.ilike(f.column, `%${v}%`);
           parts.push(`${f.column}.ilike`);
+        }
+        break;
+      }
+      case "text_starts_with": {
+        const v = sanitizeClientSearchFragment(f.value);
+        if (v) {
+          q = q.ilike(f.column, `${v}%`);
+          parts.push(`${f.column}.prefix`);
+        }
+        break;
+      }
+      case "text_in": {
+        const cleaned = f.values.map(sanitizeTextInValue).filter((x) => x.length > 0);
+        if (cleaned.length > 0) {
+          q = q.in(f.column, cleaned);
+          parts.push(`${f.column}.in(${cleaned.length})`);
         }
         break;
       }
@@ -121,6 +203,42 @@ export function buildClientsTableQuery(
       case "num_eq":
         q = q.eq(f.column, f.value);
         parts.push(`${f.column}.num_eq`);
+        break;
+      case "num_gt":
+        q = q.gt(f.column, f.value);
+        parts.push(`${f.column}.gt`);
+        break;
+      case "num_lt":
+        q = q.lt(f.column, f.value);
+        parts.push(`${f.column}.lt`);
+        break;
+      case "ts_gte": {
+        const iso = coerceTimestamptzFilterValue(f.value);
+        if (iso) {
+          q = q.gte(f.column, iso);
+          parts.push(`${f.column}.ts_gte`);
+        }
+        break;
+      }
+      case "ts_lte": {
+        const iso = coerceTimestamptzFilterValue(f.value);
+        if (iso) {
+          q = q.lte(f.column, iso);
+          parts.push(`${f.column}.ts_lte`);
+        }
+        break;
+      }
+      case "ts_eq": {
+        const iso = coerceTimestamptzFilterValue(f.value);
+        if (iso) {
+          q = q.eq(f.column, iso);
+          parts.push(`${f.column}.ts_eq`);
+        }
+        break;
+      }
+      case "id_eq":
+        q = q.eq("id", f.value);
+        parts.push("id.eq");
         break;
     }
   }

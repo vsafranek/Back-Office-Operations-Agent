@@ -12,6 +12,8 @@ const bodySchema = z.object({
   client_filters: ClientFiltersSchema.optional().nullable(),
   filter_label: z.string().max(220).optional().nullable(),
   suggest_source_channel_chart: z.boolean().optional(),
+  suggest_derived_charts: z.boolean().optional(),
+  derived_chart_kind_hint: z.enum(["bar", "line", "pie"]).optional().nullable(),
   limit: z.coerce.number().int().min(1).max(200).optional()
 });
 
@@ -33,7 +35,9 @@ export async function POST(request: Request) {
         row_text_narrowing: b.row_text_narrowing ?? null,
         client_filters: b.client_filters ?? null,
         filter_label: b.filter_label ?? null,
-        suggest_source_channel_chart: b.suggest_source_channel_chart ?? false
+        suggest_source_channel_chart: b.suggest_source_channel_chart ?? false,
+        suggest_derived_charts: b.suggest_derived_charts ?? false,
+        derived_chart_kind_hint: b.derived_chart_kind_hint ?? null
       },
       b.limit
     );

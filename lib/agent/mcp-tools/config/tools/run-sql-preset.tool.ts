@@ -15,7 +15,9 @@ const outputSchema = z.object({
   preset: z.string(),
   rowTextNarrowing: z.string().optional(),
   filterLabel: z.string().optional(),
-  suggestSourceChannelChart: z.boolean()
+  suggestSourceChannelChart: z.boolean(),
+  suggestDerivedCharts: z.boolean(),
+  derivedChartKindHint: z.enum(["bar", "line", "pie"]).nullable().optional()
 });
 
 const tool: McpTool<z.infer<typeof inputSchema>, z.infer<typeof outputSchema>> = {

@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import { getEnv } from "@/lib/config/env";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
+import { ensurePublicStorageBucket } from "@/lib/supabase/ensure-storage-bucket";
 
 export type ReportExtraSheet = {
   name: string;
@@ -59,15 +60,7 @@ export async function generateReportArtifacts(params: {
   const supabase = getSupabaseAdminClient();
   const bucketName = env.SUPABASE_STORAGE_BUCKET;
 
-  const bucketCheck = await supabase.storage.getBucket(bucketName);
-  if (bucketCheck.error) {
-    const createBucket = await supabase.storage.createBucket(bucketName, {
-      public: true
-    });
-    if (createBucket.error) {
-      throw new Error(`Storage bucket init failed: ${createBucket.error.message}`);
-    }
-  }
+  await ensurePublicStorageBucket(supabase, bucketName);
 
   const csvHeader = params.rows.length > 0 ? Object.keys(params.rows[0]!) : [];
   const csvBody = params.rows

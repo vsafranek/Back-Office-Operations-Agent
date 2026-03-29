@@ -82,7 +82,7 @@ export function ChatCompanionSidebar({
   getAccessToken,
   lastAgentAnswer,
   onNavigateConversation,
-  expandedWidthPx = 420,
+  expandedWidthPx = 680,
   collapsedWidthPx = 52,
   disableWidthTransition = false
 }: ChatCompanionSidebarProps) {
@@ -220,7 +220,7 @@ export function ChatCompanionSidebar({
               <Text span fw={600}>
                 Odkazy do chatu
               </Text>{" "}
-              — u odchozích e-mailů a u tabulky/grafu použijte „Otevřít konverzaci“ / „Zobrazit v kontextu chatu“.
+              — u odchozích e-mailů a u tabulky/grafu použijte „Otevřít konverzaci“ / „Přejít na odpověď v chatu“.
             </Text>
           </Stack>
         );

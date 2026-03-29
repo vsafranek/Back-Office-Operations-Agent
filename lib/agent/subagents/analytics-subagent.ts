@@ -1,8 +1,12 @@
-import { persistQ1SourceChannelChartPng } from "@/lib/agent/analytics/chart-png";
-import { buildLeadsVsSalesChart } from "@/lib/agent/analytics/leads-vs-sales-chart";
-import { buildSourceChannelChart } from "@/lib/agent/analytics/source-channel-chart";
+import { deriveChartsFromRows } from "@/lib/agent/analytics/derive-charts-from-rows";
+import { persistDerivedChartPng } from "@/lib/agent/analytics/chart-png";
 import { logger } from "@/lib/observability/logger";
-import type { AgentAnswer, AgentToolContext } from "@/lib/agent/types";
+import {
+  type AgentAnswer,
+  type AgentDataPanelChartPng,
+  type AgentToolContext,
+  agentArtifactStoragePathKey
+} from "@/lib/agent/types";
 import type { ToolRunner } from "@/lib/agent/mcp-tools/tool-runner";
 import { generateUserFacingReply } from "@/lib/agent/llm/user-facing-reply";
 import { shouldSuppressChartInPanel } from "@/lib/agent/question-panel-hints";
@@ -13,6 +17,7 @@ export async function runAnalyticsSubAgent(params: {
   ctx: AgentToolContext;
   question: string;
 }): Promise<AgentAnswer> {
+  const storageKey = agentArtifactStoragePathKey(params.ctx);
   const data = await params.toolRunner.run<{
     rows: Record<string, unknown>[];
     source: string;
@@ -20,9 +25,11 @@ export async function runAnalyticsSubAgent(params: {
     rowTextNarrowing?: string;
     filterLabel?: string;
     suggestSourceChannelChart: boolean;
+    suggestDerivedCharts: boolean;
+    derivedChartKindHint?: "bar" | "line" | "pie" | null;
   }>("runSqlPreset", params.ctx, {
     question: params.question,
-    runId: params.ctx.runId
+    runId: storageKey
   });
 
   let extraSheets: Awaited<ReturnType<typeof fetchCrmSheetsForReport>> | undefined;
@@ -41,61 +48,108 @@ export async function runAnalyticsSubAgent(params: {
     "generateReportArtifacts",
     params.ctx,
     {
-      runId: params.ctx.runId,
+      runId: storageKey,
       title: "Ad-hoc analyticky vystup",
       rows: data.rows,
       ...(extraSheets?.length ? { extraSheets } : {})
     }
   );
 
-  const showChannelChart =
-    data.suggestSourceChannelChart && data.preset === "new_clients_q1" && !data.rowTextNarrowing;
+  const derivedCharts = deriveChartsFromRows({
+    rows: data.rows,
+    preset: data.preset,
+    suggestSourceChannelChart: data.suggestSourceChannelChart,
+    suggestDerivedCharts: data.suggestDerivedCharts,
+    rowTextNarrowing: data.rowTextNarrowing,
+    derivedChartKindHint: data.derivedChartKindHint ?? null
+  });
 
-  const showLeadsSalesChart =
-    data.preset === "leads_vs_sales_6m" && !data.rowTextNarrowing;
-  const leadsSalesChart = showLeadsSalesChart ? buildLeadsVsSalesChart(data.rows) : null;
+  const chartPngs: AgentDataPanelChartPng[] = [];
+  const chartArtifacts: { type: "chart"; label: string; url: string }[] = [];
 
-  let chart: ReturnType<typeof buildSourceChannelChart> | null = null;
-  let chartSummary: string;
-  let chartPngPublicUrl: string | null = null;
-  if (showChannelChart) {
-    const q1Chart = buildSourceChannelChart(data.rows);
-    chart = q1Chart;
-    chartSummary =
-      q1Chart.labels.length === 0
-        ? "Podle zdroje: žádní klienti v datasetu."
-        : `Podle zdroje (kanál): ${q1Chart.labels.map((l, i) => `${l}: ${q1Chart.values[i]}`).join(", ")}`;
-
-    if (q1Chart.labels.length > 0) {
-      try {
-        chartPngPublicUrl = await persistQ1SourceChannelChartPng({
-          runId: params.ctx.runId,
-          chart: q1Chart
+  for (let i = 0; i < derivedCharts.length; i++) {
+    const ch = derivedCharts[i]!;
+    try {
+      const url = await persistDerivedChartPng({
+        runId: storageKey,
+        chart: ch,
+        fileSuffix: `${i}-${ch.kind}`
+      });
+      if (url) {
+        chartPngs.push({
+          label: `Graf (PNG) — ${ch.title.slice(0, 48)}${ch.title.length > 48 ? "…" : ""}`,
+          url,
+          kind: ch.kind
         });
-      } catch (err) {
-        logger.warn("chart_png_persist_failed", {
-          runId: params.ctx.runId,
-          message: err instanceof Error ? err.message : String(err)
+        chartArtifacts.push({
+          type: "chart",
+          label: chartPngs[chartPngs.length - 1]!.label,
+          url
         });
       }
+    } catch (err) {
+      logger.warn("chart_png_persist_failed", {
+        runId: params.ctx.runId,
+        chartIndex: i,
+        message: err instanceof Error ? err.message : String(err)
+      });
     }
-  } else if (showLeadsSalesChart && leadsSalesChart && leadsSalesChart.labels.length > 0) {
-    const parts = leadsSalesChart.labels.map(
-      (lab, i) => `${lab}: ${leadsSalesChart.leads[i] ?? 0} leadů / ${leadsSalesChart.sold[i] ?? 0} prodaných`
-    );
-    chartSummary =
-      `V pravém panelu UI je sloupcový graf vývoje (modře leady, zeleně prodané) po měsících. ` +
-      `Souhrn měsíců: ${parts.join("; ")}. ` +
-      `Uživatel často explicitně žádá graf — v answer_text popiš trend z čísel a kladně zmíni, že graf vidí v panelu vedle odpovědi. ` +
-      `NIKDY nepiš, že graf „nelze“ nebo „nevynucuješ“, nebo že by byl k dispozici jen tabulka bez grafu.`;
-  } else if (data.rowTextNarrowing) {
-    chartSummary = `Textové zúžení: „${data.rowTextNarrowing}“. Graf podle kanálu negeneruj, pokud k tomu uživatel výslovně nepobízí a data jsou už vyfiltrované.`;
-  } else {
-    chartSummary =
-      "Graf podle zdroje (kanál) použij jen u přehledu nových klientů Q1 bez textového filtru; u leadů vs prodeje za 6 měsíců je graf v UI, pokud je preset leads_vs_sales_6m.";
   }
 
+  const showChannelChart =
+    data.suggestSourceChannelChart && data.preset === "new_clients_q1" && !data.rowTextNarrowing;
+  const showLeadsSalesChart =
+    data.preset === "leads_vs_sales_6m" && !data.rowTextNarrowing && derivedCharts.length > 0;
+
+  let chartSummary: string;
+  if (derivedCharts.length > 0) {
+    const parts = derivedCharts.map((c) => {
+      if (c.kind === "line" && c.series2Values && c.series2Values.length === c.labels.length) {
+        const head = c.labels
+          .map((lab, i) => `${lab}: ${c.values[i] ?? 0}/${c.series2Values![i] ?? 0}`)
+          .slice(0, 4)
+          .join("; ");
+        return `${c.title} (${head}${c.labels.length > 4 ? "…" : ""})`;
+      }
+      const head = c.labels.map((lab, i) => `${lab}: ${c.values[i] ?? 0}`).slice(0, 5).join(", ");
+      return `${c.title}: ${head}${c.labels.length > 5 ? "…" : ""}`;
+    });
+    chartSummary =
+      `V panelu Nástroje jsou k dispozici grafy (${derivedCharts.length}) z týchž řádků jako tabulka — záložky Tabulka / Grafy. ` +
+      `Souhrn: ${parts.join(" | ")}. ` +
+      `Popis trendu nebo rozkladu v answer_text musi sedet s temito cisly.`;
+  } else if (data.preset === "new_clients_q1" && data.rowTextNarrowing) {
+    chartSummary = `Textové zúžení: „${data.rowTextNarrowing}“. Graf podle kanálu v tomto běhu negenerujeme (agregace Q1 je po zúžení vypnutá).`;
+  } else if (data.preset === "new_clients_q1" && !showChannelChart && !data.rowTextNarrowing) {
+    chartSummary =
+      "Plán dat: bez grafu podle kanálu v UI — odpovídej z tabulky a čísel. Nezmiňuj graf v pravém panelu ani odkazy na sloupcový přehled podle zdroje, protože ten v tomto běhu není.";
+  } else if (data.rowTextNarrowing) {
+    chartSummary = `Textové zúžení: „${data.rowTextNarrowing}“. Odvozené grafy nad tabulkou jen pokud jsou v datech k dispozici (agregace stejných řádků).`;
+  } else {
+    chartSummary =
+      "Grafy se zobrazí jen pokud plán dat povolí agregaci (Q1 kanál, leady 6 měsíců, nebo clients + rozklad).";
+  }
+
+  if (showLeadsSalesChart) {
+    chartSummary +=
+      " U leadů vs prodeje za 6 měsíců je v grafu dvojserie (leady / prodané) — v answer_text popiš trend z čísel a kladně zmíni graf v panelu.";
+  }
+
+  const dataScopeNote =
+    data.preset === "new_clients_q1"
+      ? [
+          "Časové okno dat: view vw_new_clients_q1 odpovídá pouze 1. čtvrtletí běžného roku (časová zóna Europe/Prague).",
+          "Pokud uživatel mínil jiný kalendářní rok nebo širší období, upřímně uveď, že aktuální výpis to neobsahuje, a navrhni upřesnění dotazu."
+        ].join(" ")
+      : data.preset === "leads_vs_sales_6m"
+        ? "Časové okno: view posledních ~6 měsíců leady vs prodané (interní view) — není libovolné období od–do zadané uživatelem."
+        : "";
+
   const sampleRows = data.rows.slice(0, 50);
+  const pngList =
+    chartArtifacts.length > 0
+      ? chartArtifacts.map((a) => `${a.label}: ${a.url}`).join(", ")
+      : "";
   const reply = await generateUserFacingReply({
     runId: params.ctx.runId,
     maxTokens: 1000,
@@ -109,6 +163,7 @@ export async function runAnalyticsSubAgent(params: {
     userContent: [
       `Puvodni dotaz uzivatele: ${params.question}`,
       `Datovy zdroj: ${data.source} (dataset: ${data.preset})`,
+      dataScopeNote,
       `Pocet radek: ${data.rows.length}`,
       chartSummary,
       "Ukazka radku (JSON):",
@@ -117,7 +172,7 @@ export async function runAnalyticsSubAgent(params: {
         extraSheets?.length
           ? " (workbook ma listy Data + Properties + Leads + Deals z interni DB)."
           : ""
-      }${chartPngPublicUrl ? `, graf PNG ${chartPngPublicUrl}` : ""}`,
+      }${pngList ? `, ${pngList}` : ""}`,
       "Shrnut vysledky pro uzivatele (cisla musi sedet s daty vyse) a navrhni dalsi kroky."
     ].join("\n\n")
   });
@@ -127,27 +182,29 @@ export async function runAnalyticsSubAgent(params: {
   const hideChartUi = shouldSuppressChartInPanel(params.question);
 
   const dataPanel =
-    showChannelChart && chart != null
+    data.preset === "new_clients_q1"
       ? {
           kind: "clients_q1" as const,
           source: data.source,
           rows: data.rows,
-          chart,
+          charts: derivedCharts,
           ...(hideChartUi ? { hideChart: true as const } : {})
         }
-      : showLeadsSalesChart && leadsSalesChart && leadsSalesChart.labels.length > 0
+      : data.preset === "leads_vs_sales_6m"
         ? {
             kind: "leads_sales_6m" as const,
             source: data.source,
             rows: data.rows,
-            chart: leadsSalesChart,
+            charts: derivedCharts,
             ...(hideChartUi ? { hideChart: true as const } : {})
           }
         : {
             kind: "clients_filtered" as const,
             source: data.source,
             title: tableTitle,
-            rows: data.rows
+            rows: data.rows,
+            ...(derivedCharts.length > 0 ? { charts: derivedCharts } : {}),
+            ...(hideChartUi ? { hideChart: true as const } : {})
           };
 
   return {
@@ -158,17 +215,14 @@ export async function runAnalyticsSubAgent(params: {
       { type: "table", label: "Dataset (CSV)", url: report.csvPublic },
       { type: "report", label: "Souhrn (Markdown)", url: report.mdPublic },
       { type: "table", label: "Dataset (Excel)", url: report.xlsxPublic },
-      ...(chartPngPublicUrl
-        ? ([
-            { type: "chart" as const, label: "Graf zdroje kanálu (PNG)", url: chartPngPublicUrl }
-          ] as const)
-        : [])
+      ...chartArtifacts
     ],
     next_actions: reply.next_actions,
     dataPanel,
     dataPanelDownloads: {
       excel: report.xlsxPublic,
-      csv: report.csvPublic
+      csv: report.csvPublic,
+      ...(chartPngs.length > 0 ? { chartPngs } : {})
     }
   };
 }

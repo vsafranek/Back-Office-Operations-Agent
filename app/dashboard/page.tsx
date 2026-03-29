@@ -28,6 +28,10 @@ import {
 } from "@/components/agent/ConfigurableAgentPanel";
 import { DEFAULT_AGENT_ID, listAgentIds, listAgentUiOptions } from "@/lib/agent/config/agent-definitions";
 import { readAgentNdjsonStream } from "@/lib/agent/stream-client";
+import {
+  AGENT_PANEL_PAYLOAD_KEY,
+  agentAnswerSliceFromPersistPayload
+} from "@/lib/agent/conversation/agent-panel-persist";
 import type { AgentAnswer } from "@/lib/agent/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
@@ -50,8 +54,9 @@ const LS_CONV_W = "bo-dashboard-conv-width";
 const LS_COMP_W = "bo-dashboard-companion-width";
 const MIN_CONV_W = 200;
 const MAX_CONV_W = 480;
-const MIN_COMP_W = 300;
-const MAX_COMP_W = 720;
+const MIN_COMP_W = 380;
+const MAX_COMP_W = 1200;
+const DEFAULT_COMP_W = 680;
 const COLLAPSED_CONV_W = 48;
 const COLLAPSED_COMP_W = 52;
 
@@ -84,13 +89,13 @@ export default function DashboardPage() {
   const prevConversationIdRef = useRef<string | null>(null);
   const skipNextCompanionClearRef = useRef(false);
   const [convWidthPx, setConvWidthPx] = useState(280);
-  const [companionWidthPx, setCompanionWidthPx] = useState(420);
+  const [companionWidthPx, setCompanionWidthPx] = useState(DEFAULT_COMP_W);
   const [panelResizeActive, setPanelResizeActive] = useState(false);
   const layoutRowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setConvWidthPx(clamp(readWidth(LS_CONV_W, 280), MIN_CONV_W, MAX_CONV_W));
-    setCompanionWidthPx(clamp(readWidth(LS_COMP_W, 420), MIN_COMP_W, MAX_COMP_W));
+    setCompanionWidthPx(clamp(readWidth(LS_COMP_W, DEFAULT_COMP_W), MIN_COMP_W, MAX_COMP_W));
   }, []);
 
   useEffect(() => {
@@ -166,6 +171,56 @@ export default function DashboardPage() {
       setMessages(rows);
     })();
   }, [activeConversationId, supabase.auth]);
+
+  useEffect(() => {
+    if (!activeConversationId) return;
+    const assistants = messages.filter((m) => m.role === "assistant");
+    if (assistants.length === 0) {
+      setLastAgentAnswer(null);
+      return;
+    }
+    const ordered = [...assistants].reverse();
+
+    let target: ConversationMessage | undefined;
+    if (companionRunId != null) {
+      target = ordered.find((m) => (m.metadata as { runId?: string }).runId === companionRunId);
+      if (!target) {
+        const latest = ordered[0]!;
+        const lm = latest.metadata as Record<string, unknown>;
+        if (lm[AGENT_PANEL_PAYLOAD_KEY] != null) target = latest;
+      }
+    } else {
+      const latest = ordered[0]!;
+      const lm = latest.metadata as Record<string, unknown>;
+      if (lm[AGENT_PANEL_PAYLOAD_KEY] == null) {
+        setLastAgentAnswer(null);
+        return;
+      }
+      target = latest;
+    }
+
+    if (!target) return;
+    const meta = target.metadata as Record<string, unknown>;
+    const slice = agentAnswerSliceFromPersistPayload(meta[AGENT_PANEL_PAYLOAD_KEY]);
+    if (!slice) return;
+
+    setLastAgentAnswer({
+      answer_text: target.content,
+      confidence: typeof meta.confidence === "number" ? meta.confidence : 0,
+      sources: Array.isArray(meta.sources)
+        ? meta.sources.filter((s): s is string => typeof s === "string")
+        : [],
+      generated_artifacts: Array.isArray(meta.generated_artifacts)
+        ? (meta.generated_artifacts as AgentAnswer["generated_artifacts"])
+        : [],
+      next_actions: Array.isArray(meta.next_actions)
+        ? meta.next_actions.filter((s): s is string => typeof s === "string")
+        : [],
+      ...slice,
+      runId: typeof meta.runId === "string" ? meta.runId : undefined,
+      intent: typeof meta.intent === "string" ? (meta.intent as AgentAnswer["intent"]) : undefined
+    });
+  }, [activeConversationId, messages, companionRunId]);
 
   async function createConversation() {
     const sessionResult = await supabase.auth.getSession();
@@ -260,6 +315,21 @@ export default function DashboardPage() {
 
   const activeConversationTitle = conversations.find((c) => c.id === activeConversationId)?.title;
 
+  function scrollChatToAgentRun(conversationId: string, runId: string) {
+    const tryScroll = (attempt: number) => {
+      const answerBubble = document.getElementById(`chat-assistant-run-${runId}`);
+      const extra = document.getElementById(`agent-extras--conv--${conversationId}--run--${runId}`);
+      const panel0 = document.getElementById(`agent-data-panel--conv--${conversationId}--run--${runId}--0`);
+      const target = answerBubble ?? extra ?? panel0;
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      if (attempt < 12) window.setTimeout(() => tryScroll(attempt + 1), 80);
+    };
+    window.setTimeout(() => tryScroll(0), 50);
+  }
+
   function navigateToConversation(conversationId: string, runId?: string | null) {
     if (runId) skipNextCompanionClearRef.current = true;
     setActiveConversationId(conversationId);
@@ -273,6 +343,7 @@ export default function DashboardPage() {
         behavior: "smooth",
         block: "nearest"
       });
+      if (runId) scrollChatToAgentRun(conversationId, runId);
     });
   }
 
@@ -540,6 +611,7 @@ export default function DashboardPage() {
                   agents={listAgentUiOptions()}
                   defaultAgentId={selectedAgentId}
                   threadMessages={threadMessages}
+                  syncedAgentAnswer={lastAgentAnswer}
                   conversationContext={{
                     id: activeConversationId,
                     title: activeConversationTitle

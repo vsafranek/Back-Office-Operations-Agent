@@ -25,7 +25,9 @@ export async function generateUserFacingReply(params: {
   const system =
     `${AGENT_SYSTEM_PROMPT}\n\n` +
     "Formuluj odpoved pro uzivatele vyhradne v cestine. Cerpej fakta jen z textu nize (payload); nic si nevymyslej. " +
-    "Vrat POUZE jeden validni JSON objekt (bez markdownu), klice: " +
+    "V answer_text muzes pouzit lehoucke formatovani uvnitr retezce: odstavce (dvojity novy radek), **tučný text**, " +
+    "odkazy jako [popis](https://...) misto holych URL, pripadne hola https URL se zobrazi jako klikatelny odkaz. " +
+    "Vrat POUZE jeden validni JSON objekt (zbytek bez markdownu obalu), klice: " +
     'answer_text (retezec), confidence (0 az 1), next_actions (pole 2–4 kratkych konkretnich navrhu v cestine).';
 
   const llmName = params.trace?.name ?? "llm.user-facing.reply";
