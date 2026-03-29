@@ -30,7 +30,7 @@ Back-office agent for real-estate operations built on:
 - Weekly report flow now generates:
   - CSV dataset
   - Markdown summary
-  - PPTX presentation (`presentation.pptx`) with dynamic slide count (default **3** for weekly flow). When `assets/presentation-templates/blue-white-company-profile.pptx` is present, the deck is filled from that branded template (`pptx-automizer`); see `docs/architecture/presentation-template-blue-white.md`.
+  - PPTX presentation (`presentation.pptx`) with dynamic slide count (default **3** for weekly flow). Default output is a **styled wide deck** built in `pptxgenjs` (header, content card, spacing). Optional `PRESENTATION_USE_TEMPLATE=true` uses the blue-white file + `pptx-automizer`; see `docs/architecture/presentation-modes.md` and `docs/architecture/presentation-template-blue-white.md`.
   - PDF version (`presentation.pdf`) for direct sharing — still a simple text layout from slide specs (not the PPTX design); optional `PRESENTATION_SKIP_PDF=true` replaces it with a short placeholder file.
 - **Template rights**: the blue-white deck is a third-party style; verify license/usage before shipping or redistributing the binary.
 - Decision note for future MCP-based presentation mode:

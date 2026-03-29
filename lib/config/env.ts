@@ -47,7 +47,7 @@ const envSchema = z.object({
   AGENT_TRACE_RETENTION_DAYS: z.coerce.number().int().min(7).max(730).optional(),
   /** Relative to cwd or absolute; default blue-white deck in assets/. */
   PRESENTATION_TEMPLATE_PATH: optionalString,
-  /** When unset, template is used if the resolved file exists. */
+  /** true = PPTX z externí šablony (soubor musí existovat). false / unset = vlastní rozvržení v pptxgenjs. */
   PRESENTATION_USE_TEMPLATE: optionalString,
   /** 1-based slide in template cloned per SlideSpec (see presentation-template-blue-white.md). */
   PRESENTATION_TEMPLATE_CONTENT_SLIDE_INDEX: z.coerce.number().int().min(1).max(200).default(13),

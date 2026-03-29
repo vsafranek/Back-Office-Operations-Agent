@@ -54,7 +54,8 @@ export function ScheduledTaskConfirmationPanel({
           system_prompt: draft.system_prompt,
           user_question: draft.user_question,
           agent_id: draft.agent_id,
-          enabled: true
+          enabled: true,
+          ...(draft.market_listings_params != null ? { market_listings_params: draft.market_listings_params } : {})
         })
       });
       const payload = (await res.json()) as { error?: string };
@@ -110,6 +111,26 @@ export function ScheduledTaskConfirmationPanel({
           <dt style={{ fontWeight: 600, color: "#4c1d95" }}>Dotaz při každém běhu</dt>
           <dd style={{ margin: "4px 0 0", whiteSpace: "pre-wrap", color: "#334155" }}>{draft.user_question}</dd>
         </div>
+        {draft.market_listings_params != null && Object.keys(draft.market_listings_params).length > 0 ? (
+          <div>
+            <dt style={{ fontWeight: 600, color: "#4c1d95" }}>Filtry nabídek (Sreality / Bezrealitky)</dt>
+            <dd style={{ margin: "4px 0 0" }}>
+              <pre
+                style={{
+                  margin: 0,
+                  fontSize: 11,
+                  background: "#ede9fe",
+                  padding: 8,
+                  borderRadius: 6,
+                  overflow: "auto",
+                  maxHeight: 160
+                }}
+              >
+                {JSON.stringify(draft.market_listings_params, null, 2)}
+              </pre>
+            </dd>
+          </div>
+        ) : null}
       </dl>
 
       {error ? <p style={{ margin: 0, color: "#b91c1c", fontSize: 13 }}>{error}</p> : null}

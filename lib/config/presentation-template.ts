@@ -14,6 +14,8 @@ function parseTriStateFlag(raw: string | undefined): "auto" | boolean {
 export type ResolvedPresentationTemplate = {
   resolvedTemplatePath: string;
   useTemplate: boolean;
+  /** True when `resolvedTemplatePath` exists on disk at resolve time. */
+  templateFileOnDisk: boolean;
   contentSlideIndex: number;
   titleSlideIndex: number;
   skipPdf: boolean;
@@ -26,9 +28,10 @@ export function resolvePresentationTemplate(env: AppEnv): ResolvedPresentationTe
 
   const flag = parseTriStateFlag(env.PRESENTATION_USE_TEMPLATE);
   const exists = fs.existsSync(resolvedTemplatePath);
+  /** auto / unset = vlastní stylovaný PPTX (pptxgenjs). Externí .pptx šablona jen při explicitním true. */
   let useTemplate: boolean;
   if (flag === "auto") {
-    useTemplate = exists;
+    useTemplate = false;
   } else if (flag === true) {
     useTemplate = exists;
   } else {
@@ -38,6 +41,7 @@ export function resolvePresentationTemplate(env: AppEnv): ResolvedPresentationTe
   return {
     resolvedTemplatePath,
     useTemplate,
+    templateFileOnDisk: exists,
     contentSlideIndex: env.PRESENTATION_TEMPLATE_CONTENT_SLIDE_INDEX,
     titleSlideIndex: env.PRESENTATION_TEMPLATE_TITLE_SLIDE_INDEX,
     skipPdf: env.PRESENTATION_SKIP_PDF

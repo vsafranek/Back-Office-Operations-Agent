@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActionIcon,
   Alert,
+  Anchor,
   Box,
   Button,
   Divider,
@@ -18,6 +19,7 @@ import {
   Textarea,
   Title
 } from "@mantine/core";
+import Link from "next/link";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
 import { CalendarPreviewStrip } from "@/components/agent/CalendarPreviewStrip";
 import { ChatMessageBubble, type ChatThreadMessage } from "@/components/agent/ChatMessageBubble";
@@ -35,6 +37,7 @@ import {
   applyViewingConfirmedSlotToBody,
   formatViewingSlotRange
 } from "@/lib/agent/viewing-email-slot-body";
+import { storageFolderPrefixFromFilePublicUrl } from "@/lib/ui/storage-public-url";
 
 export type { ChatThreadMessage };
 
@@ -627,6 +630,45 @@ export function ConfigurableAgentPanel({
                             (b) => b.dataPanel.kind === "scheduled_task_confirmation"
                           );
                           if (bundles.length === 0 && scheduledOnly.length === 0) {
+                            const downloadableArts = (displayResult.generated_artifacts ?? []).filter(
+                              (a) =>
+                                a.type !== "email" &&
+                                typeof a.url === "string" &&
+                                a.url.trim().length > 0
+                            );
+                            if (downloadableArts.length > 0) {
+                              const folderPrefix =
+                                downloadableArts
+                                  .map((a) => storageFolderPrefixFromFilePublicUrl(a.url!))
+                                  .find(Boolean) ?? null;
+                              return (
+                                <Stack gap="sm">
+                                  <Text size="xs" c="dimmed">
+                                    K tomuto běhu nejsou v chatu tabulka ani graf — níže jsou odkazy na vygenerované
+                                    soubory (shodně jako v postranním panelu záložka Storage).
+                                  </Text>
+                                  <List size="sm" spacing="xs">
+                                    {downloadableArts.map((a) => (
+                                      <List.Item key={`${a.type}-${a.label}-${a.url}`}>
+                                        <Anchor href={a.url!} target="_blank" rel="noopener noreferrer" size="sm">
+                                          {a.label}
+                                        </Anchor>
+                                      </List.Item>
+                                    ))}
+                                  </List>
+                                  {folderPrefix ? (
+                                    <Anchor
+                                      component={Link}
+                                      href={`/storage?prefix=${encodeURIComponent(folderPrefix)}`}
+                                      size="sm"
+                                      fw={600}
+                                    >
+                                      Otevřít složku v aplikaci Storage →
+                                    </Anchor>
+                                  ) : null}
+                                </Stack>
+                              );
+                            }
                             return (
                               <Text size="xs" c="dimmed">
                                 U tohoto dotazu nejsou tabulka ani grafy — text a odkazy jsou v bublině asistenta výše.

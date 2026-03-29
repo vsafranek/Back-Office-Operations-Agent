@@ -15,6 +15,7 @@ import {
   Modal,
   Select,
   Stack,
+  Switch,
   Tabs,
   Text,
   Textarea,
@@ -92,6 +93,9 @@ export default function SettingsPage() {
   const [schedLoading, setSchedLoading] = useState(false);
   const [schedSaving, setSchedSaving] = useState(false);
   const [schedMessage, setSchedMessage] = useState<string | null>(null);
+  const [presentationOpeningSlide, setPresentationOpeningSlide] = useState(true);
+  const [uiPrefsSaving, setUiPrefsSaving] = useState(false);
+  const [uiPrefsMessage, setUiPrefsMessage] = useState<string | null>(null);
   const [schedForm, setSchedForm] = useState({
     title: "",
     cron_expression: "0 8 * * *",
@@ -152,6 +156,16 @@ export default function SettingsPage() {
       }).catch(() => {});
 
       await loadIntegrations();
+
+      const uiPrefsRes = await fetch("/api/settings/ui-preferences", {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      if (uiPrefsRes.ok) {
+        const up = (await uiPrefsRes.json()) as { presentation_opening_slide?: boolean };
+        if (typeof up.presentation_opening_slide === "boolean") {
+          setPresentationOpeningSlide(up.presentation_opening_slide);
+        }
+      }
 
       const tasksRes = await fetch("/api/settings/scheduled-tasks", {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -338,6 +352,36 @@ export default function SettingsPage() {
     });
   }
 
+  async function persistPresentationOpeningSlide(next: boolean) {
+    setUiPrefsMessage(null);
+    setUiPrefsSaving(true);
+    try {
+      const sessionResult = await supabase.auth.getSession();
+      const accessToken = sessionResult.data.session?.access_token;
+      if (!accessToken) {
+        router.push("/auth/login");
+        return;
+      }
+      const res = await fetch("/api/settings/ui-preferences", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ presentation_opening_slide: next })
+      });
+      const payload = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setUiPrefsMessage(payload.error ?? "Uložení preference selhalo.");
+        return;
+      }
+      setPresentationOpeningSlide(next);
+      setUiPrefsMessage("Nastavení prezentací bylo uloženo.");
+    } finally {
+      setUiPrefsSaving(false);
+    }
+  }
+
   async function handleSetPassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPassMessage(null);
@@ -415,6 +459,7 @@ select cron.schedule(
           <Tabs.List grow>
             <Tabs.Tab value="integrace">Integrace</Tabs.Tab>
             <Tabs.Tab value="automatizace">Naplánované úlohy</Tabs.Tab>
+            <Tabs.Tab value="agent">Agent</Tabs.Tab>
             <Tabs.Tab value="ucet">Účet a bezpečnost</Tabs.Tab>
           </Tabs.List>
 
@@ -637,6 +682,30 @@ select cron.schedule(
             </Accordion.Panel>
           </Accordion.Item>
         </Accordion>
+            </Card>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="agent">
+            <Card withBorder padding="xl" radius="md" shadow="xs">
+              <Title order={3} mb="xs">
+                Prezentace (PPTX / PDF)
+              </Title>
+              <Text size="sm" c="dimmed" mb="md" maw={560}>
+                Určuje, zda agent při generování decku zahrne titulní úvodní slide s krátkým názvem tématu. Počet „obsahových“
+                slidů zůstává stejný; při zapnutém titulku přibyde jedna strana navíc.
+              </Text>
+              <Switch
+                label="Generovat prezentace s úvodním titulním slidem"
+                description="Vypnuto = všechny slidy jsou rovnou obsahové (KPI, tabulky, grafy…)."
+                checked={presentationOpeningSlide}
+                disabled={uiPrefsSaving}
+                onChange={(e) => void persistPresentationOpeningSlide(e.currentTarget.checked)}
+              />
+              {uiPrefsMessage ? (
+                <Text role="status" mt="md" size="sm" fw={500}>
+                  {uiPrefsMessage}
+                </Text>
+              ) : null}
             </Card>
           </Tabs.Panel>
 

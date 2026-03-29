@@ -33,6 +33,9 @@ import {
   agentAnswerSliceFromPersistPayload,
   agentPayloadHasTableOrChartPanel,
   agentPayloadHasViewingEmailDraft,
+  assistantMetadataHasArtifactUrls,
+  assistantMetadataHasStorageLinkedArtifacts,
+  generatedArtifactsFromAssistantMetadata,
   viewingEmailDraftPreviewFromPayload
 } from "@/lib/agent/conversation/agent-panel-persist";
 import type { AgentAnswer } from "@/lib/agent/types";
@@ -142,6 +145,23 @@ export default function DashboardPage() {
       if (!agentPayloadHasViewingEmailDraft(raw)) continue;
       const label = viewingEmailDraftPreviewFromPayload(raw) ?? "Návrh e-mailu";
       out.push({ runId, preview: label });
+    }
+    return out;
+  }, [messages]);
+
+  /** Odpovědi s artefakty v úložišti (PPTX, PDF, reporty…) — navigace v sekci Storage. */
+  const presentationAnswerRuns = useMemo(() => {
+    const assistants = messages.filter((m) => m.role === "assistant");
+    const out: { runId: string; preview: string }[] = [];
+    for (const m of assistants) {
+      const meta = m.metadata as Record<string, unknown>;
+      const runId = meta.runId;
+      if (typeof runId !== "string" || !runId.trim()) continue;
+      if (!assistantMetadataHasStorageLinkedArtifacts(meta)) continue;
+      const full = m.content.replace(/\s+/g, " ").trim();
+      const short = full.slice(0, 56);
+      const preview = full.length > 56 ? `${short}…` : short || "Soubory z odpovědi";
+      out.push({ runId, preview });
     }
     return out;
   }, [messages]);
@@ -293,12 +313,16 @@ export default function DashboardPage() {
       if (!target) {
         const latest = ordered[0]!;
         const lm = latest.metadata as Record<string, unknown>;
-        if (lm[AGENT_PANEL_PAYLOAD_KEY] != null) target = latest;
+        if (lm[AGENT_PANEL_PAYLOAD_KEY] != null || assistantMetadataHasArtifactUrls(lm)) {
+          target = latest;
+        }
       }
     } else {
       const latest = ordered[0]!;
       const lm = latest.metadata as Record<string, unknown>;
-      if (lm[AGENT_PANEL_PAYLOAD_KEY] == null) {
+      const hasPanel = lm[AGENT_PANEL_PAYLOAD_KEY] != null;
+      const hasArtifactUrls = assistantMetadataHasArtifactUrls(lm);
+      if (!hasPanel && !hasArtifactUrls) {
         setLastAgentAnswer(null);
         return;
       }
@@ -308,7 +332,28 @@ export default function DashboardPage() {
     if (!target) return;
     const meta = target.metadata as Record<string, unknown>;
     const slice = agentAnswerSliceFromPersistPayload(meta[AGENT_PANEL_PAYLOAD_KEY]);
-    if (!slice) return;
+    const generated_artifacts = generatedArtifactsFromAssistantMetadata(meta);
+
+    if (!slice) {
+      if (!assistantMetadataHasArtifactUrls(meta)) {
+        setLastAgentAnswer(null);
+        return;
+      }
+      setLastAgentAnswer({
+        answer_text: target.content,
+        confidence: typeof meta.confidence === "number" ? meta.confidence : 0,
+        sources: Array.isArray(meta.sources)
+          ? meta.sources.filter((s): s is string => typeof s === "string")
+          : [],
+        generated_artifacts,
+        next_actions: Array.isArray(meta.next_actions)
+          ? meta.next_actions.filter((s): s is string => typeof s === "string")
+          : [],
+        runId: typeof meta.runId === "string" ? meta.runId : undefined,
+        intent: typeof meta.intent === "string" ? (meta.intent as AgentAnswer["intent"]) : undefined
+      });
+      return;
+    }
 
     setLastAgentAnswer({
       answer_text: target.content,
@@ -316,9 +361,7 @@ export default function DashboardPage() {
       sources: Array.isArray(meta.sources)
         ? meta.sources.filter((s): s is string => typeof s === "string")
         : [],
-      generated_artifacts: Array.isArray(meta.generated_artifacts)
-        ? (meta.generated_artifacts as AgentAnswer["generated_artifacts"])
-        : [],
+      generated_artifacts,
       next_actions: Array.isArray(meta.next_actions)
         ? meta.next_actions.filter((s): s is string => typeof s === "string")
         : [],
@@ -880,6 +923,7 @@ export default function DashboardPage() {
             lastAgentAnswer={mergedLastAgentAnswer}
             onViewingEmailBodyChange={setViewingEmailBodyOverride}
             vizAnswerRuns={vizAnswerRuns}
+            presentationAnswerRuns={presentationAnswerRuns}
             viewingEmailRuns={viewingEmailRuns}
             assistantRunIdsInOrder={assistantRunIdsInOrder}
             assistantAnswerRuns={assistantAnswerRuns}

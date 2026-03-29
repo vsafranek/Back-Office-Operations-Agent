@@ -2,6 +2,8 @@
 
 import {
   ActionIcon,
+  Badge,
+  Box,
   Code,
   Divider,
   Group,
@@ -19,12 +21,12 @@ import {
   IconChartBar,
   IconChevronLeft,
   IconChevronRight,
+  IconClock,
   IconHome,
   IconLayoutSidebarRightExpand,
   IconMail,
   IconShieldCheck,
   IconDatabase,
-  IconGitBranch,
   IconFolder
 } from "@tabler/icons-react";
 import Link from "next/link";
@@ -36,6 +38,7 @@ import {
   DataPresetPanel,
   MailToolPanel,
   MarketSidebarPanel,
+  ScheduledTasksNotificationsPanel,
   VizPanel
 } from "@/components/agent/companion/CompanionToolPanels";
 import type { AgentUiOption } from "@/lib/agent/config/types";
@@ -45,9 +48,11 @@ import {
   companionRunNavCanGoNewer,
   companionRunNavCanGoOlder,
   companionRunNavCursor,
+  companionRunNavDisplayedSlotNumber,
   companionRunNavGoNewer,
   companionRunNavGoOlder
 } from "@/lib/ui/companion-run-nav";
+import { storageFolderPrefixFromFilePublicUrl } from "@/lib/ui/storage-public-url";
 import type { VizAnswerRunOption } from "@/components/agent/companion/CompanionToolPanels";
 
 export type CompanionSectionId =
@@ -57,7 +62,7 @@ export type CompanionSectionId =
   | "data"
   | "viz"
   | "market"
-  | "trace"
+  | "scheduled"
   | "audit"
   | "storage"
   | "help";
@@ -75,6 +80,8 @@ export type ChatCompanionSidebarProps = {
   lastAgentAnswer: AgentAnswer | null;
   /** Odpovědi s tabulkou/grafem (v pořadí konverzace, nejstarší první) — navigace v sekci Tabulka/graf. */
   vizAnswerRuns?: VizAnswerRunOption[];
+  /** Odpovědi s artefakty v úložišti (prezentace, reporty…) — navigace v sekci Storage. */
+  presentationAnswerRuns?: VizAnswerRunOption[];
   /** Odpovědi s návrhem e-mailu (prohlídka) — přepínač v Maily. */
   viewingEmailRuns?: VizAnswerRunOption[];
   /** Assistant runId v pořadí konverzace (nejstarší první) — šipky mezi maily a tabulkami. */
@@ -104,6 +111,7 @@ export function ChatCompanionSidebar({
   getAccessToken,
   lastAgentAnswer,
   vizAnswerRuns = [],
+  presentationAnswerRuns = [],
   viewingEmailRuns = [],
   assistantRunIdsInOrder = [],
   assistantAnswerRuns = [],
@@ -115,8 +123,30 @@ export function ChatCompanionSidebar({
   onViewingEmailBodyChange
 }: ChatCompanionSidebarProps) {
   const [activeSection, setActiveSection] = useState<CompanionSectionId>("mail");
+  const [scheduledUnread, setScheduledUnread] = useState(0);
   const agent = agentOptions.find((a) => a.id === selectedAgentId);
   const mailAutoOpenRunRef = useRef<string | null>(null);
+  const storageAutoOpenRunRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function pollUnread() {
+      const token = await getAccessToken();
+      if (!token || cancelled) return;
+      const res = await fetch("/api/settings/scheduled-task-notifications?count_only=1", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok || cancelled) return;
+      const data = (await res.json()) as { unread_count?: number };
+      if (!cancelled) setScheduledUnread(typeof data.unread_count === "number" ? data.unread_count : 0);
+    }
+    void pollUnread();
+    const t = setInterval(() => void pollUnread(), 90_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [getAccessToken]);
 
   useEffect(() => {
     const runId = lastAgentAnswer?.runId ?? null;
@@ -131,13 +161,33 @@ export function ChatCompanionSidebar({
     if (!isViewing) mailAutoOpenRunRef.current = null;
   }, [lastAgentAnswer]);
 
-  const navItems: { id: CompanionSectionId; label: string; icon: ReactNode }[] = [
+  useEffect(() => {
+    const runId = lastAgentAnswer?.runId ?? null;
+    const hasPresentationFiles = (lastAgentAnswer?.generated_artifacts ?? []).some(
+      (a) => a.type === "presentation" && typeof a.url === "string" && a.url.trim().length > 0
+    );
+    if (hasPresentationFiles && runId && storageAutoOpenRunRef.current !== runId) {
+      storageAutoOpenRunRef.current = runId;
+      if (isDesktop && !panelOpen) onTogglePanel();
+      setActiveSection((prev) =>
+        prev === "calendar" || prev === "viz" || prev === "context" ? prev : "storage"
+      );
+    }
+    if (!hasPresentationFiles) storageAutoOpenRunRef.current = null;
+  }, [lastAgentAnswer, isDesktop, panelOpen, onTogglePanel]);
+
+  const navItems: { id: CompanionSectionId; label: string; icon: ReactNode; badgeCount?: number }[] = [
     { id: "mail", label: "Maily", icon: <IconMail size={20} stroke={1.5} /> },
     { id: "calendar", label: "Kalendář", icon: <IconCalendar size={20} stroke={1.5} /> },
     { id: "data", label: "Data", icon: <IconDatabase size={20} stroke={1.5} /> },
     { id: "viz", label: "Tabulka / graf", icon: <IconChartBar size={20} stroke={1.5} /> },
     { id: "market", label: "Nabídky", icon: <IconHome size={20} stroke={1.5} /> },
-    { id: "trace", label: "Trace", icon: <IconGitBranch size={20} stroke={1.5} /> },
+    {
+      id: "scheduled",
+      label: "Úlohy (cron)",
+      badgeCount: scheduledUnread > 0 ? scheduledUnread : undefined,
+      icon: <IconClock size={20} stroke={1.5} />
+    },
     { id: "audit", label: "Audit", icon: <IconShieldCheck size={20} stroke={1.5} /> },
     { id: "storage", label: "Storage", icon: <IconFolder size={20} stroke={1.5} /> },
     { id: "context", label: "Kontext", icon: <IconLayoutSidebarRightExpand size={20} stroke={1.5} /> },
@@ -283,13 +333,12 @@ export function ChatCompanionSidebar({
         );
       case "market":
         return <MarketSidebarPanel getAccessToken={getAccessToken} />;
-      case "trace":
-        return focusRunId ? (
-          <AgentTraceTree runId={focusRunId} getAccessToken={getAccessToken} />
-        ) : (
-          <Text size="sm" c="dimmed">
-            Spusťte agenta dotazem ve středu obrazovky. Po dokončení běhu se zde zobrazí strom trace.
-          </Text>
+      case "scheduled":
+        return (
+          <ScheduledTasksNotificationsPanel
+            getAccessToken={getAccessToken}
+            onLoaded={setScheduledUnread}
+          />
         );
       case "audit":
         return focusRunId ? (
@@ -299,17 +348,91 @@ export function ChatCompanionSidebar({
             Audit je k dispozici po dokončení běhu s přiřazeným run ID.
           </Text>
         );
-      case "storage":
+      case "storage": {
+        const presNavRunId = lastAgentAnswer?.runId ?? focusRunId ?? null;
+        const presNavCursor = companionRunNavCursor(presentationAnswerRuns, presNavRunId, assistantRunIdsInOrder);
+        const presCount = presentationAnswerRuns.length;
+        const presDisplaySlot = companionRunNavDisplayedSlotNumber(presNavCursor, presCount);
+        const showPresNav = presCount > 1 && onSelectVizAnswerRun != null;
+        const runFileArtifacts = (lastAgentAnswer?.generated_artifacts ?? []).filter(
+          (a) =>
+            a.type !== "email" && typeof a.url === "string" && a.url.trim().length > 0
+        );
+        const folderFromArtifacts =
+          runFileArtifacts.map((a) => storageFolderPrefixFromFilePublicUrl(a.url!)).find(Boolean) ?? null;
+
         return (
           <Stack gap="sm">
-            <Text size="sm">
-              Soubory a artefakty najdete na stránce Storage (celá obrazovka).
+            {showPresNav ? (
+              <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
+                <Tooltip label="Předchozí odpověď se soubory v úložišti">
+                  <ActionIcon
+                    variant="default"
+                    size="sm"
+                    aria-label="Předchozí odpověď se soubory"
+                    disabled={presCount <= 1 || !companionRunNavCanGoOlder(presNavCursor)}
+                    onClick={() => companionRunNavGoOlder(presentationAnswerRuns, presNavCursor, onSelectVizAnswerRun!)}
+                  >
+                    <IconChevronLeft size={18} stroke={1.5} />
+                  </ActionIcon>
+                </Tooltip>
+                <Text size="xs" ta="center" fw={600} lineClamp={1} style={{ flex: 1, minWidth: 0 }}>
+                  Odpověď {presDisplaySlot ?? "—"} / {presCount}
+                </Text>
+                <Tooltip label="Další odpověď se soubory v úložišti">
+                  <ActionIcon
+                    variant="default"
+                    size="sm"
+                    aria-label="Další odpověď se soubory"
+                    disabled={presCount <= 1 || !companionRunNavCanGoNewer(presNavCursor, presCount)}
+                    onClick={() => companionRunNavGoNewer(presentationAnswerRuns, presNavCursor, onSelectVizAnswerRun!)}
+                  >
+                    <IconChevronRight size={18} stroke={1.5} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            ) : null}
+
+            {runFileArtifacts.length > 0 ? (
+              <Stack gap="xs">
+                <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
+                  Soubory z této odpovědi
+                </Text>
+                {runFileArtifacts.map((a) => (
+                  <Text key={`${a.type}-${a.label}-${a.url}`} size="sm">
+                    <Text component="a" href={a.url} target="_blank" rel="noopener noreferrer" c="indigo" fw={600}>
+                      {a.label}
+                    </Text>
+                  </Text>
+                ))}
+                {folderFromArtifacts ? (
+                  <Text size="sm">
+                    <Text
+                      component={Link}
+                      href={`/storage?prefix=${encodeURIComponent(folderFromArtifacts)}`}
+                      c="indigo"
+                      fw={600}
+                    >
+                      Otevřít složku ve Storage →
+                    </Text>
+                  </Text>
+                ) : null}
+              </Stack>
+            ) : (
+              <Text size="sm" c="dimmed">
+                U této odpovědi zatím nejsou žádné soubory s odkazem. Po běhu s výstupy do úložiště se zde objeví odkazy.
+              </Text>
+            )}
+
+            <Text size="sm" c="dimmed">
+              Celý prohlížeč souborů v aplikaci:
             </Text>
             <Text component={Link} href="/storage" size="sm" c="indigo" fw={600}>
               Otevřít Storage →
             </Text>
           </Stack>
         );
+      }
       case "help":
         return (
           <Stack gap="md">
@@ -325,8 +448,8 @@ export function ChatCompanionSidebar({
                 Ikonová navigace
               </Text>{" "}
               — vyberte sekci v pravém sloupci; obsah je vlevo od něj. Ikonky zůstávají viditelné i ve sbaleném
-              panelu. V sekci <Text span fw={600}>Kontext</Text> je strom volání pro zvolený běh (šipkami jako u
-              dalších nástrojů); samostatná záložka Trace zobrazuje totéž pro rychlý přístup. Audit vychází ze zvoleného běhu v konverzaci.
+              panelu. V sekci <Text span fw={600}>Kontext</Text> je strom volání pro zvolený běh (šipkami mezi
+              zprávami). Trace zůstává i v bublině asistenta ve vlákně. Audit vychází ze zvoleného běhu v konverzaci.
             </Text>
             <Text size="sm">
               <Text span fw={600}>
@@ -374,7 +497,31 @@ export function ChatCompanionSidebar({
                 activeSection === item.id ? "1px solid var(--mantine-color-indigo-3)" : "1px solid transparent"
             }}
           >
-            {item.icon}
+            <Box pos="relative" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {item.icon}
+              {item.badgeCount != null && item.badgeCount > 0 ? (
+                <Badge
+                  size="xs"
+                  variant="filled"
+                  color="red"
+                  circle
+                  px={4}
+                  style={{
+                    position: "absolute",
+                    top: -6,
+                    right: -8,
+                    minWidth: 18,
+                    height: 18,
+                    paddingInline: 4,
+                    fontSize: 10,
+                    lineHeight: 1,
+                    pointerEvents: "none"
+                  }}
+                >
+                  {item.badgeCount > 99 ? "99+" : item.badgeCount}
+                </Badge>
+              ) : null}
+            </Box>
           </UnstyledButton>
         </Tooltip>
       ))}
@@ -489,7 +636,29 @@ export function ChatCompanionSidebar({
                       }}
                     >
                       <Group gap={6} wrap="nowrap">
-                        {item.icon}
+                        <Box pos="relative" style={{ display: "flex" }}>
+                          {item.icon}
+                          {item.badgeCount != null && item.badgeCount > 0 ? (
+                            <Badge
+                              size="xs"
+                              variant="filled"
+                              color="red"
+                              circle
+                              px={4}
+                              style={{
+                                position: "absolute",
+                                top: -6,
+                                right: -6,
+                                minWidth: 16,
+                                height: 16,
+                                fontSize: 9,
+                                pointerEvents: "none"
+                              }}
+                            >
+                              {item.badgeCount > 99 ? "99+" : item.badgeCount}
+                            </Badge>
+                          ) : null}
+                        </Box>
                         <Text size="xs" fw={600}>
                           {item.label}
                         </Text>

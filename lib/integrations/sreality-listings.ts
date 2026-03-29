@@ -4,8 +4,10 @@
  */
 import { logger } from "@/lib/observability/logger";
 import type { MarketListing } from "@/lib/agent/tools/market-listing-model";
+import { buildSrealityListingDetailUrl } from "@/lib/integrations/sreality-detail-seo-url";
 
 const SREALITY_ESTATES = "https://www.sreality.cz/api/cs/v2/estates";
+const SREALITY_ORIGIN = "https://www.sreality.cz";
 
 const DEFAULT_USER_AGENT =
   "Mozilla/5.0 (compatible; BackOfficeBot/1.0; +internal-market-monitor; respectful fetch)";
@@ -19,6 +21,11 @@ export type FetchSrealityListingsParams = {
   localityRegionId?: number;
   /** Volitelné užší městská část (číslo z webu Sreality) */
   localityDistrictId?: number;
+  /**
+   * Dispozice (byty) nebo typ domu — `category_sub_cb` v API.
+   * @see lib/integrations/sreality-param-catalog.ts
+   */
+  categorySubCb?: number;
   page: number;
   perPage: number;
   userAgent?: string;
@@ -32,6 +39,12 @@ type SrealityEstate = {
   name?: string;
   locality?: string;
   price_czk?: { value_raw?: number };
+  seo?: {
+    category_main_cb?: number;
+    category_sub_cb?: number;
+    category_type_cb?: number;
+    locality?: string;
+  };
   _links?: {
     self?: { href?: string };
     images?: SrealityImageLink[];
@@ -39,8 +52,52 @@ type SrealityEstate = {
   };
 };
 
+/**
+ * Veřejná stránka detailu: preferuje SEO `/detail/{typ}/{kategorie}/{podtyp}/{lokalita}/{id}` z `seo`,
+ * jinak bezpečný `self` odkaz z API, jinak `?detail=` (může vyžadovat JS na webu Sreality).
+ */
+export function pickAbsoluteDetailUrl(estate: SrealityEstate, hash: number): string {
+  const fromSeo = buildSrealityListingDetailUrl(hash, estate.seo);
+  if (fromSeo) return fromSeo;
+
+  const selfHref = estate._links?.self?.href;
+  if (typeof selfHref === "string") {
+    const candidate = toAbsoluteSrealityHref(selfHref);
+    if (candidate && isBrowserFriendlySrealityListingUrl(candidate)) {
+      return candidate;
+    }
+  }
+  return buildDetailUrl(hash);
+}
+
+function toAbsoluteSrealityHref(href: string): string | null {
+  const t = href.trim();
+  if (!t) return null;
+  if (t.startsWith("http://") || t.startsWith("https://")) return t;
+  if (t.startsWith("/")) return `${SREALITY_ORIGIN}${t}`;
+  return null;
+}
+
+/**
+ * Odfiltruje API odkazy (`/cs/v2/estates/…`) a přijme jen užitečné uživatelské URL
+ * (SEO `/detail/…/…/…/…/id` nebo `/?detail=`).
+ */
+function isBrowserFriendlySrealityListingUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (!u.hostname.endsWith("sreality.cz")) return false;
+    if (u.pathname.includes("/cs/v2/") || u.pathname.includes("/api/")) return false;
+    if (u.searchParams.get("detail")) return true;
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts[0] === "detail" && parts.length >= 5) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function buildDetailUrl(hashId: number): string {
-  return `https://www.sreality.cz/detail/${hashId}`;
+  return `${SREALITY_ORIGIN}/?detail=${hashId}`;
 }
 
 function mapEstateToListing(estate: SrealityEstate, observedAt: string): MarketListing | null {
@@ -53,7 +110,7 @@ function mapEstateToListing(estate: SrealityEstate, observedAt: string): MarketL
   const priceNote =
     typeof priceRaw === "number" && priceRaw > 1 ? ` · ${Math.round(priceRaw).toLocaleString("cs-CZ")} Kč` : "";
   const title = `${name}${priceNote}`;
-  const url = buildDetailUrl(hash);
+  const url = pickAbsoluteDetailUrl(estate, hash);
 
   const imgs = estate._links?.images ?? estate._links?.image_middle2;
   const firstImg = Array.isArray(imgs) ? imgs[0]?.href : undefined;
@@ -86,6 +143,9 @@ export async function fetchSrealityListings(params: FetchSrealityListingsParams)
   }
   if (params.localityDistrictId != null) {
     qs.set("locality_district_id", String(params.localityDistrictId));
+  }
+  if (params.categorySubCb != null) {
+    qs.set("category_sub_cb", String(params.categorySubCb));
   }
 
   const url = `${SREALITY_ESTATES}?${qs.toString()}`;

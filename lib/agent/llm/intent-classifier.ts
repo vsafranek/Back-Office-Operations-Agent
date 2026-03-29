@@ -15,7 +15,7 @@ const IntentSchema = z.object({
     "scheduled_agent_task",
     "casual_chat"
   ]),
-  slideCount: z.number().int().min(2).max(15).optional()
+  slideCount: z.number().int().min(1).max(14).optional()
 });
 
 export type ClassifiedAgentIntent = z.infer<typeof IntentSchema>;
@@ -45,7 +45,7 @@ export async function classifyAgentIntent(params: {
           content:
             `${INTENT_CLASSIFIER_IDENTITY}\n\n` +
             "Zarad pozadavek uzivatele do jedne kategorie. Vrat POUZE JSON bez markdownu nebo vysvetlovani, tvar:\n" +
-            '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings"|"scheduled_agent_task"|"casual_chat","slideCount":<cislo 2-15 nebo vynechej>}\n\n' +
+            '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings"|"scheduled_agent_task"|"casual_chat","slideCount":<cislo 1-14 poctu obsahovych slidu bez titulku nebo vynechej>}\n\n' +
             "Nejdrive zvaz: jde o pozdrav, podekovani, „jak se mas“, small talk nebo zdvorilost BEZ pracovniho ukolu? → casual_chat. V tom pripade NIKDY web_search.\n" +
             "analytics: interni data, SQL, KPI, klienti, leady, dashboard — tabulka, CSV, graf nebo Markdown z dat. „Znazornit“ v kontextu cisel/dashboardu/reportu z DB je analytics; PPTX jen kdyz je zrejmy slidovy deck (viz presentation).\n" +
             "calendar_email: e-mail, prohlidka, termin schuzky, kalendář, Gmail draft — text pak zušlechťuje specialista na oficiální maily. " +
@@ -56,7 +56,7 @@ export async function classifyAgentIntent(params: {
             "web_search: jen kdyz uzivatel EXPLICITNE chce overit fakt, aktualitu nebo informaci na verejnem webu (mimo interni DB). NIKOLIV u pozdravu ani vyznamu bezne fraze. NIKOLIV „jak se mas“.\n" +
             "scheduled_agent_task: uzivatel chce nastavit OPAKOVANOU ulohu (cron), automaticky beh agenta, systemovy prompt, cas — napr. kazdy den v 8, kazdou hodinu, pg_cron. NENI to jednorazovy analyticky dotaz.\n" +
             "casual_chat: pozdravy, diky, „jak se mas“, obecna zdvorilost, konverzace bez pozadavku na data, nastroje, e-mail, report ani webovy fakticky dotaz.\n" +
-            "slideCount dopln u presentation nebo weekly_report pokud uzivatel zminil konkretni pocet slidu; jinak vynechej (system pouzije standard 3)."
+            "slideCount dopln u presentation nebo weekly_report pri konkretnim poctu OBSAHOVYCH slidu bez titulku (cislice nebo cesky); jinak vynechej (system pouzije standard 3 obsahove + titulek)."
         },
         { role: "user", content: `Pozadavek:\n${params.question}${history}` }
       ]

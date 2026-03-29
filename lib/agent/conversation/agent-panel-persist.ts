@@ -1,5 +1,6 @@
 import type {
   AgentAnswer,
+  AgentArtifact,
   AgentDataPanel,
   AgentDataPanelBundle,
   AgentDataPanelDownloads
@@ -111,6 +112,42 @@ export function agentAnswerSliceFromPersistPayload(raw: unknown): Pick<
     dataPanelDownloads: out[0]!.dataPanelDownloads,
     dataPanelBundles: out
   };
+}
+
+const ARTIFACT_TYPES = new Set<AgentArtifact["type"]>(["chart", "table", "report", "presentation", "email"]);
+
+/** Artefakty z uložené metadata zprávy (bez panelu) — např. PPTX/PDF po F5. */
+export function generatedArtifactsFromAssistantMetadata(metadata: Record<string, unknown>): AgentArtifact[] {
+  const arts = metadata.generated_artifacts;
+  if (!Array.isArray(arts)) return [];
+  const out: AgentArtifact[] = [];
+  for (const a of arts) {
+    if (!isRecord(a)) continue;
+    const type = a.type;
+    if (typeof type !== "string" || !ARTIFACT_TYPES.has(type as AgentArtifact["type"])) continue;
+    const label = typeof a.label === "string" && a.label.trim() ? a.label : "Soubor";
+    out.push({
+      type: type as AgentArtifact["type"],
+      label,
+      ...(typeof a.url === "string" && a.url.trim() ? { url: a.url.trim() } : {}),
+      ...(typeof a.content === "string" ? { content: a.content } : {})
+    });
+  }
+  return out;
+}
+
+/** Zda zpráva má v metadatech aspoň jeden artefakt s URL (soubor v úložišti / veřejný odkaz). */
+export function assistantMetadataHasArtifactUrls(metadata: Record<string, unknown>): boolean {
+  return generatedArtifactsFromAssistantMetadata(metadata).some(
+    (a) => typeof a.url === "string" && a.url.trim().length > 0
+  );
+}
+
+/** Odpovědi vhodné pro navigaci ve Storage (ne e-mailové návrhy). */
+export function assistantMetadataHasStorageLinkedArtifacts(metadata: Record<string, unknown>): boolean {
+  return generatedArtifactsFromAssistantMetadata(metadata).some(
+    (a) => a.type !== "email" && typeof a.url === "string" && a.url.trim().length > 0
+  );
 }
 
 /** Panely, které patří do navigace „Tabulka / graf“ (ne e-mail ani potvrzení cron úlohy). */

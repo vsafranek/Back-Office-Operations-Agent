@@ -7,7 +7,7 @@ import { runWeeklyReportSubAgent } from "@/lib/agent/subagents/weekly-report-sub
 export async function runWeeklyExecutiveReport(options?: { slideCount?: number; title?: string; context?: string }) {
   const runId = `weekly-${Date.now()}`;
   const supabase = getSupabaseAdminClient();
-  const resolvedSlideCount = Math.min(15, Math.max(2, options?.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT));
+  const resolvedSlideCount = Math.min(14, Math.max(1, options?.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT));
   const deckTitle = options?.title?.trim() || "Tydenni executive report";
   const deckContext = options?.context?.trim() || "Tydenni update pro management realitnich operaci.";
   await supabase.from("workflow_runs").insert({

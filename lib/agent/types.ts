@@ -189,6 +189,8 @@ export type AgentDataPanel =
         system_prompt: string;
         user_question: string;
         agent_id: string;
+        /** Parametry pro automatické stažení nabídek při běhu cronu (stejný tvar jako fetchMarketListings). */
+        market_listings_params?: Record<string, unknown> | null;
       };
     };
 

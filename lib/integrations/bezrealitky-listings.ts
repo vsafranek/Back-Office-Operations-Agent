@@ -136,17 +136,16 @@ function mapAdvertRow(
     pickString(row.location) ||
     locationFallback;
 
-  const detailUrl = `https://www.bezrealitky.cz/detail/${id}`;
-
   const uri = pickString(row.uri) || pickString(row.url) || pickString(row.slug);
-  const legacyUrl =
-    uri.startsWith("http")
-      ? uri
-      : uri
-        ? `https://www.bezrealitky.cz/nemovitosti-byty-domy/${uri.replace(/^\//, "")}`
-        : detailUrl;
-
-  const url = id.startsWith("idx-") ? legacyUrl : detailUrl;
+  /** Preferuj cestu z API; /detail/{id} často neodpovídá tvaru id z GraphQL. */
+  let url: string;
+  if (uri.startsWith("http")) {
+    url = uri;
+  } else if (uri) {
+    url = `https://www.bezrealitky.cz/${uri.replace(/^\//, "")}`;
+  } else {
+    url = `https://www.bezrealitky.cz/detail/${id}`;
+  }
 
   const main = row.mainImage as { url?: string } | undefined;
   const imageUrl =

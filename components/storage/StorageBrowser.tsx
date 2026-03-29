@@ -45,8 +45,8 @@ import {
   IconTrash
 } from "@tabler/icons-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 type StorageFile = {
@@ -130,6 +130,7 @@ function FileTypeIcon({ name, size = 28 }: { name: string; size?: number }) {
 export function StorageBrowser() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [files, setFiles] = useState<StorageFile[]>([]);
   const [folders, setFolders] = useState<StorageFolder[]>([]);
   const [rootFolders, setRootFolders] = useState<StorageFolder[]>([]);
@@ -156,6 +157,17 @@ export function StorageBrowser() {
   const [previewText, setPreviewText] = useState<string | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const prefixFromQueryApplied = useRef<string | null>(null);
+
+  useEffect(() => {
+    const raw = searchParams.get("prefix")?.trim() ?? "";
+    if (!raw) return;
+    const safe = raw.replace(/^\/+|\/+$/g, "");
+    if (!safe || safe.includes("..") || !/^[\w.\-/]+$/.test(safe)) return;
+    if (prefixFromQueryApplied.current === safe) return;
+    prefixFromQueryApplied.current = safe;
+    setPrefix(safe);
+  }, [searchParams]);
 
   const crumbs = prefix.split("/").filter(Boolean);
   const parent = parentPrefix(prefix);

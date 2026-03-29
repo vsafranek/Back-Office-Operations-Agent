@@ -64,7 +64,7 @@ export async function runAgentOrchestrator(params: {
   }
 
   if (params.intent === "presentation") {
-    const slideCount = params.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT;
+    const slideCount = Math.min(14, Math.max(1, params.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT));
     const title = params.question.trim().slice(0, 120) || "Prezentace";
     return runPresentationSubAgent({
       toolRunner,
@@ -77,7 +77,7 @@ export async function runAgentOrchestrator(params: {
   }
 
   if (params.intent === "weekly_report") {
-    const slideCount = params.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT;
+    const slideCount = Math.min(14, Math.max(1, params.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT));
     const title = params.question.trim().slice(0, 120) || "Prezentacni report";
     return runWeeklyReportSubAgent({
       toolRunner,

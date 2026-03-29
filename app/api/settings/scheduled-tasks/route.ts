@@ -12,7 +12,8 @@ const taskBodySchema = z.object({
   system_prompt: z.string().min(1).max(12000),
   user_question: z.string().min(1).max(4000).optional(),
   agent_id: z.enum(["basic", "thinking-orchestrator"]).optional(),
-  enabled: z.boolean().optional()
+  enabled: z.boolean().optional(),
+  market_listings_params: z.record(z.string(), z.unknown()).nullable().optional()
 });
 
 export async function GET(request: Request) {
@@ -22,7 +23,7 @@ export async function GET(request: Request) {
     const { data, error } = await supabase
       .from("user_scheduled_agent_tasks")
       .select(
-        "id, title, cron_expression, timezone, system_prompt, user_question, agent_id, enabled, last_run_at, created_at, updated_at"
+        "id, title, cron_expression, timezone, system_prompt, user_question, agent_id, enabled, last_run_at, created_at, updated_at, market_listings_params"
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
     }
 
     const supabase = getSupabaseAdminClient();
-    const row = {
+    const row: Record<string, unknown> = {
       user_id: user.id,
       title: parsed.title.trim(),
       cron_expression: parsed.cron_expression.trim(),
@@ -60,6 +61,9 @@ export async function POST(request: Request) {
       enabled: parsed.enabled ?? true,
       updated_at: new Date().toISOString()
     };
+    if (parsed.market_listings_params !== undefined) {
+      row.market_listings_params = parsed.market_listings_params;
+    }
 
     const { data, error } = await supabase.from("user_scheduled_agent_tasks").insert(row).select().single();
 

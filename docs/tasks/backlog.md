@@ -1,6 +1,6 @@
 # Back Office Agent Backlog
 
-Last updated: 2026-03-28 (chat bubbles, trace v bublině, SegmentedControl agent)
+Last updated: 2026-03-29 (rozsah trhu: pouze Sreality + Bezrealitky)
 
 ## How to use
 - `status`: `todo` | `in_progress` | `blocked` | `done`
@@ -13,7 +13,7 @@ Last updated: 2026-03-28 (chat bubbles, trace v bublině, SegmentedControl agent
 |---|---|---|---|---|
 | BOA-001 | Weekly report: generate 3-slide presentation artifact | done | P0 | PPTX+PDF do Supabase Storage, verejne URL v artefaktech. Vychozi pocet slidu 3 (`WEEKLY_REPORT_DEFAULT_SLIDE_COUNT`). |
 | BOA-002 | Generate chart images (PNG) for analytics outputs | done | P0 | Q1 kanálový graf: SVG (`chart-png-svg.ts`) → PNG (`sharp`) → `reports/{runId}/q1-source-channel.png`, veřejná URL v artefaktu typu `chart`; analytický subagent. |
-| BOA-003 | Replace market monitor mock feed with real property sources | done | P0 | Daily monitor už bere jen Sreality + Bezrealitky (`fetchMarketListings` default); **mock** odstraněn z produkce. Filtr relevance čtvrtí: `market-listing-locality-filter.ts` + `daily-market-monitor-subagent` (Holešovice → text v lokaci/titulku, fallback pokud by filtr vyprázdnil data). |
+| BOA-003 | Replace market monitor mock feed with real property sources | done | P0 | Daily monitor bere **výhradně Sreality + Bezrealitky** — produktový rozsah (viz BOA-013). **Mock** odstraněn z produkce. Filtr relevance čtvrtí: `market-listing-locality-filter.ts` + `daily-market-monitor-subagent` (Holešovice → text v lokaci/titulku, fallback pokud by filtr vyprázdnil data). |
 | BOA-004 | Add explicit approval workflow for outbound email sending | done | P1 | Panel: draft v Gmailu nebo „Odeslat rovnou“; `POST /api/google/email-send` s `strategy` `from_draft` \| `direct`. MCP: `sendGmailOutbound`, `createEmailDraft` (+ audit draftu), `listGmailMessages`, `getGmailMessage`. Vazba leadů: `013_outbound_email_leads` (**nasazeno na remote**), `leadIds` v API, `relatedLeadIds` v `dataPanel` (zatím ruční UUID — viz BOA-019). |
 | BOA-005 | Create data-quality task queue for missing property fields | todo | P1 | MVP hotový: agent + `missing_reconstruction` → `fn_missing_reconstruction_data`, exporty CSV/MD/XLSX, textové zúžení (title, city z RPC, `address` jsonb, internal_ref); jedna migrace **015** (rekonstrukce + `address` + DQI seed + mock 01dd) + `data_quality_issues`. Dál: owner/priority, UI fronty, auto-create při dotazu. |
 | BOA-006 | Add role model (admin, broker, management) and enforce RLS/UI permissions | todo | P1 | Restrict reports and settings by role. |
@@ -23,7 +23,7 @@ Last updated: 2026-03-28 (chat bubbles, trace v bublině, SegmentedControl agent
 | BOA-010 | Add pagination and lazy loading for long conversation histories | todo | P2 | Prevent full-history payload on each switch. |
 | BOA-011 | Add scheduler verification runbook and automated health checks | todo | P2 | Tik z Supabase na Next (`/api/cron/scheduled-agent-tasks`, `x-cron-secret` = `CRON_SECRET`) — provozovatel nasadil. Zbývá: krátký runbook (kontrola jobu, očekávaná odpověď JSON `results`), alerting / log při `status: error` v `results`. |
 | BOA-012 | Add disconnect/reconnect Google integration diagnostics in UI | in_progress | P2 | Disconnect implemented. Remaining: token health, last refresh timestamp, guided reconnect. |
-| BOA-013 | Scrapers for major Czech listing portals (Sreality.cz, Reality.iDNES.cz, Bezrealitky.cz) | in_progress | P0 | Hotovo první vlna: Sreality (API), Bezrealitky (GraphQL přes env + šablona). Zbývá iDNES / detail parsing / meziportálový dedupe — navazuje na BOA-003. |
+| BOA-013 | Napojení na realitní portály: pouze Sreality a Bezrealitky | done | P0 | **Rozsah:** integrace jen **Sreality** (API) a **Bezrealitky** (GraphQL přes env + šablona). Reality iDNES a další české portály **nejsou v plánu**. Meziportálový dedupe / další scrapery mimo rozsah — lze časem zvážit jen pokud se změní strategie. Navazuje na BOA-003. |
 | BOA-014 | Agent-callable Clients DB query tool | done | P1 | Rozšířen `runSqlPreset`: preset `new_clients_q1` → view `vw_new_clients_q1` (migrace 008: Q1 + aktuální rok Europe/Prague), lepší detekce z NL (`detectQueryPresetFromQuestion`). Service-role beze změny. |
 | BOA-015 | Pravý panel: tabulka + graf z výstupů agenta | done | P1 | `AgentAnswer.dataPanel`, analytics subagent plní `clients_q1`; UI `AgentDataPanel` + split grid v `ConfigurableAgentPanel`. PNG export viz BOA-002. |
 | BOA-016 | Analytics: graf + panel pro leady vs prodané (6 měsíců) | done | P1 | `dataPanel` `leads_sales_6m`: dvojité sloupce v UI + tabulka; LLM instrukce neomlouvají absenci grafu. Volitelný follow-up: PNG do Storage jako u Q1 (`chart-png`). |
@@ -40,3 +40,4 @@ Last updated: 2026-03-28 (chat bubbles, trace v bublině, SegmentedControl agent
 - **Naplánované úlohy agenta (BOA-020):** tabulka + RLS, tik z Supabase na Next, uživatelské úlohy v nastavení / potvrzení v chatu.
 - **Kalendář / prohlídka:** MCP `browseCalendarAvailability`, náhled v `CalendarPreviewStrip`, podpis odesílatele, expert na maily v `calendar-email-subagent`.
 - **Gmail:** čtení schránky (`listGmailMessages`, `getGmailMessage`), sloučené odeslání `sendGmailOutbound`.
+- **Trh / nabídky:** produktově jsou podporované jen portály **Sreality** a **Bezrealitky** (BOA-003, BOA-013); žádné další realitky v backlogu neplánovat bez změny rozhodnutí.

@@ -49,7 +49,7 @@ describe("fetchBezrealitkyListings", () => {
     expect(rows[0]!.external_id).toBe("bezrealitky:adv-1");
     expect(rows[0]!.source).toBe("bezrealitky");
     expect(rows[0]!.location).toContain("Praha");
-    expect(rows[0]!.url).toBe("https://www.bezrealitky.cz/detail/adv-1");
+    expect(rows[0]!.url).toBe("https://www.bezrealitky.cz/adv-1-nabidka-test");
     expect(rows[0]!.image_url).toContain("bezrealitky.cz");
   });
 

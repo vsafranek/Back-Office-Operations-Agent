@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AgentAnswer } from "@/lib/agent/types";
 import { getAgentDefinition } from "@/lib/agent/config/registry";
 import { classifyAgentIntent, type ClassifiedAgentIntent } from "@/lib/agent/llm/intent-classifier";
+import { applyPresentationIntentHeuristics } from "@/lib/agent/llm/intent-heuristics";
 import { classifyWithThinkingOrchestrator } from "@/lib/agent/llm/thinking-orchestrator";
 import { createAgentRunHandle } from "@/lib/agent/runtime/agent-run-handle";
 import { logger } from "@/lib/observability/logger";
@@ -175,7 +176,7 @@ export async function runBackOfficeAgent(input: {
       intentVal === "weekly_report" || intentVal === "presentation"
         ? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT
         : 5;
-    return Math.min(15, Math.max(2, explicitSlideCount ?? fromClassifier ?? slideDefault));
+    return Math.min(14, Math.max(1, explicitSlideCount ?? fromClassifier ?? slideDefault));
   }
 
   if (effectiveTasks.length === 1) {
@@ -189,7 +190,7 @@ export async function runBackOfficeAgent(input: {
     }
 
     const one = await classifyOne(classifierQuestion);
-    classified = one.classified;
+    classified = applyPresentationIntentHeuristics(one.classified, effectiveQuestionSingle);
     orchestrationReasoning = one.reasoning;
     intent = classified.intent;
     await emit(intentProgressLabel(intent));
@@ -304,12 +305,13 @@ export async function runBackOfficeAgent(input: {
       const partMeta = await classifyOne(clsQ);
       if (partMeta.reasoning) reasoningChunks.push(partMeta.reasoning);
 
-      const partIntent = partMeta.classified.intent;
+      const partClassified = applyPresentationIntentHeuristics(partMeta.classified, eff);
+      const partIntent = partClassified.intent;
       await emit(
         `Podotázka ${i + 1}/${effectiveTasks.length}: ${intentProgressLabel(partIntent)}`
       );
 
-      const partSlideCount = resolveSlides(partMeta.classified, partIntent);
+      const partSlideCount = resolveSlides(partClassified, partIntent);
 
       const partDispatchId = await handle.trace.record({
         parentId: rootId,

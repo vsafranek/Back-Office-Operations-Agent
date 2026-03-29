@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_PANEL_MAX_ROWS,
   agentAnswerSliceFromPersistPayload,
-  buildAgentPanelPersistPayload
+  assistantMetadataHasArtifactUrls,
+  buildAgentPanelPersistPayload,
+  generatedArtifactsFromAssistantMetadata
 } from "@/lib/agent/conversation/agent-panel-persist";
 import type { AgentAnswer } from "@/lib/agent/types";
 
@@ -49,5 +51,18 @@ describe("agent-panel-persist", () => {
     expect(payload).not.toBeNull();
     const slice = agentAnswerSliceFromPersistPayload(payload);
     expect(slice?.dataPanel?.kind).toBe("clients_q1");
+  });
+
+  it("parses generated_artifacts z metadata pro obnovu bez panelu", () => {
+    const meta = {
+      generated_artifacts: [
+        { type: "presentation", label: "PPTX", url: "https://x.test/public/foo/bar.pptx" },
+        { type: "bogus", label: "X", url: "https://z" }
+      ]
+    };
+    const arts = generatedArtifactsFromAssistantMetadata(meta);
+    expect(arts).toHaveLength(1);
+    expect(arts[0]!.type).toBe("presentation");
+    expect(assistantMetadataHasArtifactUrls(meta)).toBe(true);
   });
 });

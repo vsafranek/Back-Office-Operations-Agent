@@ -3,6 +3,7 @@ import type { McpTool } from "@/lib/agent/mcp-tools/types";
 import type { AgentToolContext } from "@/lib/agent/types";
 import type { McpToolConfigEntry } from "@/lib/agent/mcp-tools/config/types";
 import { validateCronExpression } from "@/lib/scheduled-tasks/cron-helpers";
+import { StoredMarketListingsParamsSchema } from "@/lib/agent/tools/market-listings-tool";
 
 export const ProposeScheduledAgentTaskInputSchema = z.object({
   title: z.string().min(1).max(200),
@@ -11,7 +12,8 @@ export const ProposeScheduledAgentTaskInputSchema = z.object({
   timezone: z.string().min(1).max(80).default("Europe/Prague"),
   system_prompt: z.string().min(1).max(12000),
   user_question: z.string().min(1).max(4000).default("Splň naplánovanou úlohu podle systémového zadání."),
-  agent_id: z.enum(["basic", "thinking-orchestrator"]).default("basic")
+  agent_id: z.enum(["basic", "thinking-orchestrator"]).default("basic"),
+  market_listings_params: StoredMarketListingsParamsSchema.nullable().optional()
 });
 
 export const ProposeScheduledAgentTaskOutputSchema = z.object({
@@ -22,7 +24,8 @@ export const ProposeScheduledAgentTaskOutputSchema = z.object({
     timezone: z.string(),
     system_prompt: z.string(),
     user_question: z.string(),
-    agent_id: z.string()
+    agent_id: z.string(),
+    market_listings_params: z.record(z.string(), z.unknown()).nullable().optional()
   })
 });
 
@@ -49,7 +52,10 @@ const tool: McpTool<z.infer<typeof ProposeScheduledAgentTaskInputSchema>, z.infe
         timezone: input.timezone.trim(),
         system_prompt: input.system_prompt.trim(),
         user_question: input.user_question.trim(),
-        agent_id: input.agent_id
+        agent_id: input.agent_id,
+        ...(input.market_listings_params != null && Object.keys(input.market_listings_params).length > 0
+          ? { market_listings_params: input.market_listings_params as Record<string, unknown> }
+          : {})
       };
       return {
         message:

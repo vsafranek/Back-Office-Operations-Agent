@@ -18,12 +18,12 @@ const INTENT_ENUM = [
 const ThinkingOrchestratorSchema = z.object({
   reasoning: z.string().min(1),
   intent: z.enum(INTENT_ENUM),
-  slideCount: z.number().int().min(2).max(15).optional()
+  slideCount: z.number().int().min(1).max(14).optional()
 });
 
 const IntentOnlySchema = z.object({
   intent: z.enum(INTENT_ENUM),
-  slideCount: z.number().int().min(2).max(15).optional()
+  slideCount: z.number().int().min(1).max(14).optional()
 });
 
 export type ThinkingOrchestratorResult = ClassifiedAgentIntent & {
@@ -42,7 +42,7 @@ function intentRulesBlock(): string {
     "- web_search: jen explicitni fakticky dotaz na verejny web (aktuality, cizi pojem) — NIKDY pozdrav, „jak se mas“, diky ani vyznam fraze.\n" +
     "- scheduled_agent_task: opakovany cron, automaticky beh agenta, system prompt, naplanovat ulohu — ne jednorazova analytika.\n" +
     "- casual_chat: pozdrav, small talk, zdvorilost bez pracovniho ukolu — odpoved bez nastroju, ne web_search.\n" +
-    "slideCount u presentation nebo weekly_report jen pokud uzivatel explicitne zminil pocet slidu; jinak pole vynechej.\n"
+    "slideCount u presentation nebo weekly_report = pocet OBSAHOVYCH slidu (bez titulku), 1–14; titulek prida system. Pri explicitnim poctu (cislo nebo napr. tremi slidy); jinak pole vynechej.\n"
   );
 }
 
@@ -51,7 +51,7 @@ function buildThinkingSystemPrompt(extra: string): string {
     "Jsi orchestrator back-office agenta pro realitni firmu.\n" +
     "Nejdrive proved uvahu (reasoning): 3–8 vet v cestine, co uzivatel chce, jaka je sporna mista a ktery typ ulohy to je.\n" +
     "Pak v jedinem JSON objektu (bez markdownu) vrat:\n" +
-    '{"reasoning":"<tva uvaha jako jeden retezec>","intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings"|"scheduled_agent_task"|"casual_chat","slideCount":<volitelne 2-15>}\n' +
+    '{"reasoning":"<tva uvaha jako jeden retezec>","intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings"|"scheduled_agent_task"|"casual_chat","slideCount":<volitelne 1-14, obsahove slidy>}\n' +
     intentRulesBlock() +
     "V poli reasoning strucne shrn duvod pro vybrany intent." +
     extra
@@ -101,7 +101,7 @@ async function thinkingOrchestratorStreamed(params: {
 
   const intentSystem =
     "Na zaklade zadani uzivatele a hotove uvahy asistenta (cesky) vrat POUZE jeden JSON objekt (bez markdownu):\n" +
-    '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings"|"scheduled_agent_task"|"casual_chat","slideCount":<volitelne cislo 2-15>}\n' +
+    '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings"|"scheduled_agent_task"|"casual_chat","slideCount":<volitelne cislo 1-14 obsahovych slidu>}\n' +
     intentRulesBlock();
 
   const intentUser =

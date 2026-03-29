@@ -12,7 +12,8 @@ const patchSchema = z.object({
   system_prompt: z.string().min(1).max(12000).optional(),
   user_question: z.string().min(1).max(4000).optional(),
   agent_id: z.enum(["basic", "thinking-orchestrator"]).optional(),
-  enabled: z.boolean().optional()
+  enabled: z.boolean().optional(),
+  market_listings_params: z.record(z.string(), z.unknown()).nullable().optional()
 });
 
 export async function PATCH(request: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -51,6 +52,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
     if (parsed.user_question !== undefined) updates.user_question = parsed.user_question.trim();
     if (parsed.agent_id !== undefined) updates.agent_id = parsed.agent_id;
     if (parsed.enabled !== undefined) updates.enabled = parsed.enabled;
+    if (parsed.market_listings_params !== undefined) updates.market_listings_params = parsed.market_listings_params;
 
     const supabase = getSupabaseAdminClient();
     const { data, error } = await supabase

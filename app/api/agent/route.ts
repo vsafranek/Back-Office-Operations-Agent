@@ -20,7 +20,7 @@ const requestSchema = z.object({
     .object({
       presentation: z
         .object({
-          slideCount: z.coerce.number().int().min(2).max(15).optional()
+          slideCount: z.coerce.number().int().min(1).max(14).optional()
         })
         .optional()
     })

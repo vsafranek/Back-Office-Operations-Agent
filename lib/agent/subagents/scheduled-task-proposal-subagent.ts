@@ -7,6 +7,7 @@ import {
   ProposeScheduledAgentTaskInputSchema,
   ProposeScheduledAgentTaskOutputSchema
 } from "@/lib/agent/mcp-tools/config/tools/propose-scheduled-agent-task.tool";
+import { StoredMarketListingsParamsSchema } from "@/lib/agent/tools/market-listings-tool";
 
 const LlmExtractionSchema = z.object({
   title: z.string().min(1),
@@ -14,21 +15,18 @@ const LlmExtractionSchema = z.object({
   timezone: z.string().optional(),
   system_prompt: z.string().min(1),
   user_question: z.string().optional(),
-  agent_id: z.enum(["basic", "thinking-orchestrator"]).optional()
+  agent_id: z.enum(["basic", "thinking-orchestrator"]).optional(),
+  /** Volitelně: filtry pro Sreality/Bezrealitky (location, sources, srealityOfferKind, …). */
+  market_listings_params: z.record(z.string(), z.unknown()).optional()
 });
 
 const EXTRACTION_SYSTEM = `Z pozadavku uzivatele vyextrahuj navrh OPAKOVANE naplanovane ulohy pro back-office agenta.
-Vrat POUZE jeden JSON objekt (bez markdownu):
-{
-  "title": "kratky nazev ulohy",
-  "cron_expression": "5 poli jako v PostgreSQL pg_cron: minuta hodina den_mesice mesic den_tydne, napr. 0 8 * * * pro kazdy den 8:00",
-  "timezone": "IANA casova zona, vychozi Europe/Prague pokud nejasne",
-  "system_prompt": "podrobne systemove instrukce pro agenta pri kazdem automaticke behu (role, format, omezeni)",
-  "user_question": "kratke opakovane zadani pri kazdem behu (napr. co konkretne udelat tentokrat)",
-  "agent_id": "basic" nebo "thinking-orchestrator" podle slozitosti; vychozi basic
-}
+Vrat POUZE jeden JSON objekt (bez markdownu), klice:
+- title, cron_expression (5 poli pg_cron), timezone (IANA, vychozi Europe/Prague), system_prompt, user_question, agent_id ("basic"|"thinking-orchestrator")
+- market_listings_params (volitelny objekt): pri sledovani nabidek Sreality/Bezrealitky nastav napr. location Plzen, sources [sreality,bezrealitky], srealityOfferKind prodej|pronajem, bezrealitkyOfferType PRODEJ|PRONAJEM, srealityCategoryMain 1=byty 2=domy, perPage, regionGeocodeHint.
 Pokud uzivatel cas nedefinuje rozumne, pouzij 0 9 * * * a timezone Europe/Prague.
-system_prompt a user_question musi davat smysl v kontextu realitni back-office firmy.`;
+system_prompt a user_question musi davat smysl v kontextu realitni back-office firmy.
+Pri pravidelnem sledovani novych nabidek vzdy dopln market_listings_params s location a sources.`;
 
 export async function runScheduledTaskProposalSubAgent(params: {
   toolRunner: ToolRunner;
@@ -74,13 +72,21 @@ export async function runScheduledTaskProposalSubAgent(params: {
     };
   }
 
+  const mlpParsed =
+    raw.market_listings_params != null
+      ? StoredMarketListingsParamsSchema.safeParse(raw.market_listings_params)
+      : null;
+  const market_listings_params =
+    mlpParsed?.success && mlpParsed.data && Object.keys(mlpParsed.data).length > 0 ? mlpParsed.data : undefined;
+
   const toolInput: z.infer<typeof ProposeScheduledAgentTaskInputSchema> = {
     title: raw.title.trim(),
     cron_expression: raw.cron_expression.trim(),
     timezone: (raw.timezone ?? "Europe/Prague").trim(),
     system_prompt: raw.system_prompt.trim(),
     user_question: raw.user_question?.trim() || "Splň naplánovanou úlohu podle systémového zadání.",
-    agent_id: raw.agent_id ?? "basic"
+    agent_id: raw.agent_id ?? "basic",
+    ...(market_listings_params ? { market_listings_params } : {})
   };
 
   try {

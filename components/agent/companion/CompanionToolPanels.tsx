@@ -1,36 +1,48 @@
 "use client";
 
 import {
+  Accordion,
   ActionIcon,
   Anchor,
+  Autocomplete,
+  Badge,
   Button,
   Checkbox,
   Code,
   Divider,
   Group,
+  Loader,
   Modal,
   MultiSelect,
+  Paper,
   NumberInput,
   Collapse,
   ScrollArea,
+  SegmentedControl,
   Select,
   Skeleton,
   Stack,
   Text,
   Textarea,
   TextInput,
+  TagsInput,
   Tooltip,
   UnstyledButton
 } from "@mantine/core";
 import Link from "next/link";
 import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
-import { useDisclosure } from "@mantine/hooks";
+import { useDebouncedValue, useDisclosure } from "@mantine/hooks";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarPreviewStrip } from "@/components/agent/CalendarPreviewStrip";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
 import { ViewingEmailDraftPanel } from "@/components/agent/ViewingEmailDraftPanel";
 import { MarketListingsDataPanelSection } from "@/components/agent/MarketListingsDataPanelSection";
 import type { FetchMarketListingsInput } from "@/lib/agent/tools/market-listings-tool";
+import {
+  srealityCategorySubSelectData,
+  srealityDistrictSelectData,
+  srealityRegionSelectData
+} from "@/lib/integrations/sreality-param-catalog";
 import type { AgentAnswer, AgentDataPanel as AgentDataPanelModel } from "@/lib/agent/types";
 import {
   buildViewingEmailPreviewRange,
@@ -979,25 +991,100 @@ export function MarketSidebarPanel({ getAccessToken }: { getAccessToken: () => P
   const [location, setLocation] = useState("Praha");
   const [sources, setSources] = useState<string[]>(["sreality", "bezrealitky"]);
   const [perPage, setPerPage] = useState(24);
+  const [offerKind, setOfferKind] = useState<"prodej" | "pronajem">("prodej");
+  const [srealityCategoryMain, setSrealityCategoryMain] = useState<"byty" | "domy">("byty");
+  const [regionGeocodeHint, setRegionGeocodeHint] = useState("");
+  const [srealityRegionId, setSrealityRegionId] = useState<string | null>(null);
+  const [srealityDistrictId, setSrealityDistrictId] = useState<string | null>(null);
+  const [srealityCategorySubId, setSrealityCategorySubId] = useState<string | null>(null);
+  const [bezOsmTags, setBezOsmTags] = useState<string[]>([]);
   const [params, setParams] = useState<FetchMarketListingsInput | null>(null);
+  const [locationSuggestions, setLocationSuggestions] = useState<{ value: string; label: string }[]>([]);
+  const [locationSuggestLoading, setLocationSuggestLoading] = useState(false);
+  const [debouncedLocation] = useDebouncedValue(location.trim(), 450);
+
+  const regionSelectData = useMemo(() => srealityRegionSelectData(), []);
+  const districtSelectData = useMemo(() => srealityDistrictSelectData(), []);
+  const categorySubSelectData = useMemo(
+    () => srealityCategorySubSelectData(srealityCategoryMain === "domy" ? 2 : 1),
+    [srealityCategoryMain]
+  );
+
+  useEffect(() => {
+    setSrealityCategorySubId(null);
+  }, [srealityCategoryMain]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function suggest() {
+      if (debouncedLocation.length < 2) {
+        setLocationSuggestions([]);
+        setLocationSuggestLoading(false);
+        return;
+      }
+      setLocationSuggestLoading(true);
+      try {
+        const token = await getAccessToken();
+        if (!token || cancelled) return;
+        const res = await fetch(
+          `/api/geocode/nominatim-suggest?q=${encodeURIComponent(debouncedLocation)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!res.ok || cancelled) return;
+        const payload = (await res.json()) as { suggestions?: { value: string; label: string }[] };
+        if (!cancelled) setLocationSuggestions(payload.suggestions ?? []);
+      } finally {
+        if (!cancelled) setLocationSuggestLoading(false);
+      }
+    }
+    void suggest();
+    return () => {
+      cancelled = true;
+    };
+  }, [debouncedLocation, getAccessToken]);
 
   function search() {
     const src = (sources.length ? sources : ["sreality"]) as ("sreality" | "bezrealitky")[];
-    setParams({
+    const regionId = srealityRegionId ? parseInt(srealityRegionId, 10) : NaN;
+    const districtId = srealityDistrictId ? parseInt(srealityDistrictId, 10) : NaN;
+    const subId = srealityCategorySubId ? parseInt(srealityCategorySubId, 10) : NaN;
+    const osm = bezOsmTags.map((t) => t.trim()).filter(Boolean);
+    const next: FetchMarketListingsInput = {
       location: location.trim() || "Česko",
       sources: src,
       page: 1,
       perPage,
-      srealityOfferKind: "prodej"
-    });
+      srealityOfferKind: offerKind,
+      bezrealitkyOfferType: offerKind === "pronajem" ? "PRONAJEM" : "PRODEJ",
+      srealityCategoryMain: srealityCategoryMain === "domy" ? 2 : 1
+    };
+    if (regionGeocodeHint.trim()) next.regionGeocodeHint = regionGeocodeHint.trim();
+    if (Number.isFinite(regionId)) next.srealityLocalityRegionId = regionId;
+    if (Number.isFinite(districtId)) next.srealityLocalityDistrictId = districtId;
+    if (Number.isFinite(subId)) next.srealityCategorySubCb = subId;
+    if (osm.length) next.bezrealitkyRegionOsmIds = osm;
+    setParams(next);
   }
 
   return (
     <Stack gap="sm">
       <Text size="sm" c="dimmed">
-        Rychlé stažení nabídek (stejné API jako agent).
+        Rychlé stažení nabídek (stejné API jako agent). Prázdné pokročilé pole = automatika (Nominatim podle lokality).
       </Text>
-      <TextInput label="Lokalita" value={location} onChange={(e) => setLocation(e.currentTarget.value)} size="xs" />
+      <Autocomplete
+        label="Lokalita"
+        description="Pište název města nebo obce (ČR) — našeptání přes OpenStreetMap Nominatim."
+        placeholder="např. Plzeň, Brno-Židenice"
+        size="xs"
+        value={location}
+        onChange={setLocation}
+        data={locationSuggestions}
+        filter={({ options }) => options}
+        limit={12}
+        maxDropdownHeight={240}
+        rightSection={locationSuggestLoading ? <Loader size="xs" /> : null}
+        comboboxProps={{ withinPortal: true, zIndex: 400 }}
+      />
       <MultiSelect
         label="Portály"
         data={[
@@ -1008,7 +1095,95 @@ export function MarketSidebarPanel({ getAccessToken }: { getAccessToken: () => P
         onChange={setSources}
         size="xs"
       />
-      <NumberInput label="Počet" value={perPage} onChange={(v) => setPerPage(typeof v === "number" ? v : 24)} min={6} max={60} size="xs" />
+      <div>
+        <Text size="xs" fw={500} mb={6}>
+          Typ nabídky
+        </Text>
+        <SegmentedControl
+          size="xs"
+          value={offerKind}
+          onChange={(v) => setOfferKind(v as "prodej" | "pronajem")}
+          data={[
+            { value: "prodej", label: "Prodej" },
+            { value: "pronajem", label: "Pronájem" }
+          ]}
+        />
+      </div>
+      <div>
+        <Text size="xs" fw={500} mb={6}>
+          Sreality: kategorie
+        </Text>
+        <SegmentedControl
+          size="xs"
+          value={srealityCategoryMain}
+          onChange={(v) => setSrealityCategoryMain(v as "byty" | "domy")}
+          data={[
+            { value: "byty", label: "Byty" },
+            { value: "domy", label: "Domy" }
+          ]}
+        />
+      </div>
+      <Select
+        label="Sreality: dispozice / typ (category_sub_cb)"
+        description="Volitelné — podle typu Byty/Domy. ID z dokumentace Sreality / starší config.php RSS."
+        placeholder="Všechny v kategorii"
+        searchable
+        clearable
+        size="xs"
+        data={categorySubSelectData}
+        value={srealityCategorySubId}
+        onChange={setSrealityCategorySubId}
+      />
+      <NumberInput label="Počet / stránka" value={perPage} onChange={(v) => setPerPage(typeof v === "number" ? v : 24)} min={6} max={60} size="xs" />
+      <Accordion variant="contained" radius="sm" chevronPosition="right">
+        <Accordion.Item value="adv">
+          <Accordion.Control>
+            <Text size="xs" fw={600}>
+              Pokročilé (ID regionu, OSM, hint)
+            </Text>
+          </Accordion.Control>
+          <Accordion.Panel>
+            <Stack gap="xs">
+              <TextInput
+                label="Hint pro geokód (volitelně)"
+                description="Krátký řetězec pro Nominatim, pokud „Lokalita“ nevyjde."
+                value={regionGeocodeHint}
+                onChange={(e) => setRegionGeocodeHint(e.currentTarget.value)}
+                size="xs"
+              />
+              <Select
+                label="Kraj (locality_region_id)"
+                description="Výběr nebo prázdné → při hledání Nominatim podle lokality."
+                placeholder="— automatika / ruční hint níže"
+                searchable
+                clearable
+                size="xs"
+                data={regionSelectData}
+                value={srealityRegionId}
+                onChange={setSrealityRegionId}
+              />
+              <Select
+                label="Okres / část Prahy (locality_district_id)"
+                description="Např. Plzeň-město · 12 — užší filtr v rámci kraje."
+                placeholder="—"
+                searchable
+                clearable
+                size="xs"
+                data={districtSelectData}
+                value={srealityDistrictId}
+                onChange={setSrealityDistrictId}
+              />
+              <TagsInput
+                label="Bezrealitky regionOsmIds (prefix R…)"
+                placeholder="Vložte a Enter"
+                value={bezOsmTags}
+                onChange={setBezOsmTags}
+                size="xs"
+              />
+            </Stack>
+          </Accordion.Panel>
+        </Accordion.Item>
+      </Accordion>
       <Button size="xs" onClick={search}>
         Načíst nabídky
       </Button>
@@ -1020,6 +1195,194 @@ export function MarketSidebarPanel({ getAccessToken }: { getAccessToken: () => P
           getAccessToken={getAccessToken}
         />
       ) : null}
+    </Stack>
+  );
+}
+
+export type ScheduledTaskNotificationRow = {
+  id: string;
+  task_id: string;
+  task_title: string;
+  task_cron: string;
+  agent_run_id: string | null;
+  status: "ok" | "error";
+  summary: string;
+  detail: string | null;
+  read_at: string | null;
+  created_at: string;
+};
+
+/** Přehled běhů naplánovaných úloh (cron) a označení přečtení. */
+export function ScheduledTasksNotificationsPanel({
+  getAccessToken,
+  onLoaded
+}: {
+  getAccessToken: () => Promise<string | null>;
+  onLoaded?: (unreadCount: number) => void;
+}) {
+  const [items, setItems] = useState<ScheduledTaskNotificationRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    setErr(null);
+    const token = await getAccessToken();
+    if (!token) {
+      setErr("Nejste přihlášeni.");
+      setLoading(false);
+      return;
+    }
+    const res = await fetch("/api/settings/scheduled-task-notifications?limit=80", {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const payload = (await res.json()) as {
+      error?: string;
+      notifications?: ScheduledTaskNotificationRow[];
+      unread_count?: number;
+    };
+    if (!res.ok) {
+      setErr(payload.error ?? `HTTP ${res.status}`);
+      setLoading(false);
+      return;
+    }
+    setItems(payload.notifications ?? []);
+    onLoaded?.(payload.unread_count ?? 0);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  async function markAllRead() {
+    const token = await getAccessToken();
+    if (!token) return;
+    await fetch("/api/settings/scheduled-task-notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ mark_all_read: true })
+    });
+    await load();
+  }
+
+  async function markReadId(id: string) {
+    const token = await getAccessToken();
+    if (!token) return;
+    await fetch("/api/settings/scheduled-task-notifications", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ mark_read_ids: [id] })
+    });
+    await load();
+  }
+
+  const grouped = useMemo(() => {
+    const m = new Map<string, ScheduledTaskNotificationRow[]>();
+    for (const n of items) {
+      const key = n.task_title || n.task_id;
+      if (!m.has(key)) m.set(key, []);
+      m.get(key)!.push(n);
+    }
+    return [...m.entries()];
+  }, [items]);
+
+  if (loading) {
+    return (
+      <Stack gap="sm">
+        <Skeleton h={20} />
+        <Skeleton h={60} />
+        <Skeleton h={60} />
+      </Stack>
+    );
+  }
+
+  return (
+    <Stack gap="sm">
+      <Text size="sm" c="dimmed">
+        Po každém běhu naplánované úlohy (volání cron endpointu) se zde objeví záznam. Úlohy spravujete v Nastavení.
+      </Text>
+      <Group justify="space-between" wrap="nowrap">
+        <Button size="compact-xs" variant="light" onClick={() => void load()}>
+          Obnovit
+        </Button>
+        <Button size="compact-xs" variant="default" onClick={() => void markAllRead()}>
+          Označit vše přečtené
+        </Button>
+      </Group>
+      {err ? (
+        <Text size="sm" c="red">
+          {err}
+        </Text>
+      ) : null}
+      {items.length === 0 ? (
+        <Text size="sm" c="dimmed">
+          Zatím žádné záznamy — po prvním tiknutí cronu se objeví výsledek běhu.
+        </Text>
+      ) : (
+        <Accordion variant="separated" multiple>
+          {grouped.map(([title, rows]) => (
+            <Accordion.Item key={title} value={title}>
+              <Accordion.Control>
+                <Group justify="space-between" wrap="nowrap" gap="xs">
+                  <Text size="sm" fw={600} lineClamp={1} style={{ flex: 1 }}>
+                    {title}
+                  </Text>
+                  <Badge size="sm" variant="light">
+                    {rows.length}
+                  </Badge>
+                </Group>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap="sm">
+                  {rows.map((n) => (
+                    <Paper key={n.id} withBorder p="sm" radius="md">
+                      <Group justify="space-between" wrap="nowrap" gap={6} mb={6}>
+                        <Group gap={6} wrap="nowrap">
+                          <Badge size="xs" color={n.status === "ok" ? "teal" : "red"}>
+                            {n.status}
+                          </Badge>
+                          {!n.read_at ? (
+                            <Badge size="xs" variant="outline" color="orange">
+                              Nepřečtené
+                            </Badge>
+                          ) : null}
+                        </Group>
+                        <Group gap={6} wrap="nowrap">
+                          {!n.read_at ? (
+                            <Button
+                              size="compact-xs"
+                              variant="subtle"
+                              onClick={() => void markReadId(n.id)}
+                            >
+                              Přečíst
+                            </Button>
+                          ) : null}
+                          <Text size="xs" c="dimmed">
+                            {new Date(n.created_at).toLocaleString("cs-CZ")}
+                          </Text>
+                        </Group>
+                      </Group>
+                      <Text size="xs" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {n.summary}
+                      </Text>
+                      {n.detail ? (
+                        <Text size="xs" c="dimmed" mt={4} style={{ whiteSpace: "pre-wrap" }}>
+                          {n.detail}
+                        </Text>
+                      ) : null}
+                      {n.agent_run_id ? (
+                        <Text size="xs" c="dimmed" mt={4}>
+                          run_id: <Code>{n.agent_run_id}</Code>
+                        </Text>
+                      ) : null}
+                    </Paper>
+                  ))}
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+          ))}
+        </Accordion>
+      )}
     </Stack>
   );
 }

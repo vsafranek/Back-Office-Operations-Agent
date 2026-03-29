@@ -1,5 +1,3 @@
-import PptxGenJS from "pptxgenjs";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { z } from "zod";
 import { WEEKLY_REPORT_DEFAULT_SLIDE_COUNT } from "@/lib/agent/defaults";
 import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
@@ -9,11 +7,22 @@ import { logger } from "@/lib/observability/logger";
 import { ensurePublicStorageBucket } from "@/lib/supabase/ensure-storage-bucket";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 import { generatePptxFromBlueWhiteTemplate } from "@/lib/agent/tools/presentation-from-template";
+import {
+  type PresentationSlide,
+  buildFallbackPresentationSlides,
+  buildNativeTypedPptxBuffer,
+  clampPresentationSlidesForNative,
+  clampPresentationSlidesForTemplate,
+  ensureOpeningTitleSlide,
+  generateSkippedPdfPlaceholder,
+  generateTypedPdfBuffer,
+  parsePresentationSlidesFromLlmJson,
+  presentationSlideSchema,
+  presentationSlidesToTemplateSpecs,
+  stripLeadingTitleSlides
+} from "@/lib/agent/tools/presentation-typed-deck";
 
-type SlideSpec = {
-  title: string;
-  bullets: string[];
-};
+export type { PresentationSlide };
 
 export type PresentationArtifactInput = {
   runId: string;
@@ -21,42 +30,62 @@ export type PresentationArtifactInput = {
   rows: Record<string, unknown>[];
   context?: string;
   slideCount?: number;
+  /** false = bez titulního úvodního slidu (podle nastavení uživatele). Výchozí true. */
+  includeOpeningTitleSlide?: boolean;
 };
 
 export type PresentationArtifactOutput = {
   publicUrl: string;
   pdfPublicUrl: string;
-  slides: SlideSpec[];
+  slides: PresentationSlide[];
+  /** Prefix složky v bucketu (např. `reports/prezentace/tydenni-report-abc123`) — otevření ve Storage `/storage?prefix=…`. */
+  storagePrefix: string;
 };
-
-const SlideSpecSchema = z.object({
-  title: z.string().min(1),
-  bullets: z.array(z.string().min(1)).min(4).max(8)
-});
 
 const PresentationArtifactInputSchema = z.object({
   runId: z.string().min(3),
   title: z.string().min(3).max(120),
   rows: z.array(z.record(z.string(), z.unknown())).default([]),
   context: z.string().max(2000).optional(),
-  slideCount: z.coerce.number().int().min(2).max(15).optional()
+  /** Počet obsahových slidů (bez titulního); celkem stran = +1 titulek. */
+  slideCount: z.coerce.number().int().min(1).max(14).optional(),
+  includeOpeningTitleSlide: z.boolean().optional()
 });
 
 const PresentationArtifactOutputSchema = z.object({
   publicUrl: z.string().url(),
   pdfPublicUrl: z.string().url(),
-  slides: z.array(SlideSpecSchema)
+  slides: z.array(presentationSlideSchema).min(2).max(15),
+  storagePrefix: z.string().min(3)
 });
+
+/** Názvy souborů v Storage (odlišné od generického „presentation“). */
+export const PRESENTATION_STORAGE_PPTX_NAME = "prezentace-boa.pptx";
+export const PRESENTATION_STORAGE_PDF_NAME = "shrnuti-boa.pdf";
+
+/** Složka `reports/prezentace/{slug}-{run}` podle tématu a běhu. */
+export function presentationArtifactStoragePrefix(runId: string, deckTitle: string): string {
+  const slug =
+    deckTitle
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 42) || "prezentace";
+  const rid = runId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 20);
+  return `reports/prezentace/${slug}-${rid}`;
+}
 
 export const presentationToolContract = {
   role: "subagent" as const,
   name: "runPresentationAgent",
   auth: "service-role" as const,
   description:
-    "Prezentacni specialista (MCP subagent): z tabulkovych radku a zadani vygeneruje PPTX + PDF v cestine a nahraje do Supabase Storage (reports/{runId}/). " +
-    "Vstupy: runId, title (nazev decku), rows (data pro obsah slidů), volitelne context (ukol/tagline pro titulni slide a LLM), slideCount 2-15. " +
-    "Pokud je k dispozici PPTX šablona (env PRESENTATION_*), vystupni PPTX pouzije firemni layout ({{BOA_*}}). " +
-    "PDF je jednoduchy export ze stejnych bulletu (vizualne muze odlisovat od šablony) nebo PRESENTATION_SKIP_PDF. " +
+    "Prezentacni specialista (MCP subagent): z tabulkovych radku a zadani vygeneruje PPTX + PDF v cestine a nahraje do Supabase Storage pod reports/prezentace/{tema}-{run}/ (soubory prezentace-boa.pptx, shrnuti-boa.pdf). " +
+    "LLM vraci strukturovane slidy (type: title|content|stats|quote|section); vzhled resi kod (Slide Master + typovane layouty). " +
+    "PPTX bud vlastni deck (pptxgenjs) nebo pri PRESENTATION_USE_TEMPLATE=true externi sablona. " +
     "Pred volanim lze zjistit dalsi nastroje pres listMcpCapabilities.",
   inputSchema: PresentationArtifactInputSchema,
   outputSchema: PresentationArtifactOutputSchema,
@@ -69,137 +98,53 @@ export const presentationToolContract = {
   ]
 };
 
-function toSafeSlideSpecs(value: unknown, expectedCount: number): SlideSpec[] | null {
-  if (!Array.isArray(value)) return null;
-  const cleaned = value
-    .slice(0, expectedCount)
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
-      const rawTitle = (item as { title?: unknown }).title;
-      const rawBullets = (item as { bullets?: unknown }).bullets;
-      const title = typeof rawTitle === "string" ? rawTitle.trim() : "";
-      const bullets = Array.isArray(rawBullets)
-        ? rawBullets.filter((v): v is string => typeof v === "string").map((v) => v.trim()).filter(Boolean)
-        : [];
-      if (!title) return null;
-      const trimmedBullets = bullets.slice(0, 8);
-      if (trimmedBullets.length < 4) return null;
-      return { title, bullets: trimmedBullets };
-    })
-    .filter((item): item is SlideSpec => Boolean(item));
-  return cleaned.length === expectedCount ? cleaned : null;
-}
+const SLIDE_JSON_INSTRUCTIONS = `Kazdy prvek pole je objekt s polem \"type\" a podle typu dalsi pole:
+- {\"type\":\"title\",\"title\":\"...\",\"subtitle\":\"...volitelne\"} — prvni slide MUSI byt type title. Pole \"title\": strucny nazev tematu (2–6 slov, max ~40 znaku), NIKOLIV cele uzivatelske zadani ani dlouha veta; \"subtitle\" muze doplnit kontext.
+- {\"type\":\"content\",\"title\":\"...\",\"bullets\":[\"...\"], \"table\":{\"headers\":[\"A\"],\"rows\":[[\"1\"]]},\"chart\":{\"kind\":\"bar\"|\"line\",\"categories\":[\"Led\",\"Unor\"],\"series\":[{\"name\":\"Leady\",\"values\":[10,14]}]}} } — aspon 3 bullets NEBO tabulka NEBO graf; table/chart volitelne, kategorie hodnot u grafu stejna delka jako values.
+- {\"type\":\"stats\",\"title\":\"...\",\"stats\":[{\"value\":\"...\",\"label\":\"...\"}] } — 2 az 6 paru (napr. hodnota KPI + popisek).
+- {\"type\":\"quote\",\"quote\":\"...\",\"title\":\"...volitelne\",\"attribution\":\"...volitelne\"}
+- {\"type\":\"section\",\"title\":\"...\",\"subtitle\":\"...volitelne\"} — deli sekce, velky nadpis.
 
-function safeNum(value: unknown): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
+Pis vyhradne cesky. Zadny markdown, zadny text mimo JSON.`;
 
-function buildFallbackSlides(rows: Record<string, unknown>[], slideCount: number): SlideSpec[] {
-  const months = rows.map((row) => String(row.month ?? "n/a"));
-  const totalLeads = rows.reduce((acc, row) => acc + safeNum(row.leads_count), 0);
-  const totalSold = rows.reduce((acc, row) => acc + safeNum(row.sold_count), 0);
-  const conversion = totalLeads > 0 ? ((totalSold / totalLeads) * 100).toFixed(1) : "0.0";
-  const topRows = rows.slice(0, 10).map((row) => JSON.stringify(row));
-  const padBullets = (bullets: string[]) => {
-    const next = bullets.slice(0, 8);
-    while (next.length < 4) {
-      next.push("Doplnte relevantni metriky pro rozhodovani vedení.");
-    }
-    return next;
-  };
+const SLIDE_JSON_INSTRUCTIONS_NO_OPENING = `Kazdy prvek pole je objekt s polem \"type\" a podle typu dalsi pole:
+- ZADNY slide s type \"title\" — vsechny slidy jsonou pouze content, stats, quote nebo section.
+- {\"type\":\"content\",\"title\":\"...\",\"bullets\":[\"...\"], \"table\":...,\"chart\":... } — aspon 3 bullets NEBO tabulka NEBO graf; table/chart volitelne.
+- {\"type\":\"stats\",\"title\":\"...\",\"stats\":[{\"value\":\"...\",\"label\":\"...\"}] } — 2 az 6 paru.
+- {\"type\":\"quote\",\"quote\":\"...\",\"title\":\"...volitelne\",\"attribution\":\"...volitelne\"}
+- {\"type\":\"section\",\"title\":\"...\",\"subtitle\":\"...volitelne\"}
 
-  const base: SlideSpec[] = [
-    {
-      title: "Executive shrnuti",
-      bullets: [
-        `Analyzovano zaznamu: ${rows.length}`,
-        `Celkem leads: ${totalLeads}`,
-        `Celkem prodano: ${totalSold}`,
-        `Konverzni pomer leads -> prodej: ${conversion} %`,
-        "Obsah vychazi z datoveho exportu za posledni obdobi."
-      ]
-    },
-    {
-      title: "Trend a sezonnost",
-      bullets: [
-        `Pokryte mesice: ${months.join(", ") || "bez mesicnich dat"}`,
-        "Sledujte odchylky mezi novymi leady a uzavrenymi obchody.",
-        "Identifikujte vrcholy a propady v pipeline.",
-        "Pri poklesu leadu zkontrolujte zdroje akvizice.",
-        "Pri poklesu prodeju zkontrolujte rychlost follow-upu."
-      ]
-    },
-    {
-      title: "Detailni metriky",
-      bullets: rows.length > 0
-        ? padBullets(topRows.slice(0, 6))
-        : [
-            "Nejsou dostupna zadna data pro vypocet detailnich metrik.",
-            "Zkontrolujte SQL preset a zdrojove tabulky.",
-            "Po doplneni dat workflow spustte znovu.",
-            "Doporuceni: pravidelna validace pred kazdym reportingem."
-          ]
-    },
-    {
-      title: "Rizika a doporucene kroky",
-      bullets: [
-        "Nastavte odpovednost za kazdy klicovy KPI ukazatel.",
-        "Zavedte tydenni kontrolu kvality dat pred prezentaci.",
-        "Prioritizujte leady s nejvyssim potencialem uzavreni.",
-        "Sledujte dobu od prvniho kontaktu po uzavreni.",
-        "Pripravte akcni plan na pristi reportovaci obdobi."
-      ]
-    }
-  ];
+Pis vyhradne cesky. Zadny markdown, zadny text mimo JSON.`;
 
-  while (base.length < slideCount) {
-    const i = base.length + 1;
-    base.push({
-      title: `Doplnujici analyza ${i}`,
-      bullets: [
-        "Doplnte segmentaci podle lokality a cenove hladiny.",
-        "Porovnejte vykonnost jednotlivych obchodniku.",
-        "Vyhodnotte lead source ROI a efektivitu kampani.",
-        "Oznacte data, kde chybi vstupy pro rozhodovani.",
-        "Definujte rozhodnuti, ktera z reportu plynou."
-      ]
-    });
-  }
-
-  return base.slice(0, slideCount);
-}
-
-const TEMPLATE_MAX_TITLE_CHARS = 64;
-const TEMPLATE_MAX_BULLET_CHARS = 180;
-
-function clampSlidesForTemplateLayout(slides: SlideSpec[]): SlideSpec[] {
-  const ell = (s: string, max: number) => (s.length <= max ? s : `${s.slice(0, Math.max(0, max - 1))}…`);
-  return slides.map((s) => ({
-    title: ell(s.title.trim(), TEMPLATE_MAX_TITLE_CHARS),
-    bullets: s.bullets.map((b) => ell(b.trim(), TEMPLATE_MAX_BULLET_CHARS))
-  }));
-}
-
-async function buildSlideSpecs(params: {
+async function buildPresentationSlides(params: {
   runId: string;
   title: string;
   rows: Record<string, unknown>[];
   context?: string;
   slideCount: number;
-  layoutMode: "plain" | "branded_template";
+  layoutMode: "styled_slide" | "branded_template";
+  includeOpeningTitleSlide: boolean;
 }) {
   const sample = params.rows.slice(0, 16);
-  const maxTokens = Math.min(1800, Math.max(900, params.slideCount * 180));
-  const threeSlideStructure =
-    params.slideCount === 3
-      ? "\nStruktura (presne 3 slidy): 1) Executive shrnuti a klicova KPI z dat. 2) Vyvoj v case / trendy a strucny komentar. 3) Rizika, prilezitosti a konkretni doporucene akce pro vedeni.\n"
+  const maxTokens = Math.min(2200, Math.max(900, params.slideCount * 220));
+  const weeklyDeckHint = params.includeOpeningTitleSlide
+    ? params.slideCount === 4
+      ? "\nStruktura (celkem 4 slidy vcetne titulku): 1) title — kratky nazev (2–6 slov). 2) content — KPI/shrnuti. 3) content — trendy. 4) content nebo stats — doporuceni.\n"
+      : ""
+    : params.slideCount === 3
+      ? "\nStruktura (3 obsahove slidy bez titulku): 1) content — KPI/shrnuti. 2) content — trendy. 3) content nebo stats.\n"
       : "";
   const templateHint =
     params.layoutMode === "branded_template"
-      ? " Vystup bude vlozen do firemniho PPTX: kazdy titulek slidu musi byt kratky (nadcas nadpis, max ~55 znaku). " +
-        "Kazdy bullet strucny (idealne do ~140 znaku), jedna myslenka, zadne odradkovani uvnitr bulletu. "
+      ? " Sablona PPTX ma omezeny prostor: u content zvol kratsi titulky (~55 znaku) a kratsi body (~140 znaku). "
       : "";
+  const styledHint =
+    params.layoutMode === "styled_slide"
+      ? params.includeOpeningTitleSlide
+        ? " Vystup bude kreslen podle typu slidu — drz title/subtitle strucne, u content preferuj 4–7 odracek kde to da smysl, kazdy bod jedna myslenka (~do 200 znaku). "
+        : " Vystup bude kreslen podle typu slidu (bez titulniho slidu) — u content preferuj 4–7 odracek kde to da smysl, kazdy bod jedna myslenka (~do 200 znaku). "
+      : "";
+
   let llmText = "";
   try {
     const llm = await generateWithAzureProxy({
@@ -209,97 +154,54 @@ async function buildSlideSpecs(params: {
         {
           role: "system",
           content:
-            `Jsi senior analytik. Vrat pouze validni JSON pole delky ${params.slideCount}. ` +
-            "Kazdy prvek musi mit tvar {\"title\":\"...\",\"bullets\":[\"...\",\"...\"]}. " +
-            "Pis vyhradne cesky (bez anglictiny). Kazdy slide musi mit 4 az 8 konkretni bullet bodu s datovym obsahem, " +
-            "zaverem nebo doporucenim. Zadny markdown, zadne vysvetleni mimo JSON." +
-            templateHint
+            (params.includeOpeningTitleSlide
+              ? `Jsi senior analytik. Vrat POUZE validni JSON pole presne delky ${params.slideCount} (prvni prvek = titulek, zbytek obsahove slidy). `
+              : `Jsi senior analytik. Vrat POUZE validni JSON pole presne delky ${params.slideCount} (vsechny slidy jsou obsahove — BEZ type title). `) +
+            (params.includeOpeningTitleSlide ? SLIDE_JSON_INSTRUCTIONS : SLIDE_JSON_INSTRUCTIONS_NO_OPENING) +
+            templateHint +
+            styledHint
         },
         {
           role: "user",
           content:
-            `Nazev prezentace: ${params.title}\n` +
-            `Pozadovany pocet slidu: ${params.slideCount}\n` +
+            `Interni nazev decku / metadata: ${params.title}\n` +
+            (params.includeOpeningTitleSlide
+              ? `Celkovy pocet slidu v poli (titulek + obsah): ${params.slideCount}\n`
+              : `Celkovy pocet slidu v poli (jen obsahove, bez titulku): ${params.slideCount}\n`) +
             `Kontext: ${params.context ?? "tydenni executive report"}\n` +
-            threeSlideStructure +
+            weeklyDeckHint +
             `Ukazka dat:\n${JSON.stringify(sample)}`
         }
       ]
     });
     llmText = llm.text.trim();
   } catch {
-    return buildFallbackSlides(params.rows, params.slideCount);
+    return buildFallbackPresentationSlides(params.rows, params.slideCount, params.title, {
+      includeOpeningTitleSlide: params.includeOpeningTitleSlide
+    });
   }
 
-  const raw = llmText;
   let parsed: unknown = null;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(llmText);
   } catch {
-    const match = raw.match(/\[[\s\S]*\]/);
+    const match = llmText.match(/\[[\s\S]*\]/);
     if (match) {
       try {
-        parsed = JSON.parse(match[0]);
+        parsed = JSON.parse(match[0]!);
       } catch {
         parsed = null;
       }
     }
   }
 
-  return toSafeSlideSpecs(parsed, params.slideCount) ?? buildFallbackSlides(params.rows, params.slideCount);
-}
-
-async function generateSkippedPdfPlaceholder(): Promise<Buffer> {
-  const pdf = await PDFDocument.create();
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const page = pdf.addPage([595, 420]);
-  const msg =
-    "PDF export byl vypnut (PRESENTATION_SKIP_PDF). Stahnete prosim soubor presentation.pptx pro aktualni obsah a firemni vizual.";
-  page.drawText(msg, { x: 40, y: 360, size: 11, font, maxWidth: 520, lineHeight: 13 });
-  return Buffer.from(await pdf.save());
-}
-
-async function generatePdfBuffer(params: { title: string; slides: SlideSpec[] }): Promise<Buffer> {
-  const pdf = await PDFDocument.create();
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-
-  for (let index = 0; index < params.slides.length; index += 1) {
-    const slide = params.slides[index];
-    const page = pdf.addPage([842, 595]); // A4 landscape
-    const { width, height } = page.getSize();
-
-    page.drawText(`${params.title} - Slide ${index + 1}`, {
-      x: 32,
-      y: height - 42,
-      size: 14,
-      font,
-      color: rgb(0.15, 0.2, 0.28)
-    });
-
-    page.drawText(slide.title, {
-      x: 32,
-      y: height - 84,
-      size: 26,
-      font: bold,
-      color: rgb(0.12, 0.15, 0.2)
-    });
-
-    let y = height - 126;
-    slide.bullets.forEach((bullet) => {
-      page.drawText(`- ${bullet}`, {
-        x: 44,
-        y,
-        size: 14,
-        font,
-        color: rgb(0.1, 0.1, 0.1)
-      });
-      y -= 24;
-    });
-  }
-
-  const bytes = await pdf.save();
-  return Buffer.from(bytes);
+  const validated = parsePresentationSlidesFromLlmJson(parsed, params.slideCount);
+  return (
+    validated ??
+    buildFallbackPresentationSlides(params.rows, params.slideCount, params.title, {
+      includeOpeningTitleSlide: params.includeOpeningTitleSlide
+    })
+  );
 }
 
 export async function generatePresentationArtifact(params: PresentationArtifactInput): Promise<PresentationArtifactOutput> {
@@ -313,14 +215,32 @@ export async function generatePresentationArtifact(params: PresentationArtifactI
   const bucketName = env.SUPABASE_STORAGE_BUCKET;
   await ensurePublicStorageBucket(supabase, bucketName);
 
-  const slideCount = Math.min(15, Math.max(2, parsedInput.data.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT));
+  const includeOpening = parsedInput.data.includeOpeningTitleSlide !== false;
+  let contentSlideCount = Math.min(14, Math.max(1, parsedInput.data.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT));
+  if (!includeOpening && contentSlideCount < 2) contentSlideCount = 2;
+  const totalSlideCount = Math.min(15, includeOpening ? contentSlideCount + 1 : contentSlideCount);
   const templateCfg = resolvePresentationTemplate(env);
-  const slidesRaw = await buildSlideSpecs({
+  const slidesRaw = await buildPresentationSlides({
     ...parsedInput.data,
-    slideCount,
-    layoutMode: templateCfg.useTemplate ? "branded_template" : "plain"
+    slideCount: totalSlideCount,
+    layoutMode: templateCfg.useTemplate ? "branded_template" : "styled_slide",
+    includeOpeningTitleSlide: includeOpening
   });
-  const slides = templateCfg.useTemplate ? clampSlidesForTemplateLayout(slidesRaw) : slidesRaw;
+  let slidesOrdered = includeOpening
+    ? ensureOpeningTitleSlide(slidesRaw, parsedInput.data.title, totalSlideCount)
+    : stripLeadingTitleSlides(slidesRaw).slice(0, totalSlideCount);
+  if (slidesOrdered.length < 2) {
+    slidesOrdered = buildFallbackPresentationSlides(
+      parsedInput.data.rows,
+      totalSlideCount,
+      parsedInput.data.title,
+      { includeOpeningTitleSlide: includeOpening }
+    );
+  }
+  const slides = templateCfg.useTemplate
+    ? clampPresentationSlidesForTemplate(slidesOrdered)
+    : clampPresentationSlidesForNative(slidesOrdered);
+
   const useFlag = env.PRESENTATION_USE_TEMPLATE?.trim().toLowerCase();
   const templateForcedOn = useFlag === "true" || useFlag === "1" || useFlag === "yes" || useFlag === "on";
   if (templateForcedOn && !templateCfg.useTemplate) {
@@ -338,46 +258,14 @@ export async function generatePresentationArtifact(params: PresentationArtifactI
       deckTagline:
         (parsedInput.data.context ?? "Týdenní executive report").slice(0, 220) ||
         "Automaticky generovaný report.",
-      slides
+      slides: presentationSlidesToTemplateSpecs(slides)
     });
   } else {
-    const pptx = new PptxGenJS();
-    pptx.layout = "LAYOUT_WIDE";
-    pptx.author = "Back Office Operations Agent";
-    pptx.subject = parsedInput.data.title;
-    pptx.title = parsedInput.data.title;
-
-    slides.forEach((slideSpec) => {
-      const slide = pptx.addSlide();
-      slide.background = { color: "F8FAFC" };
-      slide.addText(slideSpec.title, {
-        x: 0.5,
-        y: 0.35,
-        w: 12.3,
-        h: 0.8,
-        bold: true,
-        fontFace: "Calibri",
-        fontSize: 30,
-        color: "1F2937"
-      });
-      slide.addText(
-        slideSpec.bullets.map((b) => ({ text: b, options: { bullet: { indent: 18 } } })),
-        {
-          x: 0.8,
-          y: 1.4,
-          w: 11.8,
-          h: 5.2,
-          fontFace: "Calibri",
-          fontSize: 20,
-          color: "111827",
-          breakLine: true
-        }
-      );
-    });
-
-    buffer = (await pptx.write({ outputType: "nodebuffer" })) as Buffer;
+    buffer = await buildNativeTypedPptxBuffer(parsedInput.data.title, slides);
   }
-  const pptxPath = `reports/${parsedInput.data.runId}/presentation.pptx`;
+
+  const storagePrefix = presentationArtifactStoragePrefix(parsedInput.data.runId, parsedInput.data.title);
+  const pptxPath = `${storagePrefix}/${PRESENTATION_STORAGE_PPTX_NAME}`;
   const upload = await supabase.storage.from(bucketName).upload(pptxPath, buffer, {
     upsert: true,
     contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -393,12 +281,13 @@ export async function generatePresentationArtifact(params: PresentationArtifactI
     if (templateCfg.useTemplate) {
       logger.warn("presentation_pdf_not_template_layout", {
         runId: parsedInput.data.runId,
-        message: "PDF je stale generovany staticky pres pdf-lib ze SlideSpec; layout odpovida textu, ne PPTX šabloně."
+        message: "PDF je generovany pres pdf-lib ze stejnych slid spec; layout muze odlisovat od externi PPTX sablony."
       });
     }
-    pdfBuffer = await generatePdfBuffer({ title: parsedInput.data.title, slides });
+    pdfBuffer = await generateTypedPdfBuffer({ title: parsedInput.data.title, slides });
   }
-  const pdfPath = `reports/${parsedInput.data.runId}/presentation.pdf`;
+
+  const pdfPath = `${storagePrefix}/${PRESENTATION_STORAGE_PDF_NAME}`;
   const pdfUpload = await supabase.storage.from(bucketName).upload(pdfPath, pdfBuffer, {
     upsert: true,
     contentType: "application/pdf"
@@ -410,7 +299,7 @@ export async function generatePresentationArtifact(params: PresentationArtifactI
   const publicUrl = supabase.storage.from(bucketName).getPublicUrl(pptxPath).data.publicUrl;
   const pdfPublicUrl = supabase.storage.from(bucketName).getPublicUrl(pdfPath).data.publicUrl;
 
-  const output: PresentationArtifactOutput = { publicUrl, pdfPublicUrl, slides };
+  const output: PresentationArtifactOutput = { publicUrl, pdfPublicUrl, slides, storagePrefix };
   const checked = PresentationArtifactOutputSchema.safeParse(output);
   if (!checked.success) {
     throw new Error(`INVALID_OUTPUT: ${checked.error.issues.map((i) => i.message).join("; ")}`);

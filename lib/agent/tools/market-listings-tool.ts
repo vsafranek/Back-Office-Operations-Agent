@@ -30,6 +30,10 @@ export const FetchMarketListingsInputSchema = z.object({
   srealityLocalityDistrictId: z.coerce.number().int().optional(),
   /** Sreality API: 1 = prodej, 2 = pronájem */
   srealityOfferKind: z.enum(["prodej", "pronajem"]).default("prodej"),
+  /** Sreality category_main_cb: 1 = byty, 2 = domy */
+  srealityCategoryMain: z.union([z.literal(1), z.literal(2)]).optional(),
+  /** Sreality `category_sub_cb` — dispozice bytu nebo typ domu (viz sreality-param-catalog). */
+  srealityCategorySubCb: z.coerce.number().int().optional(),
   /** Bezrealitky GraphQL enum OfferType */
   bezrealitkyOfferType: z.enum(["PRODEJ", "PRONAJEM"]).optional(),
   /** Bezrealitky GraphQL listAdverts.regionOsmIds (prefix R…). Prázdné / vynecháno = celá ČR. */
@@ -41,6 +45,23 @@ export const FetchMarketListingsInputSchema = z.object({
    */
   regionGeocodeHint: z.string().max(80).optional()
 });
+
+/** Uložené u cron úlohy — částečná shoda s fetch vstupem. */
+export const StoredMarketListingsParamsSchema = FetchMarketListingsInputSchema.partial();
+
+export function mergeStoredMarketListingsParams(stored: unknown): z.infer<typeof FetchMarketListingsInputSchema> | null {
+  const partial = StoredMarketListingsParamsSchema.safeParse(stored);
+  if (!partial.success) return null;
+  const full = FetchMarketListingsInputSchema.safeParse({
+    location: partial.data.location ?? "Česko",
+    sources: partial.data.sources?.length ? partial.data.sources : (["sreality", "bezrealitky"] as const),
+    page: partial.data.page ?? 1,
+    perPage: partial.data.perPage ?? 24,
+    srealityOfferKind: partial.data.srealityOfferKind ?? "prodej",
+    ...partial.data
+  });
+  return full.success ? full.data : null;
+}
 
 export type FetchMarketListingsInput = z.infer<typeof FetchMarketListingsInputSchema>;
 
@@ -119,10 +140,11 @@ export async function fetchMarketListings(input: z.infer<typeof FetchMarketListi
     if (source === "sreality") {
       const categoryType = effective.srealityOfferKind === "pronajem" ? 2 : 1;
       const rows = await fetchSrealityListings({
-        categoryMain: 1,
+        categoryMain: (effective.srealityCategoryMain ?? 1) as 1 | 2,
         categoryType,
         ...(effective.srealityLocalityRegionId != null ? { localityRegionId: effective.srealityLocalityRegionId } : {}),
         localityDistrictId: effective.srealityLocalityDistrictId,
+        ...(effective.srealityCategorySubCb != null ? { categorySubCb: effective.srealityCategorySubCb } : {}),
         page: effective.page,
         perPage: effective.perPage,
         userAgent: ua,
