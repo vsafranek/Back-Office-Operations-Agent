@@ -11,7 +11,8 @@ const INTENT_ENUM = [
   "weekly_report",
   "web_search",
   "market_listings",
-  "scheduled_agent_task"
+  "scheduled_agent_task",
+  "casual_chat"
 ] as const;
 
 const ThinkingOrchestratorSchema = z.object({
@@ -37,8 +38,9 @@ function intentRulesBlock(): string {
     "- presentation: hlavni vystup je PPTX / slidovy deck (PowerPoint), ne pouhy graf z databaze.\n" +
     "- weekly_report: komplexni manazersky balicek — CSV, Markdown a prezentace.\n" +
     "- market_listings: Sreality/Bezrealitky, fetchMarketListings, nabidky z portálu — neni SQL ani obecny webovy search.\n" +
-    "- web_search: obecne overeni na webu mimo interni data — ne primarne Sreality/Bezrealitky (to market_listings).\n" +
+    "- web_search: jen explicitni fakticky dotaz na verejny web (aktuality, cizi pojem) — NIKDY pozdrav, „jak se mas“, diky ani vyznam fraze.\n" +
     "- scheduled_agent_task: opakovany cron, automaticky beh agenta, system prompt, naplanovat ulohu — ne jednorazova analytika.\n" +
+    "- casual_chat: pozdrav, small talk, zdvorilost bez pracovniho ukolu — odpoved bez nastroju, ne web_search.\n" +
     "slideCount u presentation nebo weekly_report jen pokud uzivatel explicitne zminil pocet slidu; jinak pole vynechej.\n"
   );
 }
@@ -48,7 +50,7 @@ function buildThinkingSystemPrompt(extra: string): string {
     "Jsi orchestrator back-office agenta pro realitni firmu.\n" +
     "Nejdrive proved uvahu (reasoning): 3–8 vet v cestine, co uzivatel chce, jaka je sporna mista a ktery typ ulohy to je.\n" +
     "Pak v jedinem JSON objektu (bez markdownu) vrat:\n" +
-    '{"reasoning":"<tva uvaha jako jeden retezec>","intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings"|"scheduled_agent_task","slideCount":<volitelne 2-15>}\n' +
+    '{"reasoning":"<tva uvaha jako jeden retezec>","intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings"|"scheduled_agent_task"|"casual_chat","slideCount":<volitelne 2-15>}\n' +
     intentRulesBlock() +
     "V poli reasoning strucne shrn duvod pro vybrany intent." +
     extra
@@ -71,7 +73,7 @@ async function thinkingOrchestratorStreamed(params: {
 
   const reasoningSystem =
     "Jsi orchestrator back-office agenta pro realitni firmu.\n" +
-    "Napis 3–8 vet v cestine: co uzivatel chce, pochybna mista, jaky typ ulohy (analytika, e-mail/kalendar, prezentace, report, web).\n" +
+    "Napis 3–8 vet v cestine: co uzivatel chce, pochybna mista, jaky typ ulohy (analytika, e-mail/kalendar, prezentace, report, web, casual_chat pri pozdravu/small talk bez ukolu).\n" +
     "Vrat POUZE souvisly text (bez JSON, bez odrzek, bez nadpisu)." +
     extra;
 
@@ -98,7 +100,7 @@ async function thinkingOrchestratorStreamed(params: {
 
   const intentSystem =
     "Na zaklade zadani uzivatele a hotove uvahy asistenta (cesky) vrat POUZE jeden JSON objekt (bez markdownu):\n" +
-    '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings"|"scheduled_agent_task","slideCount":<volitelne cislo 2-15>}\n' +
+    '{"intent":"analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings"|"scheduled_agent_task"|"casual_chat","slideCount":<volitelne cislo 2-15>}\n' +
     intentRulesBlock();
 
   const intentUser =

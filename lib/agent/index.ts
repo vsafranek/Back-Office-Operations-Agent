@@ -76,7 +76,7 @@ export async function runBackOfficeAgent(input: {
   const classifierQuestion =
     effectiveQuestion +
     (input.scheduledTaskExecution
-      ? "\n\n(Interní pokyn pro klasifikaci: probíhá vykonání již uložené naplánované úlohy. Intent scheduled_agent_task NEPOUŽÍVEJ — zařaď požadavek podle obsahu mezi analytics, calendar_email, presentation, weekly_report, web_search, market_listings.)"
+      ? "\n\n(Interní pokyn pro klasifikaci: probíhá vykonání již uložené naplánované úlohy. Intent scheduled_agent_task ani casual_chat NEPOUŽÍVEJ — zařaď požadavek podle obsahu mezi analytics, calendar_email, presentation, weekly_report, web_search, market_listings.)"
       : "");
 
   await emit("Zpracovávám dotaz…");
@@ -206,6 +206,7 @@ export async function runBackOfficeAgent(input: {
   answer = {
     ...answer,
     runId,
+    intent,
     orchestration: {
       agentId: agentDef.id,
       mode: agentDef.mode,
@@ -271,7 +272,8 @@ function intentProgressLabel(intent: ClassifiedAgentIntent["intent"]): string {
     weekly_report: "Záměr: týdenní report — připravuji odpověď…",
     web_search: "Záměr: vyhledávání na webu — připravuji odpověď…",
     market_listings: "Záměr: nabídky Sreality / Bezrealitky — stahuji data…",
-    scheduled_agent_task: "Záměr: naplánovaná opakovaná úloha agenta — připravuji návrh pro potvrzení…"
+    scheduled_agent_task: "Záměr: naplánovaná opakovaná úloha agenta — připravuji návrh pro potvrzení…",
+    casual_chat: "Neformální zpráva — krátká odpověď bez webu…"
   };
   return labels[intent];
 }

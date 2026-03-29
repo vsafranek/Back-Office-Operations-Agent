@@ -1,6 +1,7 @@
 import type { AgentAnswer, AgentToolContext } from "@/lib/agent/types";
 import type { ToolRunner } from "@/lib/agent/mcp-tools/tool-runner";
 import { generateUserFacingReply } from "@/lib/agent/llm/user-facing-reply";
+import { isLikelyCasualOnlyMessage, runCasualChatSubAgent } from "@/lib/agent/subagents/casual-chat-subagent";
 
 export async function runWebSearchSubAgent(params: {
   toolRunner: ToolRunner;
@@ -8,6 +9,9 @@ export async function runWebSearchSubAgent(params: {
   question: string;
 }): Promise<AgentAnswer> {
   const query = params.question.trim();
+  if (isLikelyCasualOnlyMessage(query)) {
+    return runCasualChatSubAgent({ ctx: params.ctx, question: params.question });
+  }
   const results = await params.toolRunner.run<
     Array<{ title: string; url: string; snippet?: string }>
   >("webSearch", params.ctx, { query, maxResults: 5 });

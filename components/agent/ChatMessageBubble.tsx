@@ -116,6 +116,9 @@ export function ChatMessageBubble({ message, getAccessToken, agentLabelById }: P
     ? meta.generated_artifacts.filter((a): a is ArtifactMeta => a != null && typeof a === "object")
     : [];
 
+  const intent = typeof meta.intent === "string" ? meta.intent : undefined;
+  const hideTraceForCasualChat = intent === "casual_chat" && artifacts.length === 0;
+
   return (
     <Box style={{ display: "flex", justifyContent: "flex-start" }}>
       <Paper
@@ -141,7 +144,7 @@ export function ChatMessageBubble({ message, getAccessToken, agentLabelById }: P
               onClick={() => setReasoningOpen((o) => !o)}
               aria-expanded={reasoningOpen}
             >
-              {reasoningOpen ? "Skrýt úvahu orchestrátoru" : "Úvaha orchestrátoru"}
+              {reasoningOpen ? "Skrýt úvahu Thinking Agent" : "Úvaha Thinking Agent"}
             </Button>
             <Collapse in={reasoningOpen}>
               <Text size="xs" c="dimmed" mt="xs" style={{ whiteSpace: "pre-wrap" }}>
@@ -195,7 +198,7 @@ export function ChatMessageBubble({ message, getAccessToken, agentLabelById }: P
           </Box>
         ) : null}
 
-        {runId ? (
+        {runId && !hideTraceForCasualChat ? (
           <Box mt="sm">
             <Button
               type="button"

@@ -3,8 +3,9 @@ import { DEFAULT_AGENT_MCP_TOOL_KEYS } from "../default-agent-mcp-tools";
 
 export const basicAgentConfig: AgentDefinition = {
   id: "basic",
-  label: "Základní agent",
-  description: "Rychlá klasifikace záměru jedním LLM krokem, poté spuštění příslušného subagenta.",
+  label: "Základní Agent",
+  description:
+    "Rychlá klasifikace záměru jedním krokem, pak specializovaný subagent. Na běžné pozdravy a small talk odpovídá stručně bez zbytečného web vyhledávání.",
   mode: "basic",
   availableMcpTools: DEFAULT_AGENT_MCP_TOOL_KEYS
 };

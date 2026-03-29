@@ -587,8 +587,8 @@ select cron.schedule(
               })
             }
             data={[
-              { value: "basic", label: "basic" },
-              { value: "thinking-orchestrator", label: "thinking-orchestrator" }
+              { value: "basic", label: "Základní Agent" },
+              { value: "thinking-orchestrator", label: "Thinking Agent" }
             ]}
           />
           <Button type="submit" loading={schedSaving}>

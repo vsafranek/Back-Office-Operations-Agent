@@ -63,6 +63,15 @@ function convSlug(id: string | null | undefined): string {
   return id ?? "no-conv";
 }
 
+/** Sekce audit / panely pod odpovědí — u čistého small talku bez artefaktů ji nezobrazujeme. */
+function shouldShowRelatedOutputs(result: AgentAnswer): boolean {
+  if (result.dataPanel) return true;
+  if (result.dataPanelDownloads?.excel || result.dataPanelDownloads?.csv) return true;
+  if (result.generated_artifacts && result.generated_artifacts.length > 0) return true;
+  if (result.intent === "casual_chat") return false;
+  return true;
+}
+
 function IconChevronDown({ size = 14 }: { size?: number }) {
   return (
     <svg
@@ -167,7 +176,7 @@ function AgentProgressUnderQuestion({
         {showThinking ? (
           <Box mt="md" pt="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
             <Text fw={600} size="xs" mb="xs" c="blue.9">
-              Úvaha orchestrátoru
+              Úvaha Thinking Agent
             </Text>
             <Text size="sm" style={{ whiteSpace: "pre-wrap" }} c="dark.7">
               {orchestratorStreamText}
@@ -341,7 +350,7 @@ export function ConfigurableAgentPanel({
                 />
               ) : null}
 
-              {result ? (
+              {result && shouldShowRelatedOutputs(result) ? (
                 <Stack gap="md" pt="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
                   <Title order={4} size="h5" fw={600}>
                     Související výstupy poslední odpovědi

@@ -1,4 +1,5 @@
 import type { AgentTraceRecorder } from "@/lib/agent/trace/recorder";
+import type { ClassifiedAgentIntent } from "@/lib/agent/llm/intent-classifier";
 
 export type AgentArtifact = {
   type: "chart" | "table" | "report" | "presentation" | "email";
@@ -104,6 +105,8 @@ export type AgentDataPanel =
 export type AgentAnswer = {
   /** Korelace s řádky v agent_trace_events; doplní `runBackOfficeAgent`. */
   runId?: string;
+  /** Záměr z klasifikátoru — pro UI (např. skrýt audit u čistě konverzační odpovědi). */
+  intent?: ClassifiedAgentIntent["intent"];
   answer_text: string;
   confidence: number;
   sources: string[];
