@@ -84,7 +84,7 @@ export async function runBackOfficeAgent(input: {
     : input.question;
 
   const scheduledClassifierSuffix = input.scheduledTaskExecution
-    ? "\n\n(Interní pokyn pro klasifikaci: probíhá vykonání již uložené naplánované úlohy. Intent scheduled_agent_task ani casual_chat NEPOUŽÍVEJ — zařaď požadavek podle obsahu mezi analytics, calendar_email, presentation, weekly_report, web_search, market_listings.)"
+    ? "\n\n(Interní pokyn pro klasifikaci: probíhá vykonání již uložené naplánované úlohy. Intent scheduled_agent_task ani casual_chat NEPOUŽÍVEJ — zařaď požadavek podle obsahu mezi analytics, calendar_email, presentation, weekly_report, web_search, market_listings. Nástroj proposeScheduledAgentTask ani jiné zakládání nové plánované úlohy NEPOUŽÍVEJ — opakování už řeší systém.)"
     : "";
 
   await emit("Zpracovávám dotaz…");

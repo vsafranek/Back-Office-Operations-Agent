@@ -1,5 +1,6 @@
 import { FetchMarketListingsInputSchema, fetchMarketListings } from "@/lib/agent/tools/market-listings-tool";
 import { requireAuthenticatedUser } from "@/lib/auth/server-auth";
+import { recordUserMarketListingFinds } from "@/lib/market-listings/record-user-market-listing-finds";
 
 export const runtime = "nodejs";
 
@@ -8,13 +9,14 @@ export const runtime = "nodejs";
  */
 export async function POST(request: Request) {
   try {
-    await requireAuthenticatedUser(request);
+    const user = await requireAuthenticatedUser(request);
     const body: unknown = await request.json();
     const parsed = FetchMarketListingsInputSchema.safeParse(body);
     if (!parsed.success) {
       return Response.json({ error: "Neplatné parametry.", details: parsed.error.flatten() }, { status: 400 });
     }
     const listings = await fetchMarketListings(parsed.data);
+    void recordUserMarketListingFinds({ userId: user.id, agentRunId: null, listings }).catch(() => {});
     return Response.json({ listings });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

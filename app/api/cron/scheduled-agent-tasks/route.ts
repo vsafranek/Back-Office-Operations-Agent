@@ -5,6 +5,7 @@ import { runBackOfficeAgent } from "@/lib/agent/index";
 import { logger } from "@/lib/observability/logger";
 import { fetchMarketListings, mergeStoredMarketListingsParams } from "@/lib/agent/tools/market-listings-tool";
 import type { MarketListing } from "@/lib/agent/tools/market-listing-model";
+import { recordUserMarketListingFinds } from "@/lib/market-listings/record-user-market-listing-finds";
 
 export const runtime = "nodejs";
 
@@ -88,14 +89,16 @@ export async function POST(request: Request) {
     }
 
     const prefix =
-      "[Plánovaná automatická úloha — řiď se tímto systémovým zadáním. Buď stručný, pokud úloha nevyžaduje jinak.]\n" +
+      "[Jednorázový běh již naplánované úlohy — opakování řeší pouze cron v infrastruktuře, ne ty. Neplánuj další cron úlohy, nevolaj nástroj proposeScheduledAgentTask a nežádej uživatele o nastavení opakování. Zpracuj jen tento jeden dotaz podle systémového zadání níže. Buď stručný, pokud zadání nevyžaduje jinak.]\n" +
       row.system_prompt;
 
     let listingsBlock = "";
+    let listingsForRecord: MarketListing[] = [];
     const mergedParams = mergeStoredMarketListingsParams(row.market_listings_params);
     if (mergedParams) {
       try {
         const listings = await fetchMarketListings(mergedParams);
+        listingsForRecord = listings;
         listingsBlock =
           "\n\n--- Kontext: nabídky stažené automaticky před odpovědí agenta (Sreality / Bezrealitky) ---\n" +
           formatListingsCronContext(listings) +
@@ -130,6 +133,14 @@ export async function POST(request: Request) {
 
       results.push({ taskId: row.id, status: "ok" });
       logger.info("scheduled_agent_task_run_ok", { taskId: row.id, userId: row.user_id, title: row.title });
+
+      if (listingsForRecord.length > 0) {
+        void recordUserMarketListingFinds({
+          userId: row.user_id,
+          agentRunId: answer.runId ?? null,
+          listings: listingsForRecord
+        }).catch(() => {});
+      }
 
       const sum = answer.answer_text?.trim().slice(0, 480) || "Úloha doběhla.";
       await insertNotification(supabase, {

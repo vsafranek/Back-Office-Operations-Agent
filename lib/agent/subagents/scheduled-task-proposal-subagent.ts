@@ -21,11 +21,20 @@ const LlmExtractionSchema = z.object({
 });
 
 const EXTRACTION_SYSTEM = `Z pozadavku uzivatele vyextrahuj navrh OPAKOVANE naplanovane ulohy pro back-office agenta.
+Orchestrator uz zaradil pozadavek jako scheduled_agent_task — ocekava se tedy opakovani nebo automaticky beh (cron). Pro ciste jednorazove „ukaž / informuj o nabidkach“ bez pravidelnosti orchestrator obvykle voli market_listings; tady dopln rozumny denni cron jen pokud uzivatel zadal frekvenci nebo slova jako denne, kazdy den, rano, pravidelne.
+
 Vrat POUZE jeden JSON objekt (bez markdownu), klice:
 - title, cron_expression (5 poli pg_cron), timezone (IANA, vychozi Europe/Prague), system_prompt, user_question, agent_id ("basic"|"thinking-orchestrator")
 - market_listings_params (volitelny objekt): pri sledovani nabidek Sreality/Bezrealitky nastav napr. location Plzen, sources [sreality,bezrealitky], srealityOfferKind prodej|pronajem, bezrealitkyOfferType PRODEJ|PRONAJEM, srealityCategoryMain 1=byty 2=domy, perPage, regionGeocodeHint.
-Pokud uzivatel cas nedefinuje rozumne, pouzij 0 9 * * * a timezone Europe/Prague.
-system_prompt a user_question musi davat smysl v kontextu realitni back-office firmy.
+Pokud uzivatel cas cronu nedefinuje ale z kontextu jde o denni monitoring, pouzij 0 9 * * * a timezone Europe/Prague.
+
+system_prompt — POZOR:
+- Popisuje POUZE roli a obsah JEDNOHO behu agenta (co ma vystupovat: styl, format, co zahrnout/vynechat, obor realitni back-office).
+- Zde NEPIS o opakovani, case, cronu, pg_cron, „kazdy den“, „pravidelne spoustet“, „automaticky hlidat do budoucna“, „naplanuj dalsi ulohu“ ani o vytvareni dalsich cron jobu — to uz resi ulozeny cron a tento text se vklada do kazdeho behu znovu; agent by si jinak myslel, ze ma znovu zakladat planovani.
+- Frekvenci a cas vyjadri VYHRADNE pres cron_expression + timezone, ne v system_prompt.
+
+user_question: konkretni dotaz nebo sablona pro tento beh (co zrovna zpracovat); opet bez navodu na dalsi cron.
+
 Pri pravidelnem sledovani novych nabidek vzdy dopln market_listings_params s location a sources.`;
 
 export async function runScheduledTaskProposalSubAgent(params: {
@@ -100,7 +109,9 @@ export async function runScheduledTaskProposalSubAgent(params: {
       confidence: 0.9,
       sources: ["proposeScheduledAgentTask"],
       generated_artifacts: [],
-      next_actions: ["Potvrďte úlohu v pravém panelu — teprve pak se uloží do databáze."],
+      next_actions: [
+        "Potvrďte úlohu v sekci „Data a grafy“ pod touto odpovědí nebo v postranním panelu → Úlohy (cron); teprve pak se uloží do databáze."
+      ],
       dataPanel: { kind: "scheduled_task_confirmation", draft: out.draft }
     };
   } catch (e) {

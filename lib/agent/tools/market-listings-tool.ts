@@ -200,7 +200,8 @@ export async function upsertMarketListings(params: { listings: MarketListing[] }
         location: listing.location,
         source: listing.source,
         url: listing.url,
-        observed_at: listing.created_at
+        observed_at: listing.created_at,
+        image_url: listing.image_url ?? null
       },
       { onConflict: "external_id" }
     );

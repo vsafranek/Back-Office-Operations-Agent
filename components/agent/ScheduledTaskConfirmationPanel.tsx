@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AgentDataPanel } from "@/lib/agent/types";
 
 const panelChrome = {
@@ -19,17 +19,56 @@ const panelChrome = {
 
 type Draft = Extract<AgentDataPanel, { kind: "scheduled_task_confirmation" }>["draft"];
 
+const SYNC_SAVED = "1";
+const SYNC_CANCELLED = "0";
+
+const SCHEDULED_TASK_UI_SYNC = "scheduled-task-ui-sync";
+
+function dispatchScheduledTaskUiSync(storageKey: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(SCHEDULED_TASK_UI_SYNC, { detail: { key: storageKey } }));
+}
+
 export function ScheduledTaskConfirmationPanel({
   draft,
-  getAccessToken
+  getAccessToken,
+  syncKey
 }: {
   draft: Draft;
   getAccessToken?: () => Promise<string | null>;
+  /** Sdílí stav Potvrzeno / Zrušeno mezi chatovou sekcí a panelem Úlohy (cron), např. runId odpovědi. */
+  syncKey?: string | null;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [cancelled, setCancelled] = useState(false);
+
+  const storageKey =
+    syncKey && typeof syncKey === "string" && syncKey.trim().length > 0
+      ? `scheduled_task_ui:${syncKey.trim()}`
+      : null;
+
+  useEffect(() => {
+    if (!storageKey || typeof window === "undefined") return;
+    const read = () => {
+      const v = sessionStorage.getItem(storageKey);
+      if (v === SYNC_SAVED) {
+        setSaved(true);
+        setCancelled(false);
+      } else if (v === SYNC_CANCELLED) {
+        setCancelled(true);
+        setSaved(false);
+      }
+    };
+    read();
+    const onSync = (e: Event) => {
+      const key = (e as CustomEvent<{ key?: string }>).detail?.key;
+      if (key === storageKey) read();
+    };
+    window.addEventListener(SCHEDULED_TASK_UI_SYNC, onSync as EventListener);
+    return () => window.removeEventListener(SCHEDULED_TASK_UI_SYNC, onSync as EventListener);
+  }, [storageKey]);
 
   async function confirm() {
     setError(null);
@@ -64,6 +103,10 @@ export function ScheduledTaskConfirmationPanel({
         setLoading(false);
         return;
       }
+      if (storageKey && typeof window !== "undefined") {
+        sessionStorage.setItem(storageKey, SYNC_SAVED);
+        dispatchScheduledTaskUiSync(storageKey);
+      }
       setSaved(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Neznámá chyba");
@@ -78,7 +121,8 @@ export function ScheduledTaskConfirmationPanel({
         <h2 style={{ margin: "0 0 6px", fontSize: 17, color: "#5b21b6" }}>Potvrdit naplánovanou úlohu</h2>
         <p style={{ margin: 0, fontSize: 13, color: "#6b21a8" }}>
           Po potvrzení se úloha uloží k vašemu účtu. Spouštění probíhá z cron endpointu (např. pg_cron na Supabase), který
-          volá aplikaci s tajným klíčem.
+          volá aplikaci s tajným klíčem. U systémového zadání stačí popsat jeden běh — neopakování ani další cron (to řeší
+          řádek Cron výše).
         </p>
       </div>
 
@@ -145,7 +189,17 @@ export function ScheduledTaskConfirmationPanel({
           <button type="button" disabled={loading} onClick={() => void confirm()}>
             {loading ? "Ukládám…" : "Potvrdit a uložit"}
           </button>
-          <button type="button" disabled={loading} onClick={() => setCancelled(true)}>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => {
+              if (storageKey && typeof window !== "undefined") {
+                sessionStorage.setItem(storageKey, SYNC_CANCELLED);
+                dispatchScheduledTaskUiSync(storageKey);
+              }
+              setCancelled(true);
+            }}
+          >
             Zrušit
           </button>
         </div>

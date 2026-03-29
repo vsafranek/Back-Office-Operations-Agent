@@ -43,6 +43,7 @@ import {
 } from "@/components/agent/companion/CompanionToolPanels";
 import type { AgentUiOption } from "@/lib/agent/config/types";
 import type { AgentAnswer } from "@/lib/agent/types";
+import { scheduledTaskConfirmationDraftFromAnswer } from "@/lib/agent/scheduled-task-answer-helpers";
 import { findViewingEmailDataPanel } from "@/lib/agent/viewing-email-answer-helpers";
 import {
   companionRunNavCanGoNewer,
@@ -127,6 +128,7 @@ export function ChatCompanionSidebar({
   const agent = agentOptions.find((a) => a.id === selectedAgentId);
   const mailAutoOpenRunRef = useRef<string | null>(null);
   const storageAutoOpenRunRef = useRef<string | null>(null);
+  const scheduledDraftAutoOpenRunRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,6 +162,19 @@ export function ChatCompanionSidebar({
     }
     if (!isViewing) mailAutoOpenRunRef.current = null;
   }, [lastAgentAnswer]);
+
+  useEffect(() => {
+    const runId = lastAgentAnswer?.runId ?? null;
+    const hasScheduledDraft = scheduledTaskConfirmationDraftFromAnswer(lastAgentAnswer) != null;
+    if (hasScheduledDraft && runId && scheduledDraftAutoOpenRunRef.current !== runId) {
+      scheduledDraftAutoOpenRunRef.current = runId;
+      if (isDesktop && !panelOpen) onTogglePanel();
+      setActiveSection((prev) =>
+        prev === "calendar" || prev === "viz" || prev === "context" ? prev : "scheduled"
+      );
+    }
+    if (!hasScheduledDraft) scheduledDraftAutoOpenRunRef.current = null;
+  }, [lastAgentAnswer, isDesktop, panelOpen, onTogglePanel]);
 
   useEffect(() => {
     const runId = lastAgentAnswer?.runId ?? null;
@@ -338,6 +353,8 @@ export function ChatCompanionSidebar({
           <ScheduledTasksNotificationsPanel
             getAccessToken={getAccessToken}
             onLoaded={setScheduledUnread}
+            pendingTaskDraft={scheduledTaskConfirmationDraftFromAnswer(lastAgentAnswer)}
+            pendingTaskSyncKey={lastAgentAnswer?.runId ?? null}
           />
         );
       case "audit":

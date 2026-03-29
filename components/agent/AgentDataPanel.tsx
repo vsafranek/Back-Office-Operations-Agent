@@ -628,11 +628,14 @@ function AnalyticsDataPanelTabs(props: AnalyticsPanelCommon) {
 export function AgentDataPanel({
   panel,
   getAccessToken,
-  dataPanelDownloads
+  dataPanelDownloads,
+  scheduledTaskConfirmationSyncKey
 }: {
   panel: AgentDataPanelModel;
   getAccessToken?: () => Promise<string | null>;
   dataPanelDownloads?: AgentDataPanelDownloads;
+  /** Sdílení stavu potvrzení cron návrhu mezi chatem a panelem Úlohy (cron). */
+  scheduledTaskConfirmationSyncKey?: string | null;
 }) {
   if (panel.kind === "market_listings") {
     return (
@@ -646,7 +649,13 @@ export function AgentDataPanel({
   }
 
   if (panel.kind === "scheduled_task_confirmation") {
-    return <ScheduledTaskConfirmationPanel draft={panel.draft} getAccessToken={getAccessToken} />;
+    return (
+      <ScheduledTaskConfirmationPanel
+        draft={panel.draft}
+        getAccessToken={getAccessToken}
+        syncKey={scheduledTaskConfirmationSyncKey}
+      />
+    );
   }
 
   if (panel.kind === "viewing_email_draft") {

@@ -22,6 +22,7 @@ import {
   Select,
   Skeleton,
   Stack,
+  Tabs,
   Text,
   Textarea,
   TextInput,
@@ -35,8 +36,10 @@ import { useDebouncedValue, useDisclosure } from "@mantine/hooks";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarPreviewStrip } from "@/components/agent/CalendarPreviewStrip";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
+import { ScheduledTaskConfirmationPanel } from "@/components/agent/ScheduledTaskConfirmationPanel";
 import { ViewingEmailDraftPanel } from "@/components/agent/ViewingEmailDraftPanel";
 import { MarketListingsDataPanelSection } from "@/components/agent/MarketListingsDataPanelSection";
+import { MarketListingCardView } from "@/components/agent/MarketListingCardView";
 import type { FetchMarketListingsInput } from "@/lib/agent/tools/market-listings-tool";
 import {
   srealityCategorySubSelectData,
@@ -44,6 +47,7 @@ import {
   srealityRegionSelectData
 } from "@/lib/integrations/sreality-param-catalog";
 import type { AgentAnswer, AgentDataPanel as AgentDataPanelModel } from "@/lib/agent/types";
+import type { ScheduledTaskConfirmationDraft } from "@/lib/agent/scheduled-task-answer-helpers";
 import {
   buildViewingEmailPreviewRange,
   clampViewingMeetDurationMinutes,
@@ -987,7 +991,123 @@ export function CalendarToolPanel({
   );
 }
 
+function SavedMarketFindsPanel({ getAccessToken }: { getAccessToken: () => Promise<string | null> }) {
+  const [items, setItems] = useState<
+    {
+      id: string;
+      external_id: string;
+      title: string;
+      location: string;
+      source: string;
+      url: string;
+      image_url: string | null;
+      agent_run_id: string | null;
+      first_seen_at: string;
+      last_seen_at: string;
+    }[]
+  >([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    setErr(null);
+    setLoading(true);
+    const token = await getAccessToken();
+    if (!token) {
+      setErr("Nejste přihlášeni.");
+      setLoading(false);
+      return;
+    }
+    const res = await fetch("/api/settings/market-listing-finds?limit=150", {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const payload = (await res.json()) as { finds?: typeof items; error?: string };
+    if (!res.ok) {
+      setErr(payload.error ?? `HTTP ${res.status}`);
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+    setItems(payload.finds ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial load + „Obnovit“
+  }, []);
+
+  if (loading) {
+    return (
+      <Stack gap="sm">
+        <Skeleton h={18} />
+        <Skeleton h={120} />
+        <Skeleton h={120} />
+      </Stack>
+    );
+  }
+
+  if (err) {
+    return (
+      <Stack gap="sm">
+        <Text size="sm" c="red">
+          {err}
+        </Text>
+        <Button size="xs" variant="light" onClick={() => void load()}>
+          Zkusit znovu
+        </Button>
+      </Stack>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <Text size="sm" c="dimmed">
+        Zatím žádné uložené nálezy. Objeví se po hledání v záložce Prohledat, po odpovědi agenta na dotaz na nabídky nebo po
+        běhu naplánované úlohy s nabídkami.
+      </Text>
+    );
+  }
+
+  return (
+    <Stack gap="sm">
+      <Group justify="space-between" wrap="nowrap" gap="xs">
+        <Text size="xs" c="dimmed" style={{ flex: 1 }}>
+          Řazeno podle posledního výskytu. U každé nabídky je zdroj portálu, odkaz a čas prvního / posledního zachycení.
+        </Text>
+        <Button size="compact-xs" variant="light" onClick={() => void load()}>
+          Obnovit
+        </Button>
+      </Group>
+      <ScrollArea.Autosize mah={560} type="auto">
+        <Stack gap="md">
+          {items.map((row) => (
+            <div key={row.id}>
+              <MarketListingCardView
+                card={{
+                  external_id: row.external_id,
+                  title: row.title,
+                  location: row.location,
+                  source: row.source,
+                  url: row.url,
+                  ...(row.image_url ? { image_url: row.image_url } : {})
+                }}
+              />
+              <Text size="xs" c="dimmed" mt={6} pl={4}>
+                Poprvé: {new Date(row.first_seen_at).toLocaleString("cs-CZ")} · Naposledy:{" "}
+                {new Date(row.last_seen_at).toLocaleString("cs-CZ")}
+                {row.agent_run_id ? ` · běh ${row.agent_run_id.slice(0, 8)}…` : ""}
+              </Text>
+            </div>
+          ))}
+        </Stack>
+      </ScrollArea.Autosize>
+    </Stack>
+  );
+}
+
 export function MarketSidebarPanel({ getAccessToken }: { getAccessToken: () => Promise<string | null> }) {
+  const [marketTab, setMarketTab] = useState<string | null>("search");
   const [location, setLocation] = useState("Praha");
   const [sources, setSources] = useState<string[]>(["sreality", "bezrealitky"]);
   const [perPage, setPerPage] = useState(24);
@@ -1068,6 +1188,16 @@ export function MarketSidebarPanel({ getAccessToken }: { getAccessToken: () => P
 
   return (
     <Stack gap="sm">
+      <Tabs value={marketTab} onChange={setMarketTab} variant="outline" radius="sm">
+        <Tabs.List grow>
+          <Tabs.Tab value="search">Prohledat</Tabs.Tab>
+          <Tabs.Tab value="saved">Uložené nálezy</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel value="saved" pt="sm">
+          <SavedMarketFindsPanel getAccessToken={getAccessToken} />
+        </Tabs.Panel>
+        <Tabs.Panel value="search" pt="sm">
+          <Stack gap="sm">
       <Text size="sm" c="dimmed">
         Rychlé stažení nabídek (stejné API jako agent). Prázdné pokročilé pole = automatika (Nominatim podle lokality).
       </Text>
@@ -1195,6 +1325,9 @@ export function MarketSidebarPanel({ getAccessToken }: { getAccessToken: () => P
           getAccessToken={getAccessToken}
         />
       ) : null}
+          </Stack>
+        </Tabs.Panel>
+      </Tabs>
     </Stack>
   );
 }
@@ -1215,10 +1348,16 @@ export type ScheduledTaskNotificationRow = {
 /** Přehled běhů naplánovaných úloh (cron) a označení přečtení. */
 export function ScheduledTasksNotificationsPanel({
   getAccessToken,
-  onLoaded
+  onLoaded,
+  pendingTaskDraft,
+  pendingTaskSyncKey
 }: {
   getAccessToken: () => Promise<string | null>;
   onLoaded?: (unreadCount: number) => void;
+  /** Návrh z aktuální odpovědi agenta — zobrazí se nahoře, dokud uživatel nepotvrdí / nezruší. */
+  pendingTaskDraft?: ScheduledTaskConfirmationDraft | null;
+  /** Stejný klíč jako u chatu (`runId`), aby se stav potvrzení synchronizoval mezi oběma místy. */
+  pendingTaskSyncKey?: string | null;
 }) {
   const [items, setItems] = useState<ScheduledTaskNotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1286,9 +1425,29 @@ export function ScheduledTasksNotificationsPanel({
     return [...m.entries()];
   }, [items]);
 
+  const pendingBlock =
+    pendingTaskDraft != null ? (
+      <Stack gap="xs">
+        <Text size="sm" fw={600}>
+          Návrh úlohy (čeká na uložení)
+        </Text>
+        <Text size="xs" c="dimmed">
+          Níže je cron, časová zóna, systémové zadání a dotaz při každém běhu. Po potvrzení se úloha uloží k účtu; stejný
+          formulář je i v sekci „Data a grafy“ u odpovědi v chatu.
+        </Text>
+        <ScheduledTaskConfirmationPanel
+          draft={pendingTaskDraft}
+          getAccessToken={getAccessToken}
+          syncKey={pendingTaskSyncKey}
+        />
+        <Divider label="Historie běhů" labelPosition="center" />
+      </Stack>
+    ) : null;
+
   if (loading) {
     return (
       <Stack gap="sm">
+        {pendingBlock}
         <Skeleton h={20} />
         <Skeleton h={60} />
         <Skeleton h={60} />
@@ -1298,6 +1457,7 @@ export function ScheduledTasksNotificationsPanel({
 
   return (
     <Stack gap="sm">
+      {pendingBlock}
       <Text size="sm" c="dimmed">
         Po každém běhu naplánované úlohy (volání cron endpointu) se zde objeví záznam. Úlohy spravujete v Nastavení.
       </Text>

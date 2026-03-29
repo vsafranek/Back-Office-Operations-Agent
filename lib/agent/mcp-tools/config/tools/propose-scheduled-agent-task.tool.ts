@@ -10,7 +10,13 @@ export const ProposeScheduledAgentTaskInputSchema = z.object({
   /** 5 polí jako pg_cron: minuta hodina den_měsíce měsíc den_týdne (např. `0 8 * * *`). */
   cron_expression: z.string().min(1).max(120),
   timezone: z.string().min(1).max(80).default("Europe/Prague"),
-  system_prompt: z.string().min(1).max(12000),
+  system_prompt: z
+    .string()
+    .min(1)
+    .max(12000)
+    .describe(
+      "Rola a obsah JEDNOHO behu agenta (format odpovedi, co hlidat). BEZ cronu, bez opakovani v case, bez navrhu dalsich naplanovanych uloh — frekvenci urcuje jen cron_expression."
+    ),
   user_question: z.string().min(1).max(4000).default("Splň naplánovanou úlohu podle systémového zadání."),
   agent_id: z.enum(["basic", "thinking-orchestrator"]).default("basic"),
   market_listings_params: StoredMarketListingsParamsSchema.nullable().optional()
@@ -35,7 +41,7 @@ const tool: McpTool<z.infer<typeof ProposeScheduledAgentTaskInputSchema>, z.infe
       role: "tool",
       name: "proposeScheduledAgentTask",
       description:
-        "Navrhne ulozeni opakovane naplanovane ulohy agenta (cron + system prompt). Po volani ma uzivatel v UI potvrdit panel vpravo; nastroj NEuklada do databaze.",
+        "Navrhne uložení opakované naplánované úlohy agenta (cron + systémový prompt). Po volání uživatel potvrdí v UI: sekce „Data a grafy“ u odpovědi a/nebo postranní panel → Úlohy (cron). Nástroj NEukládá do databáze.",
       inputSchema: ProposeScheduledAgentTaskInputSchema,
       outputSchema: ProposeScheduledAgentTaskOutputSchema,
       auth: "user",
@@ -60,7 +66,7 @@ const tool: McpTool<z.infer<typeof ProposeScheduledAgentTaskInputSchema>, z.infe
       return {
         message:
           `Navrhl jsem naplánovanou úlohu „${draft.title}“ (${draft.cron_expression}, ${draft.timezone}). ` +
-          `Potvrďte prosím uložení v pravém panelu — do databáze se záznam zapíše až po potvrzení.`,
+          `Potvrďte uložení níže v sekci „Data a grafy“ u této odpovědi, nebo v postranním panelu Nástroje → Úlohy (cron). Do databáze se záznam zapíše až po potvrzení.`,
         draft
       };
     }

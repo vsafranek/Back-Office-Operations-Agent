@@ -629,7 +629,8 @@ export function ConfigurableAgentPanel({
                           const scheduledOnly = getPanelBundles(displayResult).filter(
                             (b) => b.dataPanel.kind === "scheduled_task_confirmation"
                           );
-                          if (bundles.length === 0 && scheduledOnly.length === 0) {
+                          const renderBundles = [...scheduledOnly, ...bundles];
+                          if (renderBundles.length === 0) {
                             const downloadableArts = (displayResult.generated_artifacts ?? []).filter(
                               (a) =>
                                 a.type !== "email" &&
@@ -678,13 +679,13 @@ export function ConfigurableAgentPanel({
                           }
                           return (
                             <Stack gap="xl" w="100%" maw="100%" style={{ minWidth: 0 }}>
-                              {scheduledOnly.length > 0 && bundles.length === 0 ? (
+                              {scheduledOnly.length > 0 ? (
                                 <Text size="sm" c="violet.8">
-                                  V postranním panelu Nástroje potvrďte nebo zrušte uložení naplánované úlohy (cron na
-                                  straně Supabase volá aplikaci podle návodu v Nastavení).
+                                  Návrh cron úlohy potvrďte nebo zrušte v kartě níže (stejný formulář je i v postranním
+                                  panelu → Úlohy (cron)). Spouštění zajišťuje cron na straně Supabase podle Nastavení.
                                 </Text>
                               ) : null}
-                              {bundles.map((bundle, bi) => (
+                              {renderBundles.map((bundle, bi) => (
                                 <div
                                   key={`${displayResult.runId ?? "run"}-panel-${bi}-${bundle.dataPanel.kind}`}
                                   id={
@@ -696,7 +697,7 @@ export function ConfigurableAgentPanel({
                                   data-panel-kind={bundle.dataPanel.kind}
                                   data-panel-index={bi}
                                 >
-                                  {bundles.length > 1 ? (
+                                  {renderBundles.length > 1 ? (
                                     <Title order={5} size="sm" mb="sm" c="dimmed">
                                       Část {bi + 1}
                                     </Title>
@@ -705,6 +706,7 @@ export function ConfigurableAgentPanel({
                                     panel={bundle.dataPanel}
                                     getAccessToken={getAccessToken}
                                     dataPanelDownloads={bundle.dataPanelDownloads}
+                                    scheduledTaskConfirmationSyncKey={displayResult.runId ?? null}
                                   />
                                 </div>
                               ))}

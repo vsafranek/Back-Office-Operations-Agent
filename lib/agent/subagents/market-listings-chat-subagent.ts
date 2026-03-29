@@ -4,6 +4,7 @@ import { generateUserFacingReply } from "@/lib/agent/llm/user-facing-reply";
 import type { MarketListing } from "@/lib/agent/tools/market-listing-model";
 import { inferMarketListingsInputFromQuestion } from "@/lib/agent/tools/market-listings-infer";
 import { fetchMarketListings } from "@/lib/agent/tools/market-listings-tool";
+import { recordUserMarketListingFinds } from "@/lib/market-listings/record-user-market-listing-finds";
 
 const SUMMARY_LISTING_THRESHOLD = 12;
 
@@ -32,6 +33,12 @@ export async function runMarketListingsChatSubAgent(params: {
 
   const toolInput = inferMarketListingsInputFromQuestion(params.question);
   const listings = await fetchMarketListings(toolInput);
+
+  void recordUserMarketListingFinds({
+    userId: params.ctx.userId,
+    agentRunId: params.ctx.runId ?? null,
+    listings
+  }).catch(() => {});
 
   const citations = Array.from(new Set(listings.map((l) => l.url).filter(Boolean)));
 

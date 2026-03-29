@@ -50,6 +50,7 @@ type ScheduledTaskRow = {
   last_run_at: string | null;
   created_at: string;
   updated_at: string;
+  market_listings_params?: Record<string, unknown> | null;
 };
 
 const initialIntegrationState: IntegrationState = {
@@ -103,6 +104,19 @@ export default function SettingsPage() {
     system_prompt: "",
     user_question: "Splň naplánovanou úlohu podle systémového zadání.",
     agent_id: "basic" as "basic" | "thinking-orchestrator"
+  });
+
+  const [schedEditOpened, schedEditHandlers] = useDisclosure(false);
+  const [schedEditTaskId, setSchedEditTaskId] = useState<string | null>(null);
+  const [schedEditSaving, setSchedEditSaving] = useState(false);
+  const [schedEditForm, setSchedEditForm] = useState({
+    title: "",
+    cron_expression: "",
+    timezone: "Europe/Prague",
+    system_prompt: "",
+    user_question: "",
+    agent_id: "basic" as "basic" | "thinking-orchestrator",
+    market_listings_json: ""
   });
 
   const loadIntegrations = useCallback(async () => {
@@ -298,6 +312,89 @@ export default function SettingsPage() {
       cron_expression: "0 8 * * *",
       user_question: "Splň naplánovanou úlohu podle systémového zadání."
     }));
+    await refreshScheduledTasks(accessToken);
+  }
+
+  function openScheduledTaskEdit(task: ScheduledTaskRow) {
+    setSchedEditTaskId(task.id);
+    setSchedEditForm({
+      title: task.title,
+      cron_expression: task.cron_expression,
+      timezone: task.timezone,
+      system_prompt: task.system_prompt,
+      user_question: task.user_question,
+      agent_id: (task.agent_id === "thinking-orchestrator" ? "thinking-orchestrator" : "basic") as
+        | "basic"
+        | "thinking-orchestrator",
+      market_listings_json:
+        task.market_listings_params != null && typeof task.market_listings_params === "object"
+          ? JSON.stringify(task.market_listings_params, null, 2)
+          : ""
+    });
+    setSchedMessage(null);
+    schedEditHandlers.open();
+  }
+
+  async function saveScheduledTaskEdit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!schedEditTaskId) return;
+    setSchedMessage(null);
+    if (!schedEditForm.title.trim() || !schedEditForm.system_prompt.trim()) {
+      setSchedMessage("Vyplňte název a systémové zadání.");
+      return;
+    }
+    let market_listings_params: Record<string, unknown> | null | undefined;
+    const rawJson = schedEditForm.market_listings_json.trim();
+    if (rawJson.length > 0) {
+      try {
+        const parsed = JSON.parse(rawJson) as unknown;
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+          setSchedMessage("Filtry nabídek musí být JSON objekt (ne pole).");
+          return;
+        }
+        market_listings_params = parsed as Record<string, unknown>;
+      } catch {
+        setSchedMessage("Neplatný JSON u filtrů nabídek.");
+        return;
+      }
+    } else {
+      market_listings_params = null;
+    }
+    setSchedEditSaving(true);
+    const sessionResult = await supabase.auth.getSession();
+    const accessToken = sessionResult.data.session?.access_token;
+    if (!accessToken) {
+      router.push("/auth/login");
+      setSchedEditSaving(false);
+      return;
+    }
+    const res = await fetch(`/api/settings/scheduled-tasks/${schedEditTaskId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`
+      },
+      body: JSON.stringify({
+        title: schedEditForm.title.trim(),
+        cron_expression: schedEditForm.cron_expression.trim(),
+        timezone: schedEditForm.timezone.trim(),
+        system_prompt: schedEditForm.system_prompt.trim(),
+        user_question:
+          schedEditForm.user_question.trim() ||
+          "Splň naplánovanou úlohu podle systémového zadání.",
+        agent_id: schedEditForm.agent_id,
+        market_listings_params
+      })
+    });
+    const payload = (await res.json()) as { error?: string };
+    setSchedEditSaving(false);
+    if (!res.ok) {
+      setSchedMessage(payload.error ?? "Uložení změn selhalo.");
+      return;
+    }
+    setSchedMessage("Úloha byla upravena.");
+    schedEditHandlers.close();
+    setSchedEditTaskId(null);
     await refreshScheduledTasks(accessToken);
   }
 
@@ -569,7 +666,7 @@ select cron.schedule(
         <Text size="sm" c="violet.9" mb="sm">
           Zde nastavíte opakované spouštění agenta: cron výraz ve formátu <strong>pg_cron</strong> (5 polí: minuta, hodina, den v
           měsíci, měsíc, den v týdnu), časová zóna, systémové zadání pro každý běh a text dotazu při každém běhu. Úlohu lze také
-          navrhnout v chatu s agentem — po zobrazení panelu vpravo ji potvrdíte.
+          navrhnout v chatu s agentem — po zobrazení návrhu ji potvrdíte v sekci Data a grafy nebo v Nástroje → Úlohy (cron).
         </Text>
         <Text size="xs" c="violet.8" mb="lg">
           Na Supabase zapněte rozšíření <Code>pg_cron</Code> a (pro HTTP volání) <Code>pg_net</Code>. Aplikace sama cron nezakládá —
@@ -595,13 +692,21 @@ select cron.schedule(
                   <Code>{t.cron_expression}</Code> ({t.timezone}) · profil {t.agent_id}
                   {t.last_run_at ? ` · poslední běh ${new Date(t.last_run_at).toLocaleString("cs-CZ")}` : ""}
                 </Text>
-                <Group mt="sm" gap="md">
+                <Group mt="sm" gap="md" wrap="wrap">
                   <Checkbox
                     label="Zapnuto"
                     checked={t.enabled}
                     disabled={schedLoading}
                     onChange={(e) => void toggleScheduledTask(t, e.currentTarget.checked)}
                   />
+                  <Button
+                    size="xs"
+                    variant="light"
+                    disabled={schedLoading}
+                    onClick={() => openScheduledTaskEdit(t)}
+                  >
+                    Upravit
+                  </Button>
                   <Button size="xs" variant="light" color="red" disabled={schedLoading} onClick={() => deleteScheduledTask(t.id)}>
                     Smazat
                   </Button>
@@ -635,10 +740,11 @@ select cron.schedule(
           />
           <Textarea
             label="Systémové zadání (prompt pro každý běh)"
+            description="Jen obsah jednoho běhu (role, styl, co zahrnout). Neuvádějte zde cron ani opakování — to řeší pole Cron a časová zóna výše."
             minRows={6}
             value={schedForm.system_prompt}
             onChange={(e) => setSchedForm({ ...schedForm, system_prompt: e.currentTarget.value })}
-            placeholder="Instrukce pro agenta: role, co má hlídat, formát výstupu…"
+            placeholder="Např. shrň nové relevantní nabídky stručně v odrážkách; nezakládej další plánované úlohy."
           />
           <Textarea
             label="Dotaz při každém běhu"
@@ -753,6 +859,87 @@ select cron.schedule(
           </Tabs.Panel>
         </Tabs>
       </Stack>
+
+      <Modal
+        opened={schedEditOpened}
+        onClose={() => {
+          schedEditHandlers.close();
+          setSchedEditTaskId(null);
+        }}
+        title="Upravit naplánovanou úlohu"
+        size="lg"
+        radius="md"
+      >
+        <form onSubmit={(e) => void saveScheduledTaskEdit(e)}>
+          <Stack gap="md">
+            <TextInput
+              label="Název"
+              value={schedEditForm.title}
+              onChange={(e) => setSchedEditForm({ ...schedEditForm, title: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Cron (5 polí, jako v pg_cron)"
+              value={schedEditForm.cron_expression}
+              onChange={(e) => setSchedEditForm({ ...schedEditForm, cron_expression: e.currentTarget.value })}
+            />
+            <TextInput
+              label="Časová zóna (IANA)"
+              value={schedEditForm.timezone}
+              onChange={(e) => setSchedEditForm({ ...schedEditForm, timezone: e.currentTarget.value })}
+            />
+            <Textarea
+              label="Systémové zadání (prompt pro každý běh)"
+              description="Jen obsah jednoho běhu. Bez cronu a bez pokynů k zakládání dalších naplánovaných úloh."
+              minRows={6}
+              value={schedEditForm.system_prompt}
+              onChange={(e) => setSchedEditForm({ ...schedEditForm, system_prompt: e.currentTarget.value })}
+            />
+            <Textarea
+              label="Dotaz při každém běhu"
+              minRows={3}
+              value={schedEditForm.user_question}
+              onChange={(e) => setSchedEditForm({ ...schedEditForm, user_question: e.currentTarget.value })}
+            />
+            <Select
+              label="Profil agenta"
+              value={schedEditForm.agent_id}
+              onChange={(v) =>
+                setSchedEditForm({
+                  ...schedEditForm,
+                  agent_id: (v as "basic" | "thinking-orchestrator") ?? "basic"
+                })
+              }
+              data={[
+                { value: "basic", label: "Základní Agent" },
+                { value: "thinking-orchestrator", label: "Thinking Agent" }
+              ]}
+            />
+            <Textarea
+              label="Filtry nabídek (volitelné JSON)"
+              description="Prázdné = odstranit uložené filtry. Stejný tvar jako při návrhu z chatu (location, sources, …)."
+              minRows={4}
+              value={schedEditForm.market_listings_json}
+              onChange={(e) => setSchedEditForm({ ...schedEditForm, market_listings_json: e.currentTarget.value })}
+              styles={{ input: { fontFamily: "monospace", fontSize: 12 } }}
+            />
+            <Group justify="flex-end" mt="sm">
+              <Button
+                type="button"
+                variant="default"
+                onClick={() => {
+                  schedEditHandlers.close();
+                  setSchedEditTaskId(null);
+                }}
+              >
+                Zrušit
+              </Button>
+              <Button type="submit" loading={schedEditSaving}>
+                {schedEditSaving ? "Ukládám…" : "Uložit změny"}
+              </Button>
+            </Group>
+          </Stack>
+        </form>
+      </Modal>
 
       <Modal
         opened={integrationConnectOpened}

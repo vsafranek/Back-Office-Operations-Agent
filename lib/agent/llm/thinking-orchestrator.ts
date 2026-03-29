@@ -38,9 +38,10 @@ function intentRulesBlock(): string {
     "Pokud kontext ukazuje predchozi nabidku navrhu mailu / kandidatu na prijemce a uzivatel ted jen doplnuje e-mail nebo voli „prvni“/„druhy“ → calendar_email.\n" +
     "- presentation: hlavni vystup je PPTX / slidovy deck (PowerPoint), ne pouhy graf z databaze.\n" +
     "- weekly_report: komplexni manazersky balicek — CSV, Markdown a prezentace.\n" +
-    "- market_listings: Sreality/Bezrealitky, fetchMarketListings, nabidky z portálu — neni SQL ani obecny webovy search.\n" +
+    "- market_listings: Sreality/Bezrealitky, jednorazovy dotaz na inzeraty (i „informuj me o nabidkach v …“) — neni SQL ani obecny webovy search.\n" +
     "- web_search: jen explicitni fakticky dotaz na verejny web (aktuality, cizi pojem) — NIKDY pozdrav, „jak se mas“, diky ani vyznam fraze.\n" +
-    "- scheduled_agent_task: opakovany cron, automaticky beh agenta, system prompt, naplanovat ulohu — ne jednorazova analytika.\n" +
+    "- scheduled_agent_task: jen pri EXPLICITNIM opakovani v case (kazdy den, rano, pravidelne, cron, automaticky posilej…) nebo naplanovani ulohy. " +
+    "Bez frekvence/casovani → market_listings, ne scheduled_agent_task.\n" +
     "- casual_chat: pozdrav, small talk, zdvorilost bez pracovniho ukolu — odpoved bez nastroju, ne web_search.\n" +
     "slideCount u presentation nebo weekly_report = pocet OBSAHOVYCH slidu (bez titulku), 1–14; titulek prida system. Pri explicitnim poctu (cislo nebo napr. tremi slidy); jinak pole vynechej.\n"
   );

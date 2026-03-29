@@ -52,9 +52,10 @@ export async function classifyAgentIntent(params: {
             "Pokud kontext poslednich zprav ukazuje, ze asistent prave nabidl navrh e-mailu k prohlidce / kandidaty na prijemce a uzivatel nyni jen doplňuje prijemce (holý e-mail, „prvni“, „druhy“, jmeno z nabidky) nebo zopakuje stejny ukol s doplnenym emailem → stale calendar_email (NE casual_chat).\n" +
             "presentation: hlavne PPTX/slidova prezentace / slidovy deck (PowerPoint); NE jen graf nad daty v aplikaci — to je analytics.\n" +
             "weekly_report: komplexni report pro vedeni — dataset CSV, souhrn MD a prezentace dohromady.\n" +
-            "market_listings: nabidky z realitnich portálu (Sreality, Bezrealitky), stazeni inzeratu pres interni nastroj fetchMarketListings, monitoring trhu. I kdyz uzivatel napise 'internet'. NENI to obecne DDG/Google ani SQL nad CRM.\n" +
+            "market_listings: nabidky z realitnich portálu (Sreality, Bezrealitky), jednorazovy prehled nebo „informuj me / ukaž / najdi nabidky v …“. I kdyz uzivatel napise 'internet'. NENI to obecne DDG/Google ani SQL nad CRM.\n" +
             "web_search: jen kdyz uzivatel EXPLICITNE chce overit fakt, aktualitu nebo informaci na verejnem webu (mimo interni DB). NIKOLIV u pozdravu ani vyznamu bezne fraze. NIKOLIV „jak se mas“.\n" +
-            "scheduled_agent_task: uzivatel chce nastavit OPAKOVANOU ulohu (cron), automaticky beh agenta, systemovy prompt, cas — napr. kazdy den v 8, kazdou hodinu, pg_cron. NENI to jednorazovy analyticky dotaz.\n" +
+            "scheduled_agent_task: POUZE kdyz uzivatel EXPLICITNE chce OPAKOVANI v case nebo automaticky beh — napr. kazdy den, kazde rano, pravidelne, cron, kazdou hodinu, automaticky mi posilej, hlidej mi to denne. " +
+            "Bez takove frekvence/casovani to NENI scheduled_agent_task: napr. „Informuj me o novych nabidkach v Praze Holesovice“ bez „kazdy den“ apod. → market_listings (jednorazove zobrazeni), NE cron.\n" +
             "casual_chat: pozdravy, diky, „jak se mas“, obecna zdvorilost, konverzace bez pozadavku na data, nastroje, e-mail, report ani webovy fakticky dotaz.\n" +
             "slideCount dopln u presentation nebo weekly_report pri konkretnim poctu OBSAHOVYCH slidu bez titulku (cislice nebo cesky); jinak vynechej (system pouzije standard 3 obsahove + titulek)."
         },
