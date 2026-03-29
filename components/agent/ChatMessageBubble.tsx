@@ -27,6 +27,7 @@ type ArtifactMeta = { type?: string; label?: string; url?: string; content?: str
 type AssistantMetadata = {
   runId?: string;
   agentId?: string;
+  streaming?: boolean;
   agentMode?: string;
   intent?: string;
   confidence?: number;
@@ -103,6 +104,7 @@ export function ChatMessageBubble({ message, getAccessToken, agentLabelById }: P
   }
 
   const meta = readAssistantMeta(message.metadata);
+  const streaming = meta.streaming === true;
   const runId = typeof meta.runId === "string" ? meta.runId : undefined;
   const reasoning =
     typeof meta.orchestration?.reasoning === "string" && meta.orchestration.reasoning.trim()
@@ -133,7 +135,13 @@ export function ChatMessageBubble({ message, getAccessToken, agentLabelById }: P
       >
         <FormattedAssistantContent content={message.content} />
 
-        {reasoning ? (
+        {streaming ? (
+          <Text size="xs" c="dimmed" mt={6}>
+            Dokončuji odpověď…
+          </Text>
+        ) : null}
+
+        {!streaming && reasoning ? (
           <Box mt="sm">
             <Button
               type="button"
@@ -153,7 +161,7 @@ export function ChatMessageBubble({ message, getAccessToken, agentLabelById }: P
           </Box>
         ) : null}
 
-        {(conf != null || sources.length > 0) && (
+        {!streaming && (conf != null || sources.length > 0) && (
           <Text size="xs" c="dimmed" mt="xs">
             {conf != null ? `Spolehlivost: ${conf.toFixed(2)}` : null}
             {conf != null && sources.length > 0 ? " · " : null}
@@ -161,7 +169,7 @@ export function ChatMessageBubble({ message, getAccessToken, agentLabelById }: P
           </Text>
         )}
 
-        {nextActions.length > 0 ? (
+        {!streaming && nextActions.length > 0 ? (
           <Box mt="sm">
             <Text size="xs" fw={600} mb={4}>
               Další kroky
@@ -174,7 +182,7 @@ export function ChatMessageBubble({ message, getAccessToken, agentLabelById }: P
           </Box>
         ) : null}
 
-        {artifacts.length > 0 ? (
+        {!streaming && artifacts.length > 0 ? (
           <Box mt="sm">
             <Text size="xs" fw={600} mb={4}>
               Artefakty
@@ -197,7 +205,7 @@ export function ChatMessageBubble({ message, getAccessToken, agentLabelById }: P
           </Box>
         ) : null}
 
-        {runId && !hideTraceForCasualChat ? (
+        {!streaming && runId && !hideTraceForCasualChat ? (
           <Box mt="sm">
             <Button
               type="button"

@@ -62,4 +62,25 @@ describe("readAgentNdjsonStream", () => {
     expect(chunks.join("")).toBe("Ahoj");
     expect(out.answer_text).toBe("OK");
   });
+
+  it("předá answer_delta", async () => {
+    const chunks: string[] = [];
+    const payload: AgentAnswer = {
+      answer_text: "Finál",
+      confidence: 1,
+      sources: [],
+      generated_artifacts: [],
+      next_actions: []
+    };
+    const body = [
+      JSON.stringify({ type: "answer_delta", text: "Fi" }),
+      JSON.stringify({ type: "answer_delta", text: "nál" }),
+      JSON.stringify({ type: "result", payload })
+    ].join("\n");
+    const out = await readAgentNdjsonStream(streamResponse(`${body}\n`), {
+      onAnswerDelta: (t) => chunks.push(t)
+    });
+    expect(chunks.join("")).toBe("Finál");
+    expect(out.answer_text).toBe("Finál");
+  });
 });

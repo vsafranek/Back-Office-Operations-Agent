@@ -81,6 +81,14 @@ export type AgentMarketListingCard = {
   image_url?: string;
 };
 
+/** Kandidát na příjemce e-mailu (CRM) — stejný tvar jako `EmailRecipientCandidate` na serveru, bez importu server modulu do klienta. */
+export type ViewingEmailRecipientCandidate = {
+  kind: "client" | "lead";
+  id: string;
+  fullName: string | null;
+  email: string;
+};
+
 export type AgentDataPanel =
   | {
       kind: "clients_q1";
@@ -136,6 +144,15 @@ export type AgentDataPanel =
     }
   | {
       kind: "viewing_email_draft";
+      /** Kandidáti z CRM (klienti / leady) k doplnění příjemce; UI + follow-up v chatu. */
+      recipientCandidates?: ViewingEmailRecipientCandidate[];
+      /** Shrnutí nemovitosti z CRM (lead → property), pro doplnění do těla zprávy. */
+      propertySummary?: string;
+      /**
+       * Délka schůzky v minutách odvozená z dotazu (krok 15). Výchozí přepínač nad kalendářem v chatu.
+       * Starší uložené odpovědi pole nemají — UI vezme délku z prvního slotu.
+       */
+      meetingDurationMinutes?: number;
       /** Volné sloty z Google Calendar (free/busy). */
       slots: { start: string; end: string }[];
       /** Obsazené úseky + okno pro náhled v UI (volitelné u starších uložených odpovědí). */
@@ -215,6 +232,7 @@ export function agentArtifactStoragePathKey(ctx: AgentToolContext): string {
 export type AgentStreamLine =
   | { type: "phase"; label: string }
   | { type: "orchestrator_delta"; text: string }
+  | { type: "answer_delta"; text: string }
   | { type: "result"; payload: AgentAnswer }
   | { type: "error"; message: string };
 

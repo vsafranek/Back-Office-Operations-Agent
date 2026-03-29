@@ -25,7 +25,7 @@ import {
   IconFolder
 } from "@tabler/icons-react";
 import Link from "next/link";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AgentTraceTree } from "@/components/agent/AgentTraceTree";
 import { AuditRunSummary } from "@/components/agent/AuditRunSummary";
 import {
@@ -37,6 +37,7 @@ import {
 } from "@/components/agent/companion/CompanionToolPanels";
 import type { AgentUiOption } from "@/lib/agent/config/types";
 import type { AgentAnswer } from "@/lib/agent/types";
+import { findViewingEmailDataPanel } from "@/lib/agent/viewing-email-answer-helpers";
 import type { VizAnswerRunOption } from "@/components/agent/companion/CompanionToolPanels";
 
 export type CompanionSectionId =
@@ -62,8 +63,12 @@ export type ChatCompanionSidebarProps = {
   focusRunId: string | null;
   getAccessToken: () => Promise<string | null>;
   lastAgentAnswer: AgentAnswer | null;
-  /** Odpovědi s datovým panelem (nejnovější první) — navigace šipkami v sekci Tabulka/graf. */
+  /** Odpovědi s tabulkou/grafem (v pořadí konverzace, nejstarší první) — navigace v sekci Tabulka/graf. */
   vizAnswerRuns?: VizAnswerRunOption[];
+  /** Odpovědi s návrhem e-mailu (prohlídka) — přepínač v Maily. */
+  viewingEmailRuns?: VizAnswerRunOption[];
+  /** Assistant runId v pořadí konverzace (nejstarší první) — šipky mezi maily a tabulkami. */
+  assistantRunIdsInOrder?: string[];
   onSelectVizAnswerRun?: (runId: string) => void;
   onNavigateConversation: (conversationId: string, runId?: string | null) => void;
   /** Šířka rozbaleného panelu (px). */
@@ -72,6 +77,7 @@ export type ChatCompanionSidebarProps = {
   collapsedWidthPx?: number;
   /** Vypnout animaci šířky při táhnutí rozdělovače. */
   disableWidthTransition?: boolean;
+  onViewingEmailBodyChange?: (body: string) => void;
 };
 
 export function ChatCompanionSidebar({
@@ -86,14 +92,28 @@ export function ChatCompanionSidebar({
   getAccessToken,
   lastAgentAnswer,
   vizAnswerRuns = [],
+  viewingEmailRuns = [],
+  assistantRunIdsInOrder = [],
   onSelectVizAnswerRun,
   onNavigateConversation,
   expandedWidthPx = 680,
   collapsedWidthPx = 52,
-  disableWidthTransition = false
+  disableWidthTransition = false,
+  onViewingEmailBodyChange
 }: ChatCompanionSidebarProps) {
   const [activeSection, setActiveSection] = useState<CompanionSectionId>("context");
   const agent = agentOptions.find((a) => a.id === selectedAgentId);
+  const mailAutoOpenRunRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const runId = lastAgentAnswer?.runId ?? null;
+    const isViewing = findViewingEmailDataPanel(lastAgentAnswer) != null;
+    if (isViewing && runId && mailAutoOpenRunRef.current !== runId) {
+      mailAutoOpenRunRef.current = runId;
+      setActiveSection("mail");
+    }
+    if (!isViewing) mailAutoOpenRunRef.current = null;
+  }, [lastAgentAnswer]);
 
   const navItems: { id: CompanionSectionId; label: string; icon: ReactNode }[] = [
     { id: "context", label: "Kontext", icon: <IconLayoutSidebarRightExpand size={20} stroke={1.5} /> },
@@ -161,6 +181,11 @@ export function ChatCompanionSidebar({
             conversationId={conversationId}
             focusRunId={focusRunId}
             onNavigateConversation={onNavigateConversation}
+            lastAgentAnswer={lastAgentAnswer}
+            viewingEmailRuns={viewingEmailRuns}
+            assistantRunIdsInOrder={assistantRunIdsInOrder}
+            onSelectViewingEmailRun={onSelectVizAnswerRun}
+            onViewingEmailBodyChange={onViewingEmailBodyChange}
           />
         );
       case "calendar":
@@ -171,10 +196,9 @@ export function ChatCompanionSidebar({
         return (
           <VizPanel
             lastAgentAnswer={lastAgentAnswer}
-            conversationId={conversationId}
             getAccessToken={getAccessToken}
-            onNavigateConversation={onNavigateConversation}
             vizAnswerRuns={vizAnswerRuns}
+            assistantRunIdsInOrder={assistantRunIdsInOrder}
             onSelectVizAnswerRun={onSelectVizAnswerRun}
           />
         );
@@ -226,9 +250,13 @@ export function ChatCompanionSidebar({
             </Text>
             <Text size="sm">
               <Text span fw={600}>
-                Odkazy do chatu
+                Tabulka / graf a Maily
               </Text>{" "}
-              — u tabulky/grafu použijte šipky nahoře (odpovědi / části výsledku) a „Přejít na odpověď v chatu“.
+              — u tabulek a grafů jde o odpovědi s datovým panelem; pořadí od nejstarší po nejnovější. Šipky mezi
+              odpověďmi (i mezi dílčími částmi jedné odpovědi) posunou středový chat k příslušné bublině. Stejný vzor
+              šipek je u více návrhů e-mailu v záložce <Text span fw={600}>Maily</Text>. Při aktivním e-mailovém běhu
+              můžete šipkami v Tabulka/graf přepnout zpět na starší tabulkovou odpověď. Prohlížeč si zapamatuje naposledy
+              zvolený běh v konverzaci (do obnovení záložky). Kalendář a výběr termínu zůstávají ve vláknu chatu.
             </Text>
           </Stack>
         );
@@ -341,9 +369,19 @@ export function ChatCompanionSidebar({
           )}
 
           {isDesktop ? (
-            <Group align="flex-start" gap="sm" wrap="nowrap" style={{ minHeight: 0, flex: 1 }} mih={400}>
-              <ScrollArea flex="1" type="auto" offsetScrollbars mih={360} mah="min(70vh, 640px)">
-                <Stack gap="xs" pr="xs">
+            <Group align="stretch" gap="sm" wrap="nowrap" style={{ minHeight: 0, flex: 1 }} mih={0}>
+              <ScrollArea
+                flex="1"
+                type="auto"
+                offsetScrollbars
+                scrollbars="y"
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  maxHeight: "min(calc(100dvh - 120px), 720px)"
+                }}
+              >
+                <Stack gap="xs" pr="xs" pb="md">
                   <Text size="xs" c="dimmed" tt="uppercase" fw={700}>
                     {contentTitle}
                   </Text>

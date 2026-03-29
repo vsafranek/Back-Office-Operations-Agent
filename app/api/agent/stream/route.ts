@@ -72,6 +72,9 @@ export async function POST(request: Request) {
           },
           onOrchestratorDelta: (textChunk) => {
             send({ type: "orchestrator_delta", text: textChunk });
+          },
+          onAnswerDelta: (textChunk) => {
+            send({ type: "answer_delta", text: textChunk });
           }
         });
         send({ type: "result", payload: result });

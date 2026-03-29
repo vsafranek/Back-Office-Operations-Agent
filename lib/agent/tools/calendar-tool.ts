@@ -71,35 +71,92 @@ export async function browseCalendarAvailability(params: {
   };
 }
 
+const VIEWING_SLOT_STEP_MS = 15 * 60 * 1000;
+const DEFAULT_VIEWING_SLOT_MINUTES = 60;
+
+function clampViewingSlotMinutes(minutes: number): number {
+  const stepped = Math.round(minutes / 15) * 15;
+  return Math.max(15, Math.min(480, stepped));
+}
+
+function alignViewingSearchCursor(now: Date): Date {
+  const roundedUp = new Date(Math.ceil(now.getTime() / VIEWING_SLOT_STEP_MS) * VIEWING_SLOT_STEP_MS);
+  const nineToday = new Date(now);
+  nineToday.setHours(9, 0, 0, 0);
+  const c = new Date(Math.max(roundedUp.getTime(), nineToday.getTime()));
+  let guard = 0;
+  while ((c.getDay() === 0 || c.getDay() === 6) && guard < 14) {
+    c.setDate(c.getDate() + 1);
+    c.setHours(9, 0, 0, 0);
+    guard++;
+  }
+  return c;
+}
+
+function jumpCursorToNextWeekdayNine(cursor: Date): void {
+  cursor.setDate(cursor.getDate() + 1);
+  cursor.setHours(9, 0, 0, 0);
+  let guard = 0;
+  while ((cursor.getDay() === 0 || cursor.getDay() === 6) && guard < 14) {
+    cursor.setDate(cursor.getDate() + 1);
+    guard++;
+  }
+}
+
 /**
- * Z výsledku prohlížení kalendáře spočítá hodinové sloty pro prohlídku (pracovní dny 9–17).
+ * Z výsledku prohlížení kalendáře spočítá sloty pro prohlídku (pracovní dny, začátky po 15 min, konec nejpozději v 17:00).
  */
 export function buildViewingSlotsFromCalendarAvailability(
   availability: CalendarAvailabilityResult,
-  params: { limit?: number; now?: Date }
+  params: { limit?: number; now?: Date; slotDurationMinutes?: number }
 ): CalendarTimeRange[] {
   const now = params.now ?? new Date();
   const maxResults = params.limit ?? 5;
+  const slotMs = clampViewingSlotMinutes(params.slotDurationMinutes ?? DEFAULT_VIEWING_SLOT_MINUTES) * 60 * 1000;
   const { busy } = availability;
-  const timeMax = availability.rangeEnd;
+  const timeMax = new Date(availability.rangeEnd).getTime();
 
   const slots: CalendarTimeRange[] = [];
-  const cursor = new Date(now);
-  cursor.setMinutes(0, 0, 0);
-  cursor.setHours(9, 0, 0, 0);
+  const cursor = alignViewingSearchCursor(now);
 
-  while (slots.length < maxResults && cursor.toISOString() < timeMax) {
+  let iter = 0;
+  const maxIter = 25_000;
+
+  while (slots.length < maxResults && cursor.getTime() < timeMax && iter < maxIter) {
+    iter++;
+    const day = cursor.getDay();
+    if (day === 0 || day === 6) {
+      jumpCursorToNextWeekdayNine(cursor);
+      continue;
+    }
+    if (cursor.getHours() < 9) {
+      cursor.setHours(9, 0, 0, 0);
+      continue;
+    }
+
     const start = new Date(cursor);
-    const end = new Date(cursor.getTime() + 60 * 60 * 1000);
+    const end = new Date(start.getTime() + slotMs);
+    const workEnd = new Date(start);
+    workEnd.setHours(17, 0, 0, 0);
+
+    if (end.getTime() > workEnd.getTime()) {
+      jumpCursorToNextWeekdayNine(cursor);
+      continue;
+    }
+
     const overlap = busy.some((item) => {
       const busyStart = new Date(item.start);
       const busyEnd = new Date(item.end);
       return rangesOverlap(start, end, busyStart, busyEnd);
     });
-    if (!overlap && start.getDay() > 0 && start.getDay() < 6 && start.getHours() >= 9 && start.getHours() <= 17) {
+
+    if (!overlap) {
       slots.push({ start: start.toISOString(), end: end.toISOString() });
+      cursor.setTime(end.getTime());
+      cursor.setTime(Math.ceil(cursor.getTime() / VIEWING_SLOT_STEP_MS) * VIEWING_SLOT_STEP_MS);
+    } else {
+      cursor.setTime(cursor.getTime() + VIEWING_SLOT_STEP_MS);
     }
-    cursor.setHours(cursor.getHours() + 1);
   }
 
   return slots;
@@ -164,12 +221,16 @@ export async function suggestViewingSlots(params: {
   userId: string;
   daysAhead?: number;
   limit?: number;
+  slotDurationMinutes?: number;
 }): Promise<ViewingSlotsResult> {
   const availability = await browseCalendarAvailability({
     userId: params.userId,
     daysAhead: params.daysAhead
   });
-  const slots = buildViewingSlotsFromCalendarAvailability(availability, { limit: params.limit });
+  const slots = buildViewingSlotsFromCalendarAvailability(availability, {
+    limit: params.limit,
+    slotDurationMinutes: params.slotDurationMinutes
+  });
   return {
     ...availability,
     slots

@@ -1,74 +1,56 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarPreviewStrip } from "@/components/agent/CalendarPreviewStrip";
+import type { ViewingEmailRecipientCandidate } from "@/lib/agent/types";
+import { ensureViewingEmailSignOff, stripViewingEmailSignOff } from "@/lib/agent/viewing-email-sign-off";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const panelChrome = {
-  position: "sticky" as const,
-  top: 12,
   display: "grid" as const,
   gap: 16,
   alignContent: "start" as const,
   border: "1px solid #e2e8f0",
   borderRadius: 10,
   padding: 14,
-  background: "#fafafa",
-  maxHeight: "calc(100vh - 48px)",
-  overflow: "auto" as const
+  background: "#fafafa"
 };
-
-function formatSlotRange(startIso: string, endIso: string): string {
-  try {
-    const s = new Date(startIso);
-    const e = new Date(endIso);
-    if (Number.isNaN(s.getTime())) return startIso;
-    const d = s.toLocaleDateString("cs-CZ", { weekday: "short", day: "numeric", month: "short" });
-    const t1 = s.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
-    const t2 = e.toLocaleTimeString("cs-CZ", { hour: "2-digit", minute: "2-digit" });
-    return `${d} ${t1}–${t2}`;
-  } catch {
-    return `${startIso} – ${endIso}`;
-  }
-}
 
 function isProbablyValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 }
 
 type Props = {
-  slots: { start: string; end: string }[];
-  calendarPreview?: {
-    busy: { start: string; end: string }[];
-    rangeStart: string;
-    rangeEnd: string;
-  };
   senderDisplayName?: string;
+  /** Nemovitost z CRM (lead → property), kvůli kontextu v e-mailu. */
+  propertySummary?: string | null;
   draft: { to: string; subject: string; body: string };
   /** Předvyplněné UUID leadů z agenta; uživatel může upravit před odesláním. */
   relatedLeadIds?: string[];
+  recipientCandidates?: ViewingEmailRecipientCandidate[];
   getAccessToken?: () => Promise<string | null>;
   conversationId?: string | null;
   agentRunId?: string | null;
+  /** Synchronizace těla s výběrem termínu ve chatu (nadřazený stav na dashboardu). */
+  onBodyChange?: (body: string) => void;
 };
 
 export function ViewingEmailDraftPanel({
-  slots,
-  calendarPreview,
   senderDisplayName,
+  propertySummary,
   draft,
   relatedLeadIds,
+  recipientCandidates = [],
   getAccessToken,
   conversationId,
-  agentRunId
+  agentRunId,
+  onBodyChange
 }: Props) {
   const [to, setTo] = useState(draft.to);
   const [subject, setSubject] = useState(draft.subject);
   const [body, setBody] = useState(draft.body);
   const [leadIds, setLeadIds] = useState<string[]>(() => relatedLeadIds?.filter((id) => UUID_RE.test(id)) ?? []);
-  const [leadIdInput, setLeadIdInput] = useState("");
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [loadingSend, setLoadingSend] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,37 +63,54 @@ export function ViewingEmailDraftPanel({
   const [confirmSend, setConfirmSend] = useState(false);
   const [sent, setSent] = useState<{ messageId: string | null } | null>(null);
 
+  const runKey = `${conversationId ?? ""}:${agentRunId ?? ""}`;
   useEffect(() => {
-    setLeadIds(relatedLeadIds?.filter((id) => UUID_RE.test(id)) ?? []);
-  }, [relatedLeadIds]);
+    let initialTo = (draft.to ?? "").trim();
+    if (!initialTo && recipientCandidates.length === 1) {
+      const c = recipientCandidates[0]!;
+      if (isProbablyValidEmail(c.email)) initialTo = c.email.trim();
+    }
+    setTo(initialTo);
+    setSubject(draft.subject);
+    setDraftSaved(null);
+    setLastSavedForm(null);
+    setSent(null);
+    setConfirmSend(false);
+    setError(null);
+
+    const lids = relatedLeadIds?.filter((id) => UUID_RE.test(id)) ?? [];
+    if (
+      recipientCandidates.length === 1 &&
+      initialTo === recipientCandidates[0]!.email.trim() &&
+      recipientCandidates[0]!.kind === "lead"
+    ) {
+      const id = recipientCandidates[0]!.id;
+      if (UUID_RE.test(id) && !lids.includes(id)) lids.push(id);
+    }
+    setLeadIds(lids);
+    // Panel má `key` podle běhu — synchronizace stavu jen při novém návrhu z agenta.
+  }, [runKey]);
+
+  const signName = senderDisplayName?.trim() ?? "";
+
+  useEffect(() => {
+    const raw = draft.body;
+    const next =
+      signName.length > 0
+        ? ensureViewingEmailSignOff(stripViewingEmailSignOff(raw, signName), signName)
+        : raw;
+    setBody(next);
+  }, [draft.body, signName]);
 
   const displayName = senderDisplayName?.trim() || "přihlášeného uživatele";
-  const previewRange = useMemo(() => {
-    if (calendarPreview?.rangeStart && calendarPreview?.rangeEnd) {
-      return { busy: calendarPreview.busy ?? [], rangeStart: calendarPreview.rangeStart, rangeEnd: calendarPreview.rangeEnd };
-    }
-    if (slots.length === 0) return null;
-    const starts = slots.map((s) => new Date(s.start).getTime()).filter((t) => !Number.isNaN(t));
-    const ends = slots.map((s) => new Date(s.end).getTime()).filter((t) => !Number.isNaN(t));
-    if (starts.length === 0 || ends.length === 0) return null;
-    return {
-      busy: [] as { start: string; end: string }[],
-      rangeStart: new Date(Math.min(...starts)).toISOString(),
-      rangeEnd: new Date(Math.max(...ends)).toISOString()
-    };
-  }, [calendarPreview, slots]);
 
   const emailOk = isProbablyValidEmail(to);
 
-  function addLeadId() {
-    const v = leadIdInput.trim();
-    if (!UUID_RE.test(v) || leadIds.includes(v)) return;
-    setLeadIds((prev) => [...prev, v]);
-    setLeadIdInput("");
-  }
-
-  function removeLeadId(id: string) {
-    setLeadIds((prev) => prev.filter((x) => x !== id));
+  function pickRecipientCandidate(c: ViewingEmailRecipientCandidate) {
+    setTo(c.email);
+    if (c.kind === "lead" && UUID_RE.test(c.id)) {
+      setLeadIds((prev) => (prev.includes(c.id) ? prev : [...prev, c.id]));
+    }
   }
 
   const leadIdsPayload = leadIds.length > 0 ? leadIds : undefined;
@@ -280,55 +279,65 @@ export function ViewingEmailDraftPanel({
   return (
     <div style={panelChrome}>
       <div>
-        <h2 style={{ margin: "0 0 6px", fontSize: 18 }}>Prohlídka a e-mail</h2>
+        <h2 style={{ margin: "0 0 6px", fontSize: 18 }}>Návrh e-mailu (prohlídka)</h2>
         <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
-          Volné termíny z připojeného kalendáře (Google nebo Microsoft). E-mail je připraven v podobě od{" "}
-          <strong>{displayName}</strong>. Můžete <strong>uložit draft</strong> v poště, nebo po potvrzení{" "}
-          <strong>odeslat rovnou</strong> bez draftu; z uloženého draftu lze také odeslat (BOA-004). Volitelně
-          propojte <strong>UUID leadů</strong> s auditním záznamem.
+          Text je od <strong>{displayName}</strong> (podpis v těle zprávy se sjednocuje automaticky). Kalendář a výběr
+          termínu jsou ve vláknu chatu pod odpovědí agenta. Zde doplňte příjemce, upravte znění a{" "}
+          <strong>uložte draft</strong> nebo po potvrzení <strong>odešlete</strong>. Vazby na leady z odpovědi agenta se
+          do auditu přidají automaticky při uložení a odeslání.
         </p>
       </div>
 
-      <div>
-        <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>Navržené termíny</div>
-        {slots.length === 0 ? (
-          <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>Žádné volné sloty v zadaném horizontu.</p>
-        ) : (
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "#334155" }}>
-            {slots.map((s, i) => (
-              <li key={`${s.start}-${i}`} style={{ marginBottom: 4 }}>
-                {formatSlotRange(s.start, s.end)}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {previewRange ? (
+      {propertySummary?.trim() ? (
         <div
           style={{
-            border: "1px solid #e2e8f0",
+            padding: "10px 12px",
             borderRadius: 8,
-            padding: 12,
-            background: "#fff"
+            border: "1px solid #bae6fd",
+            background: "#f0f9ff",
+            fontSize: 13,
+            color: "#0c4a6e"
           }}
         >
-          <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14 }}>Náhled kalendáře</div>
-          <p style={{ margin: "0 0 10px", fontSize: 12, color: "#64748b" }}>
-            {previewRange.busy.length > 0
-              ? "Šedě jsou vaše obsazené úseky (free/busy), zeleně navrhované prohlídky v tomto e-mailu."
-              : "Zeleně jsou navrhované prohlídky; obsazenost kalendáře nebyla k dispozici (starší odpověď nebo bez free/busy)."}
-          </p>
-          <CalendarPreviewStrip
-            busy={previewRange.busy}
-            proposedSlots={slots}
-            rangeStart={previewRange.rangeStart}
-            rangeEnd={previewRange.rangeEnd}
-          />
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Nemovitost (z CRM)</div>
+          <p style={{ margin: 0, lineHeight: 1.45 }}>{propertySummary.trim()}</p>
         </div>
       ) : null}
 
       <div style={{ display: "grid", gap: 10 }}>
+        {recipientCandidates.length > 0 ? (
+          <div style={{ display: "grid", gap: 8, fontSize: 13 }}>
+            <span style={{ fontWeight: 600 }}>Kandidáti z CRM</span>
+            <p style={{ margin: 0, fontSize: 12, color: "#64748b" }}>
+              Kliknutím vyplníte adresu (u leadu současně přidáte UUID do propojených leadů).
+            </p>
+            <ul style={{ margin: 0, paddingLeft: 18, color: "#334155" }}>
+              {recipientCandidates.map((c, idx) => (
+                <li key={`${c.kind}-${c.id}`} style={{ marginBottom: 6 }}>
+                  <span style={{ marginRight: 8 }}>
+                    {idx + 1}. {c.fullName?.trim() || "(bez jména)"} · {c.email}{" "}
+                    <span style={{ color: "#64748b" }}>({c.kind})</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => pickRecipientCandidate(c)}
+                    disabled={Boolean(sent)}
+                    style={{
+                      fontSize: 12,
+                      padding: "4px 10px",
+                      borderRadius: 6,
+                      border: "1px solid #cbd5e1",
+                      background: "#fff",
+                      cursor: sent ? "default" : "pointer"
+                    }}
+                  >
+                    Použít
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
           <span style={{ fontWeight: 600 }}>Komu (e-mail)</span>
           <input
@@ -363,83 +372,26 @@ export function ViewingEmailDraftPanel({
           <span style={{ fontWeight: 600 }}>Tělo zprávy</span>
           <textarea
             value={body}
-            onChange={(e) => setBody(e.target.value)}
-            rows={12}
+            onChange={(e) => {
+              const v = e.target.value;
+              setBody(v);
+              onBodyChange?.(v);
+            }}
+            rows={14}
             style={{
               padding: "8px 10px",
               borderRadius: 8,
               border: "1px solid #cbd5e1",
               fontSize: 14,
               fontFamily: "inherit",
-              resize: "vertical"
+              resize: "vertical",
+              minHeight: 220,
+              maxHeight: "min(52vh, 520px)",
+              overflowY: "auto",
+              lineHeight: 1.5
             }}
           />
         </label>
-        <div style={{ display: "grid", gap: 8, fontSize: 13 }}>
-          <span style={{ fontWeight: 600 }}>Propojené leady (UUID)</span>
-          <p style={{ margin: 0, fontSize: 12, color: "#64748b" }}>
-            Záznam draftu/odeslání v aplikaci se propojí s těmito leady (tabulka vazeb v databázi).
-          </p>
-          {leadIds.length > 0 ? (
-            <ul style={{ margin: 0, paddingLeft: 18, color: "#334155" }}>
-              {leadIds.map((id) => (
-                <li key={id} style={{ marginBottom: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <code style={{ fontSize: 12 }}>{id}</code>
-                  <button
-                    type="button"
-                    onClick={() => removeLeadId(id)}
-                    disabled={Boolean(sent)}
-                    style={{ fontSize: 12, color: "#b91c1c", background: "none", border: "none", cursor: sent ? "default" : "pointer" }}
-                  >
-                    odebrat
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p style={{ margin: 0, fontSize: 12, color: "#64748b" }}>Žádné leady — audit bude bez vazby na lead.</p>
-          )}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            <input
-              type="text"
-              value={leadIdInput}
-              onChange={(e) => setLeadIdInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addLeadId();
-                }
-              }}
-              placeholder="např. bbbbbbb1-bbbb-bbbb-bbbb-bbbbbbbbbbb1"
-              disabled={Boolean(sent)}
-              style={{
-                flex: "1 1 220px",
-                minWidth: 0,
-                padding: "8px 10px",
-                borderRadius: 8,
-                border: "1px solid #cbd5e1",
-                fontSize: 13,
-                fontFamily: "monospace"
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => addLeadId()}
-              disabled={Boolean(sent) || !leadIdInput.trim()}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 8,
-                border: "1px solid #cbd5e1",
-                fontWeight: 600,
-                fontSize: 13,
-                cursor: sent ? "not-allowed" : "pointer",
-                background: "#fff"
-              }}
-            >
-              Přidat lead
-            </button>
-          </div>
-        </div>
       </div>
 
       {formDirty && draftSaved ? (

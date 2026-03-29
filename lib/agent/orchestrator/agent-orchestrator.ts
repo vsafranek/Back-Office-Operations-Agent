@@ -30,6 +30,7 @@ export async function runAgentOrchestrator(params: {
   trace?: AgentTraceRecorder;
   traceDispatchId?: string | null;
   toolRunner: ToolRunner;
+  onAnswerDelta?: (chunk: string) => void | Promise<void>;
 }): Promise<AgentAnswer> {
   const { toolRunner } = params;
 
@@ -57,7 +58,8 @@ export async function runAgentOrchestrator(params: {
       toolRunner,
       ctx,
       question: params.question,
-      contextText: params.contextText
+      contextText: params.contextText,
+      onAnswerDelta: params.onAnswerDelta
     });
   }
 
@@ -69,7 +71,8 @@ export async function runAgentOrchestrator(params: {
       ctx,
       slideCount,
       question: params.question,
-      title
+      title,
+      onAnswerDelta: params.onAnswerDelta
     });
   }
 
@@ -81,16 +84,27 @@ export async function runAgentOrchestrator(params: {
       ctx,
       slideCount,
       question: params.question,
-      title
+      title,
+      onAnswerDelta: params.onAnswerDelta
     });
   }
 
   if (params.intent === "web_search") {
-    return runWebSearchSubAgent({ toolRunner, ctx, question: params.question });
+    return runWebSearchSubAgent({
+      toolRunner,
+      ctx,
+      question: params.question,
+      onAnswerDelta: params.onAnswerDelta
+    });
   }
 
   if (params.intent === "market_listings") {
-    return runMarketListingsChatSubAgent({ toolRunner, ctx, question: params.question });
+    return runMarketListingsChatSubAgent({
+      toolRunner,
+      ctx,
+      question: params.question,
+      onAnswerDelta: params.onAnswerDelta
+    });
   }
 
   if (params.intent === "scheduled_agent_task") {
@@ -98,13 +112,14 @@ export async function runAgentOrchestrator(params: {
   }
 
   if (params.intent === "casual_chat") {
-    return runCasualChatSubAgent({ ctx, question: params.question });
+    return runCasualChatSubAgent({ ctx, question: params.question, onAnswerDelta: params.onAnswerDelta });
   }
 
   return runAnalyticsSubAgent({
     toolRunner,
     ctx,
-    question: params.question
+    question: params.question,
+    onAnswerDelta: params.onAnswerDelta
   });
 }
 

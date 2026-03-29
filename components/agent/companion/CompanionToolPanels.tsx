@@ -4,12 +4,14 @@ import {
   ActionIcon,
   Anchor,
   Button,
+  Checkbox,
   Code,
   Divider,
   Group,
   Modal,
   MultiSelect,
   NumberInput,
+  Collapse,
   ScrollArea,
   Select,
   Stack,
@@ -19,17 +21,36 @@ import {
   Tooltip,
   UnstyledButton
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import Link from "next/link";
 import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
+import { useDisclosure } from "@mantine/hooks";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CalendarPreviewStrip } from "@/components/agent/CalendarPreviewStrip";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
+import { ViewingEmailDraftPanel } from "@/components/agent/ViewingEmailDraftPanel";
 import { MarketListingsDataPanelSection } from "@/components/agent/MarketListingsDataPanelSection";
 import { DATASET_IDS } from "@/lib/agent/tools/data-pull-plan";
 import type { FetchMarketListingsInput } from "@/lib/agent/tools/market-listings-tool";
-import type { AgentAnswer } from "@/lib/agent/types";
+import type { AgentAnswer, AgentDataPanel as AgentDataPanelModel } from "@/lib/agent/types";
+import { findViewingEmailDataPanel } from "@/lib/agent/viewing-email-answer-helpers";
+import {
+  companionRunNavCanGoNewer,
+  companionRunNavCanGoOlder,
+  companionRunNavCursor,
+  companionRunNavDisplayedSlotNumber,
+  companionRunNavGoNewer,
+  companionRunNavGoOlder
+} from "@/lib/ui/companion-run-nav";
 
 export type VizAnswerRunOption = { runId: string; preview: string };
+
+const VIZ_SIDEBAR_KINDS = new Set<AgentDataPanelModel["kind"]>([
+  "clients_q1",
+  "leads_sales_6m",
+  "clients_filtered",
+  "deal_sales_detail",
+  "market_listings"
+]);
 
 type GmailRow = {
   id: string;
@@ -53,6 +74,10 @@ type OutboundRow = {
 
 type CalendarEv = { id: string; summary: string; start: string; end: string; htmlLink?: string };
 
+function isProbablyValidEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+}
+
 function startOfWeekMonday(d: Date): Date {
   const x = new Date(d);
   const day = x.getDay();
@@ -73,19 +98,51 @@ export function MailToolPanel(props: {
   conversationId: string | null;
   focusRunId: string | null;
   onNavigateConversation: (conversationId: string, runId?: string | null) => void;
+  /** Sloučeno s úpravou těla z chatu (výběr termínu). */
+  lastAgentAnswer?: AgentAnswer | null;
+  viewingEmailRuns?: VizAnswerRunOption[];
+  assistantRunIdsInOrder?: string[];
+  /** Stejné jako výběr běhu u Tabulka/graf — přepíná návrh v Maily. */
+  onSelectViewingEmailRun?: (runId: string) => void;
+  onViewingEmailBodyChange?: (body: string) => void;
 }) {
-  const { getAccessToken, conversationId, focusRunId, onNavigateConversation } = props;
+  const {
+    getAccessToken,
+    conversationId,
+    focusRunId,
+    onNavigateConversation,
+    lastAgentAnswer = null,
+    viewingEmailRuns = [],
+    assistantRunIdsInOrder = [],
+    onSelectViewingEmailRun,
+    onViewingEmailBodyChange
+  } = props;
+  const [composeExpanded, { toggle: toggleCompose }] = useDisclosure(false);
   const [messages, setMessages] = useState<GmailRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [detail, setDetail] = useState<{ subject: string; from: string; bodyText: string } | null>(null);
-  const [opened, { open, close }] = useDisclosure(false);
   const [composeTo, setComposeTo] = useState("");
   const [composeSubject, setComposeSubject] = useState("");
   const [composeBody, setComposeBody] = useState("");
   const [composeBusy, setComposeBusy] = useState(false);
+  const [composeSendBusy, setComposeSendBusy] = useState(false);
+  const [composeConfirmSend, setComposeConfirmSend] = useState(false);
+  const [composeDraftSaved, setComposeDraftSaved] = useState<{ draftId: string | null } | null>(null);
+  const [composeLastSaved, setComposeLastSaved] = useState<{ to: string; subject: string; body: string } | null>(null);
+  const [composeSent, setComposeSent] = useState<{ messageId: string | null } | null>(null);
   const [outbound, setOutbound] = useState<OutboundRow[] | null>(null);
+
+  const composeEmailOk = isProbablyValidEmail(composeTo);
+  const composeFormDirty = useMemo(() => {
+    if (!composeLastSaved) return false;
+    return (
+      composeTo.trim() !== composeLastSaved.to ||
+      composeSubject.trim() !== composeLastSaved.subject ||
+      composeBody !== composeLastSaved.body
+    );
+  }, [composeTo, composeSubject, composeBody, composeLastSaved]);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -112,10 +169,12 @@ export function MailToolPanel(props: {
   const loadOutbound = useCallback(async () => {
     const token = await getAccessToken();
     if (!token) return;
-    const res = await fetch("/api/mail/outbound-history", { headers: { Authorization: `Bearer ${token}` } });
+    const u = new URL("/api/mail/outbound-history", window.location.origin);
+    if (conversationId) u.searchParams.set("conversationId", conversationId);
+    const res = await fetch(u.toString(), { headers: { Authorization: `Bearer ${token}` } });
     const data = (await res.json()) as { items?: OutboundRow[] };
     if (res.ok) setOutbound(data.items ?? []);
-  }, [getAccessToken]);
+  }, [getAccessToken, conversationId]);
 
   useEffect(() => {
     void loadList();
@@ -140,11 +199,24 @@ export function MailToolPanel(props: {
     });
   }
 
-  async function submitDraft() {
+  async function composeSaveDraft() {
+    setErr(null);
+    setComposeConfirmSend(false);
+    const token = await getAccessToken();
+    if (!token) {
+      setErr("Nejste přihlášeni.");
+      return;
+    }
+    if (!composeEmailOk) {
+      setErr("Zadejte platnou e-mailovou adresu příjemce.");
+      return;
+    }
+    if (!composeSubject.trim() || !composeBody.trim()) {
+      setErr("Vyplňte předmět a tělo zprávy.");
+      return;
+    }
     setComposeBusy(true);
     try {
-      const token = await getAccessToken();
-      if (!token) return;
       const res = await fetch("/api/mail/email-draft", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -156,20 +228,127 @@ export function MailToolPanel(props: {
           agentRunId: focusRunId ?? null
         })
       });
+      const j = (await res.json()) as { draftId?: string | null; error?: string };
       if (!res.ok) {
-        const j = (await res.json()) as { error?: string };
         setErr(j.error ?? "Draft se nepodařilo vytvořit.");
         return;
       }
-      close();
-      setComposeTo("");
-      setComposeSubject("");
-      setComposeBody("");
+      setComposeDraftSaved({ draftId: j.draftId ?? null });
+      setComposeLastSaved({
+        to: composeTo.trim(),
+        subject: composeSubject.trim(),
+        body: composeBody.trim()
+      });
+      setComposeSent(null);
       void loadOutbound();
     } finally {
       setComposeBusy(false);
     }
   }
+
+  async function composeSendDirect() {
+    setErr(null);
+    if (!composeConfirmSend) {
+      setErr("Zaškrtněte potvrzení odeslání.");
+      return;
+    }
+    const token = await getAccessToken();
+    if (!token) {
+      setErr("Nejste přihlášeni.");
+      return;
+    }
+    if (!composeEmailOk || !composeSubject.trim() || !composeBody.trim()) {
+      setErr("Vyplňte příjemce, předmět a tělo.");
+      return;
+    }
+    setComposeSendBusy(true);
+    try {
+      const res = await fetch("/api/mail/email-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          strategy: "direct" as const,
+          confirmSend: true as const,
+          to: composeTo.trim(),
+          subject: composeSubject.trim(),
+          body: composeBody.trim(),
+          conversationId: conversationId ?? null,
+          agentRunId: focusRunId ?? null
+        })
+      });
+      const j = (await res.json()) as { messageId?: string | null; error?: string };
+      if (!res.ok) {
+        setErr(j.error ?? "Odeslání se nezdařilo.");
+        return;
+      }
+      setComposeSent({ messageId: j.messageId ?? null });
+      setComposeConfirmSend(false);
+      void loadOutbound();
+    } finally {
+      setComposeSendBusy(false);
+    }
+  }
+
+  async function composeSendFromDraft() {
+    setErr(null);
+    if (!composeDraftSaved?.draftId) {
+      setErr("Nejprve uložte draft.");
+      return;
+    }
+    if (composeFormDirty) {
+      setErr("Obsah se změnil po uložení draftu — nejprve znovu uložte draft.");
+      return;
+    }
+    if (!composeConfirmSend) {
+      setErr("Zaškrtněte potvrzení odeslání.");
+      return;
+    }
+    const token = await getAccessToken();
+    if (!token) {
+      setErr("Nejste přihlášeni.");
+      return;
+    }
+    setComposeSendBusy(true);
+    try {
+      const res = await fetch("/api/mail/email-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          strategy: "from_draft" as const,
+          confirmSend: true as const,
+          draftId: composeDraftSaved.draftId,
+          to: composeTo.trim(),
+          subject: composeSubject.trim(),
+          body: composeBody.trim(),
+          conversationId: conversationId ?? null,
+          agentRunId: focusRunId ?? null
+        })
+      });
+      const j = (await res.json()) as { messageId?: string | null; error?: string };
+      if (!res.ok) {
+        setErr(j.error ?? "Odeslání se nezdařilo.");
+        return;
+      }
+      setComposeSent({ messageId: j.messageId ?? null });
+      setComposeConfirmSend(false);
+      void loadOutbound();
+    } finally {
+      setComposeSendBusy(false);
+    }
+  }
+
+  const viewingDraft = findViewingEmailDataPanel(lastAgentAnswer);
+  const mailNavRunId = lastAgentAnswer?.runId ?? focusRunId ?? null;
+  const mailNavCursor = companionRunNavCursor(viewingEmailRuns, mailNavRunId, assistantRunIdsInOrder);
+  const mailAnswerCount = viewingEmailRuns.length;
+  const showMailAnswerNav = mailAnswerCount > 1 && onSelectViewingEmailRun != null;
+  const mailDisplaySlot = companionRunNavDisplayedSlotNumber(mailNavCursor, mailAnswerCount);
+  const mailPreviewText =
+    mailNavCursor >= 0
+      ? viewingEmailRuns[mailNavCursor]?.preview
+      : mailAnswerCount > 0
+        ? viewingEmailRuns[0]?.preview
+        : undefined;
 
   return (
     <Stack gap="sm">
@@ -179,13 +358,134 @@ export function MailToolPanel(props: {
           Nastavení
         </Anchor>
       </Text>
+
+      {showMailAnswerNav ? (
+        <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
+          <Tooltip label="Starší návrh e-mailu (dříve v konverzaci)">
+            <ActionIcon
+              variant="default"
+              size="sm"
+              aria-label="Starší návrh e-mailu"
+              disabled={!companionRunNavCanGoOlder(mailNavCursor)}
+              onClick={() => companionRunNavGoOlder(viewingEmailRuns, mailNavCursor, onSelectViewingEmailRun!)}
+            >
+              <IconChevronLeft size={18} stroke={1.5} />
+            </ActionIcon>
+          </Tooltip>
+          <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+            <Text size="xs" ta="center" fw={600} lineClamp={1}>
+              Návrh {mailDisplaySlot ?? "—"} / {mailAnswerCount}
+            </Text>
+            {mailPreviewText ? (
+              <Text size="xs" c="dimmed" ta="center" lineClamp={2} style={{ wordBreak: "break-word" }}>
+                {mailPreviewText}
+              </Text>
+            ) : null}
+          </Stack>
+          <Tooltip label="Novější návrh e-mailu">
+            <ActionIcon
+              variant="default"
+              size="sm"
+              aria-label="Novější návrh e-mailu"
+              disabled={!companionRunNavCanGoNewer(mailNavCursor, mailAnswerCount)}
+              onClick={() => companionRunNavGoNewer(viewingEmailRuns, mailNavCursor, onSelectViewingEmailRun!)}
+            >
+              <IconChevronRight size={18} stroke={1.5} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      ) : null}
+
+      {viewingDraft ? (
+        <>
+          <Divider label="Návrh z agenta (prohlídka)" labelPosition="center" />
+          <ViewingEmailDraftPanel
+            key={`${conversationId ?? "no-conv"}:${lastAgentAnswer?.runId ?? focusRunId ?? "run"}`}
+            senderDisplayName={viewingDraft.senderDisplayName}
+            propertySummary={viewingDraft.propertySummary}
+            draft={viewingDraft.draft}
+            relatedLeadIds={viewingDraft.relatedLeadIds}
+            recipientCandidates={viewingDraft.recipientCandidates}
+            getAccessToken={getAccessToken}
+            conversationId={conversationId}
+            agentRunId={lastAgentAnswer?.runId ?? focusRunId}
+            onBodyChange={onViewingEmailBodyChange}
+          />
+        </>
+      ) : showMailAnswerNav ? (
+        <Text size="xs" c="dimmed">
+          Aktivní běh nemá návrh e-mailu v tomto panelu — šipkami přejděte na jiný návrh z konverzace.
+        </Text>
+      ) : null}
+
+      <Button size="xs" variant="default" onClick={toggleCompose}>
+        {composeExpanded ? "Skrýt nový e-mail" : "Nový e-mail"}
+      </Button>
+      <Collapse in={composeExpanded}>
+        <Stack gap="xs" pt="xs">
+          <Divider label="Nová zpráva" labelPosition="center" />
+          <TextInput label="Komu" size="xs" value={composeTo} onChange={(e) => setComposeTo(e.currentTarget.value)} />
+          <TextInput label="Předmět" size="xs" value={composeSubject} onChange={(e) => setComposeSubject(e.currentTarget.value)} />
+          <Textarea label="Tělo zprávy" size="xs" minRows={6} value={composeBody} onChange={(e) => setComposeBody(e.currentTarget.value)} />
+          {composeFormDirty && composeDraftSaved ? (
+            <Text size="xs" c="orange">
+              Text se liší od uloženého draftu — před odesláním z uloženého konceptu znovu uložte.
+            </Text>
+          ) : null}
+          {composeSent ? (
+            <Text size="xs" c="green">
+              Odesláno
+              {composeSent.messageId ? ` (reference ${composeSent.messageId.slice(0, 10)}…)` : ""}.
+            </Text>
+          ) : null}
+          <Checkbox
+            label={`Potvrzuji odeslání příjemci ${composeTo.trim() || "—"}`}
+            checked={composeConfirmSend}
+            disabled={composeBusy || composeSendBusy}
+            onChange={(e) => setComposeConfirmSend(e.currentTarget.checked)}
+          />
+          <Group gap="xs">
+            <Button size="xs" loading={composeBusy} onClick={() => void composeSaveDraft()} disabled={composeSendBusy || Boolean(composeSent)}>
+              Uložit draft
+            </Button>
+            <Button
+              size="xs"
+              variant="light"
+              color="orange"
+              loading={composeSendBusy}
+              onClick={() => void composeSendDirect()}
+              disabled={
+                composeBusy || !composeConfirmSend || !composeEmailOk || !composeSubject.trim() || !composeBody.trim() || Boolean(composeSent)
+              }
+            >
+              Odeslat rovnou
+            </Button>
+          </Group>
+          {composeDraftSaved && !composeSent ? (
+            <Button
+              size="xs"
+              variant="outline"
+              color="orange"
+              loading={composeSendBusy}
+              disabled={
+                composeBusy ||
+                !composeDraftSaved.draftId ||
+                !composeConfirmSend ||
+                composeFormDirty ||
+                !composeEmailOk
+              }
+              onClick={() => void composeSendFromDraft()}
+            >
+              Odeslat z uloženého draftu
+            </Button>
+          ) : null}
+        </Stack>
+      </Collapse>
+
       <Group wrap="nowrap" gap="xs">
         <TextInput placeholder="Gmail hledání (q)…" value={q} onChange={(e) => setQ(e.currentTarget.value)} style={{ flex: 1 }} size="xs" />
         <Button size="xs" variant="light" onClick={() => void loadList()} loading={loading}>
           Načíst
-        </Button>
-        <Button size="xs" onClick={open}>
-          Nový draft
         </Button>
       </Group>
       {err ? (
@@ -222,7 +522,11 @@ export function MailToolPanel(props: {
         </Stack>
       </ScrollArea.Autosize>
 
-      <Divider label="Odchozí z aplikace" labelPosition="center" />
+      <Divider label={conversationId ? "Odchozí v této konverzaci" : "Odchozí z aplikace"} labelPosition="center" />
+      <Text size="xs" c="dimmed">
+        Drafty i odeslané zprávy se ukládají do databáze (komu, předmět, konverzace, běh agenta) pro audit a přehled
+        kontaktů.
+      </Text>
       <ScrollArea.Autosize mah={180} type="auto">
         <Stack gap={6}>
           {(outbound ?? []).map((o) => (
@@ -247,22 +551,6 @@ export function MailToolPanel(props: {
           ))}
         </Stack>
       </ScrollArea.Autosize>
-
-      <Modal opened={opened} onClose={close} title="Nový draft" size="md">
-        <Stack gap="sm">
-          <TextInput label="Komu" value={composeTo} onChange={(e) => setComposeTo(e.currentTarget.value)} />
-          <TextInput label="Předmět" value={composeSubject} onChange={(e) => setComposeSubject(e.currentTarget.value)} />
-          <Textarea label="Text" minRows={4} value={composeBody} onChange={(e) => setComposeBody(e.currentTarget.value)} />
-          <Group justify="flex-end">
-            <Button variant="default" onClick={close}>
-              Zrušit
-            </Button>
-            <Button loading={composeBusy} onClick={() => void submitDraft()}>
-              Vytvořit draft
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
 
       <Modal opened={detail != null} onClose={() => setDetail(null)} title={detail?.subject ?? "Zpráva"} size="lg">
         {detail ? (
@@ -321,6 +609,11 @@ export function CalendarToolPanel({ getAccessToken }: { getAccessToken: () => Pr
     void load();
   }, [load]);
 
+  const eventBusy = useMemo(
+    () => events.map((e) => ({ start: e.start, end: e.end })).filter((b) => b.start && b.end),
+    [events]
+  );
+
   return (
     <Stack gap="sm">
       <Text size="sm" c="dimmed">
@@ -351,6 +644,29 @@ export function CalendarToolPanel({ getAccessToken }: { getAccessToken: () => Pr
         </Text>
       ) : null}
       {loading ? <Text size="sm">Načítám…</Text> : null}
+      {!loading && !err ? (
+        <div
+          style={{
+            border: "1px solid var(--mantine-color-default-border)",
+            borderRadius: 8,
+            padding: 10,
+            background: "var(--mantine-color-body)"
+          }}
+        >
+          <Text size="xs" fw={600} mb={8}>
+            Přehled (mřížka 8:00–18:00, krok 30 min — stejně jako u návrhu prohlídky v chatu)
+          </Text>
+          <Text size="xs" c="dimmed" mb={8}>
+            Šedě jsou naplánované úseky z kalendáře; u e-mailu k prohlídce agent zeleně vyznačí navrhované sloty.
+          </Text>
+          <CalendarPreviewStrip
+            busy={eventBusy}
+            proposedSlots={[]}
+            rangeStart={range.timeMin}
+            rangeEnd={range.timeMax}
+          />
+        </div>
+      ) : null}
       <ScrollArea.Autosize mah={400} type="auto">
         <Stack gap={6}>
           {events.map((e) => (
@@ -522,22 +838,20 @@ export function MarketSidebarPanel({ getAccessToken }: { getAccessToken: () => P
 
 export function VizPanel(props: {
   lastAgentAnswer: AgentAnswer | null;
-  conversationId: string | null;
   getAccessToken: () => Promise<string | null>;
-  onNavigateConversation: (conversationId: string, runId?: string | null) => void;
   vizAnswerRuns?: VizAnswerRunOption[];
+  assistantRunIdsInOrder?: string[];
   onSelectVizAnswerRun?: (runId: string) => void;
 }) {
   const {
     lastAgentAnswer,
-    conversationId,
     getAccessToken,
-    onNavigateConversation,
     vizAnswerRuns = [],
+    assistantRunIdsInOrder = [],
     onSelectVizAnswerRun
   } = props;
 
-  const bundles =
+  const rawBundles =
     lastAgentAnswer?.dataPanelBundles && lastAgentAnswer.dataPanelBundles.length > 0
       ? lastAgentAnswer.dataPanelBundles
       : lastAgentAnswer?.dataPanel
@@ -548,6 +862,8 @@ export function VizPanel(props: {
             }
           ]
         : [];
+
+  const bundles = rawBundles.filter((b) => VIZ_SIDEBAR_KINDS.has(b.dataPanel.kind));
 
   const [bundleIndex, setBundleIndex] = useState(0);
 
@@ -560,26 +876,90 @@ export function VizPanel(props: {
   }, [bundles.length]);
 
   const activeRunId = lastAgentAnswer?.runId ?? null;
-  const answerIndex =
-    activeRunId != null ? vizAnswerRuns.findIndex((r) => r.runId === activeRunId) : -1;
   const answerCount = vizAnswerRuns.length;
-  const showAnswerNav = answerCount > 1 && onSelectVizAnswerRun != null && answerIndex >= 0;
+  const navCursor = companionRunNavCursor(vizAnswerRuns, activeRunId, assistantRunIdsInOrder);
+  const showAnswerNav = answerCount > 1 && onSelectVizAnswerRun != null;
   const showBundleNav = bundles.length > 1;
+  const displaySlot = companionRunNavDisplayedSlotNumber(navCursor, answerCount);
+  const answerPreviewText =
+    navCursor >= 0
+      ? vizAnswerRuns[navCursor]?.preview
+      : answerCount > 0
+        ? vizAnswerRuns[0]?.preview
+        : undefined;
 
   const goOlderAnswer = () => {
-    if (!onSelectVizAnswerRun || answerIndex < 0 || answerIndex >= answerCount - 1) return;
-    onSelectVizAnswerRun(vizAnswerRuns[answerIndex + 1]!.runId);
+    if (!onSelectVizAnswerRun) return;
+    companionRunNavGoOlder(vizAnswerRuns, navCursor, onSelectVizAnswerRun);
   };
   const goNewerAnswer = () => {
-    if (!onSelectVizAnswerRun || answerIndex <= 0) return;
-    onSelectVizAnswerRun(vizAnswerRuns[answerIndex - 1]!.runId);
+    if (!onSelectVizAnswerRun) return;
+    companionRunNavGoNewer(vizAnswerRuns, navCursor, onSelectVizAnswerRun);
   };
 
-  if (!lastAgentAnswer || bundles.length === 0) {
+  const answerNavRow =
+    showAnswerNav ? (
+      <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
+        <Tooltip label="Starší odpověď (dříve v konverzaci)">
+          <ActionIcon
+            variant="default"
+            size="sm"
+            aria-label="Starší odpověď"
+            disabled={!companionRunNavCanGoOlder(navCursor)}
+            onClick={goOlderAnswer}
+          >
+            <IconChevronLeft size={18} stroke={1.5} />
+          </ActionIcon>
+        </Tooltip>
+        <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+          <Text size="xs" ta="center" fw={600} lineClamp={1}>
+            Odpověď {displaySlot ?? "—"} / {answerCount}
+          </Text>
+          {answerPreviewText ? (
+            <Text size="xs" c="dimmed" ta="center" lineClamp={2} style={{ wordBreak: "break-word" }}>
+              {answerPreviewText}
+            </Text>
+          ) : null}
+        </Stack>
+        <Tooltip label="Novější odpověď">
+          <ActionIcon
+            variant="default"
+            size="sm"
+            aria-label="Novější odpověď"
+            disabled={!companionRunNavCanGoNewer(navCursor, answerCount)}
+            onClick={goNewerAnswer}
+          >
+            <IconChevronRight size={18} stroke={1.5} />
+          </ActionIcon>
+        </Tooltip>
+      </Group>
+    ) : null;
+
+  const showEmpty = !lastAgentAnswer || bundles.length === 0;
+
+  const emptyStateText = (() => {
+    if (!lastAgentAnswer) {
+      return answerCount > 0
+        ? "Šipkami zvolte odpověď s tabulkou nebo grafem. Aktuálně zobrazený běh k tabulce v tomto panelu neodpovídá."
+        : "Tabulka nebo graf se zde objeví po běhu agenta s tabulkovým nebo grafickým panelem. Použijte středový chat nebo sekci Data.";
+    }
+    const hadOnlyEmail =
+      rawBundles.length > 0 &&
+      rawBundles.every((b) => b.dataPanel.kind === "viewing_email_draft");
+    if (hadOnlyEmail) {
+      return "U tohoto běhu jde o návrh e-mailu — detail je v záložce Maily. Tabulku nebo graf v konverzaci vyberte šipkami výše.";
+    }
+    return "Tabulka nebo graf se zde objeví po běhu agenta s tabulkovým nebo grafickým panelem. Použijte středový chat nebo sekci Data.";
+  })();
+
+  if (showEmpty) {
     return (
-      <Text size="sm" c="dimmed">
-        Tabulka nebo graf se zde objeví po posledním běhu agenta s datovým panelem. Použijte středový chat nebo sekci Data.
-      </Text>
+      <Stack gap="sm">
+        {showAnswerNav ? <Stack gap={6}>{answerNavRow}</Stack> : null}
+        <Text size="sm" c="dimmed">
+          {emptyStateText}
+        </Text>
+      </Stack>
     );
   }
 
@@ -590,42 +970,7 @@ export function VizPanel(props: {
     <Stack gap="sm">
       {(showAnswerNav || showBundleNav) && (
         <Stack gap={6}>
-          {showAnswerNav ? (
-            <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
-              <Tooltip label="Starší odpověď (dříve v konverzaci)">
-                <ActionIcon
-                  variant="default"
-                  size="sm"
-                  aria-label="Starší odpověď"
-                  disabled={answerIndex >= answerCount - 1}
-                  onClick={goOlderAnswer}
-                >
-                  <IconChevronLeft size={18} stroke={1.5} />
-                </ActionIcon>
-              </Tooltip>
-              <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
-                <Text size="xs" ta="center" fw={600} lineClamp={1}>
-                  Odpověď {answerIndex + 1} / {answerCount}
-                </Text>
-                {vizAnswerRuns[answerIndex]?.preview ? (
-                  <Text size="xs" c="dimmed" ta="center" lineClamp={2} style={{ wordBreak: "break-word" }}>
-                    {vizAnswerRuns[answerIndex]!.preview}
-                  </Text>
-                ) : null}
-              </Stack>
-              <Tooltip label="Novější odpověď">
-                <ActionIcon
-                  variant="default"
-                  size="sm"
-                  aria-label="Novější odpověď"
-                  disabled={answerIndex <= 0}
-                  onClick={goNewerAnswer}
-                >
-                  <IconChevronRight size={18} stroke={1.5} />
-                </ActionIcon>
-              </Tooltip>
-            </Group>
-          ) : null}
+          {answerNavRow}
           {showBundleNav ? (
             <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
               <Tooltip label="Předchozí zobrazení (část výsledku)">
@@ -659,16 +1004,6 @@ export function VizPanel(props: {
           ) : null}
         </Stack>
       )}
-
-      {lastAgentAnswer.runId && conversationId ? (
-        <Button
-          size="xs"
-          variant="light"
-          onClick={() => onNavigateConversation(conversationId, lastAgentAnswer.runId ?? null)}
-        >
-          Přejít na odpověď v chatu
-        </Button>
-      ) : null}
 
       <AgentDataPanel
         key={`${lastAgentAnswer.runId ?? "run"}-viz-${safeBundleIndex}`}

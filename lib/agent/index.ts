@@ -66,6 +66,8 @@ export async function runBackOfficeAgent(input: {
   onProgress?: (event: AgentRunProgress) => void | Promise<void>;
   /** Tokeny úvahy thinking orchestrátoru (jen při streamovaném běhu). */
   onOrchestratorDelta?: (textChunk: string) => void | Promise<void>;
+  /** Části finální uživatelské odpovědi (stream z LLM; jen jednodílné běhy, ne slepené podotázky). */
+  onAnswerDelta?: (textChunk: string) => void | Promise<void>;
 }): Promise<AgentAnswer> {
   const emit = async (phase: string) => {
     await input.onProgress?.({ phase });
@@ -247,7 +249,8 @@ export async function runBackOfficeAgent(input: {
       slideCount: resolvedSlideCount,
       trace: handle.trace,
       traceDispatchId: dispatchId,
-      toolRunner
+      toolRunner,
+      onAnswerDelta: input.onAnswerDelta
     });
   } else {
     await emit(`Rozloženo na ${effectiveTasks.length} podotázky…`);
@@ -336,7 +339,8 @@ export async function runBackOfficeAgent(input: {
         slideCount: partSlideCount,
         trace: handle.trace,
         traceDispatchId: partDispatchId,
-        toolRunner
+        toolRunner,
+        onAnswerDelta: undefined
       });
 
       const labelRaw = taskSeeds[i] ?? eff;

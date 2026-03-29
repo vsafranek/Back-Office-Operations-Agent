@@ -5,8 +5,8 @@ import {
 } from "@/lib/agent/calendar-email-slots-params";
 
 describe("inferViewingSlotParams", () => {
-  it("vrací výchozí 7 dní", () => {
-    expect(inferViewingSlotParams("napiš email")).toEqual({ daysAhead: 7, limit: 5 });
+  it("vrací výchozí 7 dní a 60 min schůzky", () => {
+    expect(inferViewingSlotParams("napiš email")).toEqual({ daysAhead: 7, limit: 5, slotDurationMinutes: 60 });
   });
 
   it("rozpozná 14 dní", () => {
@@ -14,7 +14,19 @@ describe("inferViewingSlotParams", () => {
   });
 
   it("rozpozná explicitní počet dnů", () => {
-    expect(inferViewingSlotParams("terminy na 10 dni dopredu")).toEqual({ daysAhead: 10, limit: 5 });
+    expect(inferViewingSlotParams("terminy na 10 dni dopredu")).toEqual({
+      daysAhead: 10,
+      limit: 5,
+      slotDurationMinutes: 60
+    });
+  });
+
+  it("rozpozná 90min schůzku", () => {
+    expect(inferViewingSlotParams("email na prohlídku, schůzka hodinu a půl").slotDurationMinutes).toBe(90);
+  });
+
+  it("rozpozná délku z „45 minut“", () => {
+    expect(inferViewingSlotParams("navrhni termín 45 minut").slotDurationMinutes).toBe(45);
   });
 });
 

@@ -3,6 +3,7 @@ import type { AgentAnswer, AgentStreamLine } from "@/lib/agent/types";
 export type AgentStreamReaderOptions = {
   onPhase?: (label: string) => void;
   onOrchestratorDelta?: (chunk: string) => void;
+  onAnswerDelta?: (chunk: string) => void;
 };
 
 /**
@@ -32,6 +33,10 @@ export async function readAgentNdjsonStream(
     }
     if (parsed.type === "orchestrator_delta") {
       options?.onOrchestratorDelta?.(parsed.text);
+      return;
+    }
+    if (parsed.type === "answer_delta") {
+      options?.onAnswerDelta?.(parsed.text);
       return;
     }
     if (parsed.type === "error") {

@@ -8,6 +8,7 @@ export async function runWeeklyReportSubAgent(params: {
   slideCount: number;
   question: string;
   title: string;
+  onAnswerDelta?: (chunk: string) => void | Promise<void>;
 }): Promise<AgentAnswer> {
   const storageKey = agentArtifactStoragePathKey(params.ctx);
   const data = await params.toolRunner.run<{ rows: Record<string, unknown>[]; source: string }>("runSqlPreset", params.ctx, {
@@ -55,6 +56,7 @@ export async function runWeeklyReportSubAgent(params: {
           name: "llm.subagent.weekly-report.reply"
         }
       : undefined,
+    onAnswerDelta: params.onAnswerDelta,
     userContent: [
       `Pozadavek uzivatele: ${params.question}`,
       `Nazev baliku vystupu: ${params.title}`,

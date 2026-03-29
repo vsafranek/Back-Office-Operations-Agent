@@ -15,7 +15,6 @@ import type {
   DerivedChartModel
 } from "@/lib/agent/types";
 import { MarketListingsDataPanelSection } from "@/components/agent/MarketListingsDataPanelSection";
-import { ViewingEmailDraftPanel } from "@/components/agent/ViewingEmailDraftPanel";
 import { ScheduledTaskConfirmationPanel } from "@/components/agent/ScheduledTaskConfirmationPanel";
 
 function formatCell(value: unknown): string {
@@ -604,16 +603,10 @@ export function AgentDataPanel({
 
   if (panel.kind === "viewing_email_draft") {
     return (
-      <ViewingEmailDraftPanel
-        slots={panel.slots}
-        calendarPreview={panel.calendarPreview}
-        senderDisplayName={panel.senderDisplayName}
-        draft={panel.draft}
-        relatedLeadIds={panel.relatedLeadIds}
-        getAccessToken={getAccessToken}
-        conversationId={panel.conversationId}
-        agentRunId={panel.agentRunId}
-      />
+      <Text size="sm" c="dimmed">
+        Návrh e-mailu a příjemce jsou v postranním panelu v záložce <strong>Maily</strong>. Kalendář a výběr termínu
+        najdete zde ve vláknu chatu pod touto odpovědí.
+      </Text>
     );
   }
 

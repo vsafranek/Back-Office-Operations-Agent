@@ -16,6 +16,7 @@ export async function runAnalyticsSubAgent(params: {
   toolRunner: ToolRunner;
   ctx: AgentToolContext;
   question: string;
+  onAnswerDelta?: (chunk: string) => void | Promise<void>;
 }): Promise<AgentAnswer> {
   const storageKey = agentArtifactStoragePathKey(params.ctx);
   const data = await params.toolRunner.run<{
@@ -162,6 +163,7 @@ export async function runAnalyticsSubAgent(params: {
           name: "llm.subagent.analytics.reply"
         }
       : undefined,
+    onAnswerDelta: params.onAnswerDelta,
     userContent: [
       `Puvodni dotaz uzivatele: ${params.question}`,
       `Datovy zdroj: ${data.source} (dataset: ${data.preset})`,

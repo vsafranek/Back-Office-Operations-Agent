@@ -4,6 +4,8 @@ import { Anchor, Button, Divider, Paper, PasswordInput, Stack, Text, TextInput, 
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { googleSupabaseSignInScopeString } from "@/lib/integrations/google-integration-scopes";
+import { MICROSOFT_GRAPH_INTEGRATION_SCOPES } from "@/lib/integrations/microsoft-graph-oauth-scopes";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 export default function RegisterPage() {
@@ -14,6 +16,7 @@ export default function RegisterPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [microsoftLoading, setMicrosoftLoading] = useState(false);
 
   async function handleRegister(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -49,7 +52,11 @@ export default function RegisterPage() {
       provider: "google",
       options: {
         redirectTo,
-        scopes: ["openid", "email", "profile"].join(" ")
+        scopes: googleSupabaseSignInScopeString(),
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent"
+        }
       }
     });
 
@@ -59,14 +66,32 @@ export default function RegisterPage() {
     }
   }
 
+  async function handleMicrosoftRegister() {
+    setMicrosoftLoading(true);
+    setMessage(null);
+
+    const redirectTo = `${window.location.origin}/dashboard`;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "azure",
+      options: {
+        redirectTo,
+        scopes: MICROSOFT_GRAPH_INTEGRATION_SCOPES
+      }
+    });
+
+    setMicrosoftLoading(false);
+    if (error) {
+      setMessage(error.message);
+    }
+  }
+
   return (
     <Paper shadow="sm" p="xl" radius="md" withBorder>
       <Title order={2}>Registrace</Title>
       <Text size="sm" c="dimmed" mt="xs">
-        Založte účet e-mailem (ověření e-mailu podle nastavení Supabase) nebo přes Google. Kalendář a poštu
-        připojíte později v{" "}
+        Založte účet e-mailem (ověření dle Supabase) nebo přes <strong>Google</strong> / <strong>Microsoft</strong>. Doplňky v{" "}
         <Anchor component={Link} href="/settings" size="sm">
-          Nastavení integrací
+          Nastavení
         </Anchor>
         .
       </Text>
@@ -97,9 +122,14 @@ export default function RegisterPage() {
 
       <Divider label="nebo" labelPosition="center" my="lg" />
 
-      <Button variant="light" fullWidth onClick={() => void handleGoogleRegister()} loading={googleLoading}>
-        {googleLoading ? "Přesměrovávám na Google..." : "Registrovat / Přihlásit přes Google"}
-      </Button>
+      <Stack gap="sm">
+        <Button variant="light" fullWidth onClick={() => void handleGoogleRegister()} loading={googleLoading}>
+          {googleLoading ? "Přesměrovávám…" : "Pokračovat s Google"}
+        </Button>
+        <Button variant="light" fullWidth onClick={() => void handleMicrosoftRegister()} loading={microsoftLoading}>
+          {microsoftLoading ? "Přesměrovávám…" : "Pokračovat s Microsoftem"}
+        </Button>
+      </Stack>
 
       <Text size="sm" mt="lg">
         Už máš účet?{" "}

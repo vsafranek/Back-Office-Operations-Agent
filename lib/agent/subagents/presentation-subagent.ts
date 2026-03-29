@@ -12,6 +12,7 @@ export async function runPresentationSubAgent(params: {
   slideCount: number;
   question: string;
   title: string;
+  onAnswerDelta?: (chunk: string) => void | Promise<void>;
 }): Promise<AgentAnswer> {
   const storageKey = agentArtifactStoragePathKey(params.ctx);
   const data = await params.toolRunner.run<{ rows: Record<string, unknown>[]; source: string }>("runSqlPreset", params.ctx, {
@@ -52,6 +53,7 @@ export async function runPresentationSubAgent(params: {
           name: "llm.subagent.presentation.reply"
         }
       : undefined,
+    onAnswerDelta: params.onAnswerDelta,
     userContent: [
       `Puvodni pozadavek: ${params.question}`,
       `Deck: ${params.title}, slidu: ${params.slideCount}`,

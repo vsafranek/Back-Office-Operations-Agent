@@ -11,7 +11,10 @@ import {
   Container,
   Divider,
   Group,
+  List,
+  Modal,
   Select,
+  SegmentedControl,
   Stack,
   Tabs,
   Text,
@@ -19,10 +22,12 @@ import {
   TextInput,
   Title
 } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 import { modals } from "@mantine/modals";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSyncLoginProviderIntegration } from "@/hooks/use-sync-login-provider-integration";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 type IntegrationState = {
@@ -69,11 +74,16 @@ async function fetchOAuthUrl(path: string, bearer: string): Promise<string> {
 
 export default function SettingsPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  useSyncLoginProviderIntegration(supabase);
   const router = useRouter();
   const [integration, setIntegration] = useState<IntegrationState>(initialIntegrationState);
   const [connecting, setConnecting] = useState<"google" | "microsoft" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<"google" | "microsoft" | null>(null);
+  const [integrationConnectOpened, integrationConnectHandlers] = useDisclosure(false);
+  const [integrationConnectProvider, setIntegrationConnectProvider] = useState<"google" | "microsoft">("google");
+  const [integrationConnectConsent, setIntegrationConnectConsent] = useState(false);
+  const [integrationConnectModalError, setIntegrationConnectModalError] = useState<string | null>(null);
   const [passNew, setPassNew] = useState("");
   const [passNew2, setPassNew2] = useState("");
   const [passLoading, setPassLoading] = useState(false);
@@ -155,39 +165,45 @@ export default function SettingsPage() {
     })();
   }, [router, supabase.auth, loadIntegrations]);
 
-  async function startGoogleConnect() {
-    setConnecting("google");
+  function openIntegrationConnectModal(provider: "google" | "microsoft") {
+    setIntegrationConnectProvider(provider);
+    setIntegrationConnectConsent(false);
+    setIntegrationConnectModalError(null);
+    integrationConnectHandlers.open();
+  }
+
+  async function executeIntegrationOAuth(provider: "google" | "microsoft") {
+    setConnecting(provider);
     setMessage(null);
     try {
       const sessionResult = await supabase.auth.getSession();
       const accessToken = sessionResult.data.session?.access_token;
       if (!accessToken) {
+        setConnecting(null);
         router.push("/auth/login");
         return;
       }
-      const url = await fetchOAuthUrl("/api/integrations/oauth/google/authorize", accessToken);
+      const path =
+        provider === "google"
+          ? "/api/integrations/oauth/google/authorize"
+          : "/api/integrations/oauth/microsoft/authorize";
+      const url = await fetchOAuthUrl(path, accessToken);
       window.location.href = url;
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Google OAuth selhalo.");
+      const msg = e instanceof Error ? e.message : "OAuth selhalo.";
+      setMessage(msg);
       setConnecting(null);
+      throw e;
     }
   }
 
-  async function startMicrosoftConnect() {
-    setConnecting("microsoft");
-    setMessage(null);
+  async function submitIntegrationConnectFromModal() {
+    if (!integrationConnectConsent) return;
+    setIntegrationConnectModalError(null);
     try {
-      const sessionResult = await supabase.auth.getSession();
-      const accessToken = sessionResult.data.session?.access_token;
-      if (!accessToken) {
-        router.push("/auth/login");
-        return;
-      }
-      const url = await fetchOAuthUrl("/api/integrations/oauth/microsoft/authorize", accessToken);
-      window.location.href = url;
+      await executeIntegrationOAuth(integrationConnectProvider);
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Microsoft OAuth selhalo.");
-      setConnecting(null);
+      setIntegrationConnectModalError(e instanceof Error ? e.message : "Propojení selhalo.");
     }
   }
 
@@ -413,10 +429,11 @@ select cron.schedule(
 
               <Alert color="gray" variant="light" title="Jak to funguje">
                 <Text size="sm">
-                  Stačí kliknout na <strong>Připojit</strong> a dokončit přihlášení u Google nebo Microsoftu. Údaje o účtu (e-mail,
-                  výchozí kalendář) si aplikace doplní sama. U obou poskytovatelů můžete mít účty připojené najednou — pro nástroje
-                  agenta (kalendář a pošta) se použije ten, u kterého jste naposledy dokončili připojení; po odpojení jednoho z nich
-                  se automaticky přepne na druhý, pokud je k dispozici.
+                  Pokud se přihlásíte přes <strong>Google</strong> nebo <strong>Microsoft 365</strong> na přihlašovací stránce, stejný účet se
+                  automaticky použije pro Gmail/Kalendář resp. Outlook (tokeny z přihlášení uložíme do integrací). Přihlášení e-mailem a
+                  heslem integraci samo nepřipojí — doplníte ji tlačítkem <strong>Připojit …</strong> (OAuth v modálu). U obou poskytovatelů můžete
+                  mít účty připojené najednou — aktivní pro agenta je ten, u něhož jste naposledy dokončili připojení nebo OAuth přihlášení;
+                  konkrétní výběr a odpojení řešíte zde.
                 </Text>
               </Alert>
 
@@ -450,8 +467,12 @@ select cron.schedule(
                       </Text>
                     </Text>
                     <Group gap="xs">
-                      <Button size="sm" onClick={() => void startGoogleConnect()} disabled={connecting !== null}>
-                        {connecting === "google" ? "Přesměrovávám…" : "Připojit Google"}
+                      <Button
+                        size="sm"
+                        onClick={() => openIntegrationConnectModal("google")}
+                        disabled={connecting !== null}
+                      >
+                        Připojit Google
                       </Button>
                       <Button
                         size="sm"
@@ -473,8 +494,12 @@ select cron.schedule(
                       </Text>
                     </Text>
                     <Group gap="xs">
-                      <Button size="sm" onClick={() => void startMicrosoftConnect()} disabled={connecting !== null}>
-                        {connecting === "microsoft" ? "Přesměrovávám…" : "Připojit Microsoft 365"}
+                      <Button
+                        size="sm"
+                        onClick={() => openIntegrationConnectModal("microsoft")}
+                        disabled={connecting !== null}
+                      >
+                        Připojit Microsoft 365
                       </Button>
                       <Button
                         size="sm"
@@ -660,6 +685,174 @@ select cron.schedule(
           </Tabs.Panel>
         </Tabs>
       </Stack>
+
+      <Modal
+        opened={integrationConnectOpened}
+        onClose={() => {
+          setIntegrationConnectModalError(null);
+          integrationConnectHandlers.close();
+        }}
+        title="Připojit účet pro kalendář a poštu"
+        size="lg"
+        radius="md"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Vyberte poskytovatele a potvrďte pokračování. Otevře se přihlášení u Google nebo Microsoftu a poté se vrátíte zpět do
+            aplikace.
+          </Text>
+
+          <div>
+            <Text size="sm" fw={600} mb={6}>
+              Poskytovatel
+            </Text>
+            <SegmentedControl
+              fullWidth
+              value={integrationConnectProvider}
+              onChange={(v) => {
+                setIntegrationConnectProvider(v as "google" | "microsoft");
+                setIntegrationConnectConsent(false);
+                setIntegrationConnectModalError(null);
+              }}
+              data={[
+                { label: "Google", value: "google" },
+                { label: "Microsoft 365", value: "microsoft" }
+              ]}
+            />
+          </div>
+
+          <Text size="sm" fw={600}>
+            Požadovaná oprávnění
+          </Text>
+          {integrationConnectProvider === "google" ? (
+            <List size="sm" spacing="xs" c="dimmed">
+              <List.Item>Google Kalendář — čtení (volné termíny, události)</List.Item>
+              <List.Item>Gmail — úprava schránky včetně konceptů a odeslání po vašem schválení v aplikaci</List.Item>
+            </List>
+          ) : (
+            <List size="sm" spacing="xs" c="dimmed">
+              <List.Item>Microsoft Graph — čtení kalendáře (Outlook)</List.Item>
+              <List.Item>Microsoft Graph — čtení a zápis pošty (Outlook)</List.Item>
+              <List.Item>Obnovování přístupu na pozadí (offline)</List.Item>
+            </List>
+          )}
+
+          <Checkbox
+            label="Rozumím a chci pokračovat na přihlášení u vybraného poskytovatele."
+            checked={integrationConnectConsent}
+            onChange={(e) => {
+              const c = e.currentTarget.checked;
+              setIntegrationConnectConsent(c);
+            }}
+          />
+
+          {integrationConnectModalError ? (
+            <Alert color="red" variant="light" title="Chyba">
+              {integrationConnectModalError}
+            </Alert>
+          ) : null}
+
+          <Accordion variant="contained" radius="md">
+            <Accordion.Item value="ms-admin">
+              <Accordion.Control>Pro správce: Microsoft Entra ID (Azure)</Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap="sm">
+                  <Text size="sm">
+                    V{" "}
+                    <Anchor href="https://entra.microsoft.com/" target="_blank" rel="noreferrer">
+                      Microsoft Entra admin center
+                    </Anchor>{" "}
+                    → <strong>Identity</strong> → <strong>Applications</strong> → <strong>App registrations</strong> →{" "}
+                    <strong>New registration</strong>.
+                  </Text>
+                  <List type="ordered" size="sm" spacing="xs">
+                    <List.Item>
+                      Typ účtů: podle potřeby (např. více tenantů + osobní účty odpovídá tenantovi{" "}
+                      <Code>common</Code> v env).
+                    </List.Item>
+                    <List.Item>
+                      <strong>Redirect URI (Web)</strong> — přidejte <em>obě</em> adresy (jedna Entra aplikace může sloužit pro
+                      integraci i přihlášení):
+                      <List size="sm" mt="xs" withPadding>
+                        <List.Item>
+                          Integrace (Next):{" "}
+                          <Code>
+                            {"{NEXT_PUBLIC_APP_URL nebo origin}"}/api/integrations/oauth/microsoft/callback
+                          </Code>
+                        </List.Item>
+                        <List.Item>
+                          Přihlášení (Supabase): <Code>https://{"{SUPABASE_REF}"}.supabase.co/auth/v1/callback</Code>
+                        </List.Item>
+                      </List>
+                      <Text size="xs" c="dimmed" mt={4}>
+                        Lokální integrace např. <Code>http://localhost:3000/…/microsoft/callback</Code>. V Supabase → Authentication →
+                        Providers → <strong>Azure</strong> zadejte stejné Client ID, secret a tenant jako v env.
+                      </Text>
+                    </List.Item>
+                    <List.Item>
+                      V přehledu aplikace zkopírujte <strong>Application (client) ID</strong> → env{" "}
+                      <Code>MICROSOFT_OAUTH_CLIENT_ID</Code>.
+                    </List.Item>
+                    <List.Item>
+                      <strong>Certificates &amp; secrets</strong> → nový client secret → env{" "}
+                      <Code>MICROSOFT_OAUTH_CLIENT_SECRET</Code>.
+                    </List.Item>
+                    <List.Item>
+                      <strong>API permissions</strong> → Microsoft Graph → <em>Delegated</em>:{" "}
+                      <Code>Calendars.ReadWrite</Code> (nebo Read), <Code>Mail.ReadWrite</Code>, <Code>offline_access</Code>,{" "}
+                      <Code>openid</Code>, <Code>profile</Code>, <Code>email</Code>. U firemních tenantů často{" "}
+                      <strong>Grant admin consent</strong>.
+                    </List.Item>
+                    <List.Item>
+                      Volitelně <Code>MICROSOFT_OAUTH_TENANT</Code>: výchozí <Code>common</Code>, nebo{" "}
+                      <Code>organizations</Code>, nebo konkrétní ID tenanta.
+                    </List.Item>
+                  </List>
+                  <Text size="xs" c="dimmed">
+                    Bez ID a secretu server vrátí chybu 501. Scopes v kódu: viz{" "}
+                    <Code>getMicrosoftOAuthScopes()</Code> v repozitáři.
+                  </Text>
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+            <Accordion.Item value="google-admin">
+              <Accordion.Control>Pro správce: Google Cloud Console</Accordion.Control>
+              <Accordion.Panel>
+                <List type="ordered" size="sm" spacing="xs">
+                  <List.Item>Projekt → APIs &amp; Services → Credentials → OAuth 2.0 Client (Web application).</List.Item>
+                  <List.Item>
+                    Authorized redirect URIs: integrační callback <Code>{"{origin}"}/api/integrations/oauth/google/callback</Code> a
+                    pro přihlášení přes Supabase také <Code>https://{"{SUPABASE_REF}"}.supabase.co/auth/v1/callback</Code>.
+                  </List.Item>
+                  <List.Item>
+                    Client ID a client secret vložte do env <Code>GOOGLE_OAUTH_CLIENT_ID</Code> a{" "}
+                    <Code>GOOGLE_OAUTH_CLIENT_SECRET</Code>.
+                  </List.Item>
+                </List>
+              </Accordion.Panel>
+            </Accordion.Item>
+          </Accordion>
+
+          <Group justify="flex-end" mt="md">
+            <Button
+              variant="default"
+              onClick={() => {
+                setIntegrationConnectModalError(null);
+                integrationConnectHandlers.close();
+              }}
+            >
+              Zrušit
+            </Button>
+            <Button
+              onClick={() => void submitIntegrationConnectFromModal()}
+              loading={connecting === integrationConnectProvider}
+              disabled={!integrationConnectConsent || connecting !== null}
+            >
+              {connecting === integrationConnectProvider ? "Přesměrovávám…" : "Přihlásit se u poskytovatele"}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Container>
   );
 }

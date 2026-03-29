@@ -26,6 +26,7 @@ export async function runMarketListingsChatSubAgent(params: {
   toolRunner: ToolRunner;
   ctx: AgentToolContext;
   question: string;
+  onAnswerDelta?: (chunk: string) => void | Promise<void>;
 }): Promise<AgentAnswer> {
   void params.toolRunner;
 
@@ -77,6 +78,7 @@ export async function runMarketListingsChatSubAgent(params: {
           name: "llm.subagent.market-listings.reply"
         }
       : undefined,
+    onAnswerDelta: params.onAnswerDelta,
     userContent
   });
 

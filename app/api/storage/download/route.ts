@@ -33,9 +33,13 @@ export async function GET(request: Request) {
       return Response.json({ error: "Invalid path." }, { status: 400 });
     }
     const fileName = targetPath.split("/").pop() ?? "download";
-    const signed = await supabase.storage.from(env.SUPABASE_STORAGE_BUCKET).createSignedUrl(targetPath, 300, {
-      download: fileName
-    });
+    const disposition = (url.searchParams.get("disposition") ?? "attachment").trim().toLowerCase();
+    const inline = disposition === "inline";
+    const signed = await supabase.storage.from(env.SUPABASE_STORAGE_BUCKET).createSignedUrl(
+      targetPath,
+      inline ? 900 : 300,
+      inline ? {} : { download: fileName }
+    );
     if (signed.error || !signed.data.signedUrl) {
       throw new Error(signed.error?.message ?? "Failed to create signed download URL.");
     }

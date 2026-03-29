@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { AgentAnswer, AgentToolContext } from "@/lib/agent/types";
-import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
+import { extractAnswerTextFromPartialModelJson } from "@/lib/agent/llm/user-facing-reply";
+import { generateWithAzureProxy, streamWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
 import { tryParseJsonObject } from "@/lib/agent/llm/parse-json-response";
 
 const ReplySchema = z.object({
@@ -44,6 +45,7 @@ next_actions: konkrétní tipy, co může uživatel napsat jako další (např. 
 export async function runCasualChatSubAgent(params: {
   ctx: AgentToolContext;
   question: string;
+  onAnswerDelta?: (chunk: string) => void | Promise<void>;
 }): Promise<AgentAnswer> {
   const trace = params.ctx.trace
     ? {
@@ -55,15 +57,37 @@ export async function runCasualChatSubAgent(params: {
 
   const userBlock = `Zpráva uživatele:\n${params.question.trim()}`;
 
-  let llm = await generateWithAzureProxy({
-    runId: params.ctx.runId,
-    maxTokens: 500,
-    trace,
-    messages: [
-      { role: "system", content: CASUAL_SYSTEM },
-      { role: "user", content: userBlock }
-    ]
-  });
+  let llm = params.onAnswerDelta
+    ? await streamWithAzureProxy({
+        runId: params.ctx.runId,
+        maxTokens: 500,
+        trace,
+        messages: [
+          { role: "system", content: CASUAL_SYSTEM },
+          { role: "user", content: userBlock }
+        ],
+        onTextDelta: (() => {
+          let buf = "";
+          let lastLen = 0;
+          return (chunk: string) => {
+            buf += chunk;
+            const extracted = extractAnswerTextFromPartialModelJson(buf);
+            if (extracted.length > lastLen) {
+              void Promise.resolve(params.onAnswerDelta!(extracted.slice(lastLen)));
+              lastLen = extracted.length;
+            }
+          };
+        })()
+      })
+    : await generateWithAzureProxy({
+        runId: params.ctx.runId,
+        maxTokens: 500,
+        trace,
+        messages: [
+          { role: "system", content: CASUAL_SYSTEM },
+          { role: "user", content: userBlock }
+        ]
+      });
 
   let parsed = tryParseJsonObject(ReplySchema, llm.text);
   if (!parsed) {

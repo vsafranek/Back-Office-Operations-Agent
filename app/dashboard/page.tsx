@@ -30,10 +30,19 @@ import { DEFAULT_AGENT_ID, listAgentIds, listAgentUiOptions } from "@/lib/agent/
 import { readAgentNdjsonStream } from "@/lib/agent/stream-client";
 import {
   AGENT_PANEL_PAYLOAD_KEY,
-  agentAnswerSliceFromPersistPayload
+  agentAnswerSliceFromPersistPayload,
+  agentPayloadHasTableOrChartPanel,
+  agentPayloadHasViewingEmailDraft,
+  viewingEmailDraftPreviewFromPayload
 } from "@/lib/agent/conversation/agent-panel-persist";
 import type { AgentAnswer } from "@/lib/agent/types";
+import {
+  findViewingEmailDataPanel,
+  mergeViewingEmailDraftBody
+} from "@/lib/agent/viewing-email-answer-helpers";
+import { useSyncLoginProviderIntegration } from "@/hooks/use-sync-login-provider-integration";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
+import { persistCompanionRunForConversation, readPersistedCompanionRunForConversation } from "@/lib/ui/companion-run-persist";
 
 type Conversation = {
   id: string;
@@ -60,6 +69,12 @@ const DEFAULT_COMP_W = 680;
 const COLLAPSED_CONV_W = 48;
 const COLLAPSED_COMP_W = 52;
 
+function conversationHasAssistantRunForId(messages: ConversationMessage[], runId: string): boolean {
+  return messages.some(
+    (m) => m.role === "assistant" && (m.metadata as { runId?: string }).runId === runId
+  );
+}
+
 function readWidth(key: string, fallback: number) {
   if (typeof window === "undefined") return fallback;
   const n = Number.parseInt(localStorage.getItem(key) ?? "", 10);
@@ -72,6 +87,7 @@ function clamp(n: number, lo: number, hi: number) {
 
 export default function DashboardPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  useSyncLoginProviderIntegration(supabase);
   const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -88,21 +104,24 @@ export default function DashboardPage() {
   const isDesktop = useMediaQuery("(min-width: 48em)");
   const prevConversationIdRef = useRef<string | null>(null);
   const skipNextCompanionClearRef = useRef(false);
+  /** Aby se scroll v chatu při stejném conv+run neopakoval zbytečně; při změně konverzace se resetuje. */
+  const lastChatScrollKeyRef = useRef<string>("");
   const [convWidthPx, setConvWidthPx] = useState(280);
   const [companionWidthPx, setCompanionWidthPx] = useState(DEFAULT_COMP_W);
   const [panelResizeActive, setPanelResizeActive] = useState(false);
   const layoutRowRef = useRef<HTMLDivElement>(null);
+  const viewingEmailRunRef = useRef<string | null>(null);
+  const [viewingEmailBodyOverride, setViewingEmailBodyOverride] = useState<string | null>(null);
 
-  /** Asistentovy odpovědi s uloženým panelem (nejnovější první) — pro přepínání v nástrojích Tabulka/graf. */
+  /** Asistentovy odpovědi s uloženým panelem (pořadí konverzace: nejstarší první) — Tabulka/graf v nástrojích. */
   const vizAnswerRuns = useMemo(() => {
     const assistants = messages.filter((m) => m.role === "assistant");
-    const ordered = [...assistants].reverse();
     const out: { runId: string; preview: string }[] = [];
-    for (const m of ordered) {
+    for (const m of assistants) {
       const meta = m.metadata as Record<string, unknown>;
       const runId = meta.runId;
       if (typeof runId !== "string" || !runId.trim()) continue;
-      if (!agentAnswerSliceFromPersistPayload(meta[AGENT_PANEL_PAYLOAD_KEY])) continue;
+      if (!agentPayloadHasTableOrChartPanel(meta[AGENT_PANEL_PAYLOAD_KEY])) continue;
       const full = m.content.replace(/\s+/g, " ").trim();
       const short = full.slice(0, 56);
       const preview = full.length > 56 ? `${short}…` : short || "Odpověď asistenta";
@@ -110,6 +129,47 @@ export default function DashboardPage() {
     }
     return out;
   }, [messages]);
+
+  /** Odpovědi s návrhem e-mailu prohlídka — přepínač v záložce Maily. */
+  const viewingEmailRuns = useMemo(() => {
+    const assistants = messages.filter((m) => m.role === "assistant");
+    const out: { runId: string; preview: string }[] = [];
+    for (const m of assistants) {
+      const meta = m.metadata as Record<string, unknown>;
+      const runId = meta.runId;
+      if (typeof runId !== "string" || !runId.trim()) continue;
+      const raw = meta[AGENT_PANEL_PAYLOAD_KEY];
+      if (!agentPayloadHasViewingEmailDraft(raw)) continue;
+      const label = viewingEmailDraftPreviewFromPayload(raw) ?? "Návrh e-mailu";
+      out.push({ runId, preview: label });
+    }
+    return out;
+  }, [messages]);
+
+  /** Pořadí runId u assistant zpráv (od nejstarší v konverzaci) — navigace v nástrojích. */
+  const assistantRunIdsInOrder = useMemo(() => {
+    const out: string[] = [];
+    for (const m of messages) {
+      if (m.role !== "assistant") continue;
+      const runId = (m.metadata as { runId?: string }).runId;
+      if (typeof runId === "string" && runId.trim()) out.push(runId);
+    }
+    return out;
+  }, [messages]);
+
+  useEffect(() => {
+    if (!activeConversationId?.trim() || !companionRunId?.trim()) return;
+    persistCompanionRunForConversation(activeConversationId, companionRunId);
+  }, [activeConversationId, companionRunId]);
+
+  useEffect(() => {
+    if (!activeConversationId || messages.length === 0) return;
+    if (companionRunId != null) return;
+    const saved = readPersistedCompanionRunForConversation(activeConversationId);
+    if (!saved) return;
+    if (!conversationHasAssistantRunForId(messages, saved)) return;
+    setCompanionRunId(saved);
+  }, [activeConversationId, messages, companionRunId]);
 
   useEffect(() => {
     setConvWidthPx(clamp(readWidth(LS_CONV_W, 280), MIN_CONV_W, MAX_CONV_W));
@@ -127,6 +187,10 @@ export default function DashboardPage() {
       setLastAgentAnswer(null);
     }
     prevConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    lastChatScrollKeyRef.current = "";
   }, [activeConversationId]);
 
   useEffect(() => {
@@ -173,11 +237,12 @@ export default function DashboardPage() {
   }, [router, supabase.auth]);
 
   useEffect(() => {
+    if (!activeConversationId) {
+      setMessages([]);
+      return;
+    }
+    setMessages([]);
     void (async () => {
-      if (!activeConversationId) {
-        setMessages([]);
-        return;
-      }
       const sessionResult = await supabase.auth.getSession();
       const accessToken = sessionResult.data.session?.access_token;
       if (!accessToken) return;
@@ -239,6 +304,25 @@ export default function DashboardPage() {
       intent: typeof meta.intent === "string" ? (meta.intent as AgentAnswer["intent"]) : undefined
     });
   }, [activeConversationId, messages, companionRunId]);
+
+  useEffect(() => {
+    const runId = lastAgentAnswer?.runId ?? null;
+    const ve = findViewingEmailDataPanel(lastAgentAnswer);
+    if (!ve || !runId) {
+      viewingEmailRunRef.current = null;
+      setViewingEmailBodyOverride(null);
+      return;
+    }
+    if (viewingEmailRunRef.current !== runId) {
+      viewingEmailRunRef.current = runId;
+      setViewingEmailBodyOverride(ve.draft.body);
+    }
+  }, [lastAgentAnswer?.runId, lastAgentAnswer]);
+
+  const mergedLastAgentAnswer = useMemo(
+    () => mergeViewingEmailDraftBody(lastAgentAnswer, viewingEmailBodyOverride),
+    [lastAgentAnswer, viewingEmailBodyOverride]
+  );
 
   async function createConversation() {
     const sessionResult = await supabase.auth.getSession();
@@ -334,19 +418,44 @@ export default function DashboardPage() {
   const activeConversationTitle = conversations.find((c) => c.id === activeConversationId)?.title;
 
   function scrollChatToAgentRun(conversationId: string, runId: string) {
+    const slug = conversationId.trim() || "no-conv";
     const tryScroll = (attempt: number) => {
-      const answerBubble = document.getElementById(`chat-assistant-run-${runId}`);
-      const extra = document.getElementById(`agent-extras--conv--${conversationId}--run--${runId}`);
-      const panel0 = document.getElementById(`agent-data-panel--conv--${conversationId}--run--${runId}--0`);
-      const target = answerBubble ?? extra ?? panel0;
-      if (target) {
-        target.scrollIntoView({ behavior: "smooth", block: "center" });
+      const workspace = document.getElementById(`agent-workspace--conv--${slug}`);
+      const target =
+        document.getElementById(`chat-assistant-run-${runId}`) ??
+        document.getElementById(`agent-extras--conv--${slug}--run--${runId}`) ??
+        document.getElementById(`agent-data-panel--conv--${slug}--run--${runId}--0`);
+
+      if (workspace && target) {
+        const viewport = workspace.querySelector<HTMLElement>("[data-scrollbars]");
+        if (viewport) {
+          const vTop = viewport.getBoundingClientRect().top;
+          const tTop = target.getBoundingClientRect().top;
+          const nextTop = viewport.scrollTop + (tTop - vTop) - Math.min(48, viewport.clientHeight * 0.08);
+          viewport.scrollTo({ top: Math.max(0, nextTop), behavior: "smooth" });
+        } else {
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
         return;
       }
-      if (attempt < 12) window.setTimeout(() => tryScroll(attempt + 1), 80);
+      if (attempt < 28) window.setTimeout(() => tryScroll(attempt + 1), 100);
     };
-    window.setTimeout(() => tryScroll(0), 50);
+    window.setTimeout(() => tryScroll(0), 60);
   }
+
+  /** Po výběru běhu v nástrojích (šipky u tabulky/grafu) nebo z odkazu v poště — scroll k bublině v chatu. */
+  useEffect(() => {
+    if (!activeConversationId || !companionRunId) return;
+    const key = `${activeConversationId}:${companionRunId}`;
+    if (lastChatScrollKeyRef.current === key) return;
+    lastChatScrollKeyRef.current = key;
+    const id = activeConversationId;
+    const run = companionRunId;
+    requestAnimationFrame(() => {
+      scrollChatToAgentRun(id, run);
+      requestAnimationFrame(() => scrollChatToAgentRun(id, run));
+    });
+  }, [activeConversationId, companionRunId]);
 
   function navigateToConversation(conversationId: string, runId?: string | null) {
     if (runId) skipNextCompanionClearRef.current = true;
@@ -361,7 +470,6 @@ export default function DashboardPage() {
         behavior: "smooth",
         block: "nearest"
       });
-      if (runId) scrollChatToAgentRun(conversationId, runId);
     });
   }
 
@@ -629,7 +737,8 @@ export default function DashboardPage() {
                   agents={listAgentUiOptions()}
                   defaultAgentId={selectedAgentId}
                   threadMessages={threadMessages}
-                  syncedAgentAnswer={lastAgentAnswer}
+                  syncedAgentAnswer={mergedLastAgentAnswer}
+                  onViewingEmailBodyChange={setViewingEmailBodyOverride}
                   conversationContext={{
                     id: activeConversationId,
                     title: activeConversationTitle
@@ -696,7 +805,8 @@ export default function DashboardPage() {
 
                     const payload = await readAgentNdjsonStream(response, {
                       onPhase: streamOpts?.onPhase,
-                      onOrchestratorDelta: streamOpts?.onOrchestratorDelta
+                      onOrchestratorDelta: streamOpts?.onOrchestratorDelta,
+                      onAnswerDelta: streamOpts?.onAnswerDelta
                     });
 
                     if (conversationId) {
@@ -744,8 +854,11 @@ export default function DashboardPage() {
             selectedAgentId={selectedAgentId}
             agentOptions={listAgentUiOptions()}
             focusRunId={companionRunId}
-            lastAgentAnswer={lastAgentAnswer}
+            lastAgentAnswer={mergedLastAgentAnswer}
+            onViewingEmailBodyChange={setViewingEmailBodyOverride}
             vizAnswerRuns={vizAnswerRuns}
+            viewingEmailRuns={viewingEmailRuns}
+            assistantRunIdsInOrder={assistantRunIdsInOrder}
             onSelectVizAnswerRun={setCompanionRunId}
             onNavigateConversation={navigateToConversation}
             expandedWidthPx={companionWidthPx}

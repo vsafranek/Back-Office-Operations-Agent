@@ -7,7 +7,8 @@ import type { McpToolConfigEntry } from "@/lib/agent/mcp-tools/config/types";
 const inputSchema = z.object({
   userId: z.string().min(1),
   daysAhead: z.coerce.number().int().optional(),
-  limit: z.coerce.number().int().optional()
+  limit: z.coerce.number().int().optional(),
+  slotDurationMinutes: z.coerce.number().int().min(15).max(480).optional()
 });
 
 const rangeSchema = z.object({ start: z.string(), end: z.string() });
@@ -24,7 +25,7 @@ const tool: McpTool<z.infer<typeof inputSchema>, z.infer<typeof outputSchema>> =
     role: "tool",
     name: "suggestViewingSlots",
     description:
-      "Návrh volných hodinových slotů pro prohlídku + busy intervaly a časové okno (jedno volání free/busy + výpočet). " +
+      "Návrh volných slotů pro prohlídku (začátky po 15 min, délka volitelná) + busy intervaly a časové okno (jedno volání free/busy + výpočet). " +
       "Jen pro prohlížení obsazenosti bez návrhu slotů použij browseCalendarAvailability.",
     inputSchema,
     outputSchema,
@@ -32,7 +33,12 @@ const tool: McpTool<z.infer<typeof inputSchema>, z.infer<typeof outputSchema>> =
     sideEffects: []
   },
   run: async (_ctx: AgentToolContext, input) =>
-    suggestViewingSlots({ userId: input.userId, daysAhead: input.daysAhead, limit: input.limit })
+    suggestViewingSlots({
+      userId: input.userId,
+      daysAhead: input.daysAhead,
+      limit: input.limit,
+      slotDurationMinutes: input.slotDurationMinutes
+    })
 };
 
 export const suggestViewingSlotsTool: McpToolConfigEntry = {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { AgentTraceRecorder } from "@/lib/agent/trace/recorder";
-import { generateWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
+import { generateWithAzureProxy, streamWithAzureProxy } from "@/lib/llm/azure-proxy-provider";
 import { AGENT_SYSTEM_PROMPT } from "@/lib/agent/system-prompt";
 import { tryParseJsonObject } from "@/lib/agent/llm/parse-json-response";
 
@@ -16,11 +16,78 @@ export type UserFacingReply = {
   next_actions: string[];
 };
 
+/**
+ * Z dosud přijatého JSON výstupu modelu vytáhne prefix hodnoty `answer_text` (dekóduje běžné escape sekvence).
+ * Pro živý výpis během streamu — klíč musí být uveden jako "answer_text": "
+ */
+export function extractAnswerTextFromPartialModelJson(buffer: string): string {
+  const m = buffer.match(/"answer_text"\s*:\s*"/);
+  if (!m || m.index === undefined) return "";
+  let i = m.index + m[0].length;
+  let out = "";
+  while (i < buffer.length) {
+    const c = buffer[i]!;
+    if (c === "\\") {
+      if (i + 1 >= buffer.length) break;
+      const n = buffer[i + 1]!;
+      if (n === "n") {
+        out += "\n";
+        i += 2;
+        continue;
+      }
+      if (n === "r") {
+        out += "\r";
+        i += 2;
+        continue;
+      }
+      if (n === "t") {
+        out += "\t";
+        i += 2;
+        continue;
+      }
+      if (n === '"' || n === "\\" || n === "/") {
+        out += n;
+        i += 2;
+        continue;
+      }
+      if (n === "u" && i + 5 < buffer.length) {
+        const hex = buffer.slice(i + 2, i + 6);
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          out += String.fromCharCode(parseInt(hex, 16));
+          i += 6;
+          continue;
+        }
+      }
+      out += n;
+      i += 2;
+      continue;
+    }
+    if (c === '"') break;
+    out += c;
+    i += 1;
+  }
+  return out;
+}
+
+function emitAnswerStreamDelta(
+  onAnswerDelta: ((chunk: string) => void | Promise<void>) | undefined,
+  buffer: string,
+  lastEmittedLen: number
+): number {
+  if (!onAnswerDelta) return lastEmittedLen;
+  const extracted = extractAnswerTextFromPartialModelJson(buffer);
+  if (extracted.length <= lastEmittedLen) return lastEmittedLen;
+  const piece = extracted.slice(lastEmittedLen);
+  void Promise.resolve(onAnswerDelta(piece));
+  return extracted.length;
+}
+
 export async function generateUserFacingReply(params: {
   runId: string;
   userContent: string;
   maxTokens?: number;
   trace?: { recorder: AgentTraceRecorder; parentId: string | null; name?: string };
+  onAnswerDelta?: (chunk: string) => void | Promise<void>;
 }): Promise<UserFacingReply> {
   const system =
     `${AGENT_SYSTEM_PROMPT}\n\n` +
@@ -48,7 +115,33 @@ export async function generateUserFacingReply(params: {
       ]
     });
 
-  let llm = await run(params.userContent, "");
+  const streamFirst = Boolean(params.onAnswerDelta);
+  let llm = streamFirst
+    ? await streamWithAzureProxy({
+        runId: params.runId,
+        maxTokens: params.maxTokens ?? 900,
+        trace: params.trace
+          ? {
+              recorder: params.trace.recorder,
+              parentId: params.trace.parentId,
+              name: `${llmName}`
+            }
+          : undefined,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: params.userContent }
+        ],
+        onTextDelta: (() => {
+          let buf = "";
+          let lastLen = 0;
+          return (chunk: string) => {
+            buf += chunk;
+            lastLen = emitAnswerStreamDelta(params.onAnswerDelta, buf, lastLen);
+          };
+        })()
+      })
+    : await run(params.userContent, "");
+
   let parsed = tryParseJsonObject(UserReplySchema, llm.text);
   if (parsed) {
     return {

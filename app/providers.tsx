@@ -1,10 +1,13 @@
 "use client";
 
 import { MantineProvider, createTheme } from "@mantine/core";
+import { DatesProvider } from "@mantine/dates";
 import { ModalsProvider } from "@mantine/modals";
 import { Notifications } from "@mantine/notifications";
+import "dayjs/locale/cs";
 
 import "@mantine/core/styles.css";
+import "@mantine/dates/styles.css";
 import "@mantine/notifications/styles.css";
 
 const theme = createTheme({
@@ -53,10 +56,12 @@ const theme = createTheme({
 export function Providers({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <MantineProvider theme={theme} defaultColorScheme="light">
-      <ModalsProvider>
-        <Notifications position="top-right" zIndex={4000} />
-        {children}
-      </ModalsProvider>
+      <DatesProvider settings={{ locale: "cs", firstDayOfWeek: 1, weekendDays: [0, 6] }}>
+        <ModalsProvider>
+          <Notifications position="top-right" zIndex={4000} />
+          {children}
+        </ModalsProvider>
+      </DatesProvider>
     </MantineProvider>
   );
 }

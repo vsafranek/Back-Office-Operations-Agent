@@ -1,14 +1,10 @@
 import { getEnv } from "@/lib/config/env";
 import { createOAuthState } from "@/lib/integrations/oauth-state";
+import { googleOAuthIntegrationScopeString } from "@/lib/integrations/google-integration-scopes";
 import { getOAuthPublicOrigin } from "@/lib/integrations/oauth-public-origin";
 import { requireAuthenticatedUser } from "@/lib/auth/server-auth";
 
 export const runtime = "nodejs";
-
-const GOOGLE_CONNECT_SCOPES = [
-  "https://www.googleapis.com/auth/calendar.readonly",
-  "https://www.googleapis.com/auth/gmail.modify"
-].join(" ");
 
 export async function GET(request: Request) {
   try {
@@ -26,7 +22,7 @@ export async function GET(request: Request) {
     url.searchParams.set("client_id", env.GOOGLE_OAUTH_CLIENT_ID);
     url.searchParams.set("redirect_uri", redirectUri);
     url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", GOOGLE_CONNECT_SCOPES);
+    url.searchParams.set("scope", googleOAuthIntegrationScopeString());
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("prompt", "consent");
     url.searchParams.set("state", state);

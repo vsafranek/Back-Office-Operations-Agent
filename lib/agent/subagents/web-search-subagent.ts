@@ -7,10 +7,15 @@ export async function runWebSearchSubAgent(params: {
   toolRunner: ToolRunner;
   ctx: AgentToolContext;
   question: string;
+  onAnswerDelta?: (chunk: string) => void | Promise<void>;
 }): Promise<AgentAnswer> {
   const query = params.question.trim();
   if (isLikelyCasualOnlyMessage(query)) {
-    return runCasualChatSubAgent({ ctx: params.ctx, question: params.question });
+    return runCasualChatSubAgent({
+      ctx: params.ctx,
+      question: params.question,
+      onAnswerDelta: params.onAnswerDelta
+    });
   }
   const results = await params.toolRunner.run<
     Array<{ title: string; url: string; snippet?: string }>
@@ -46,6 +51,7 @@ export async function runWebSearchSubAgent(params: {
           name: "llm.subagent.web-search.reply"
         }
       : undefined,
+    onAnswerDelta: params.onAnswerDelta,
     userContent: [
       `Dotaz uzivatele: ${params.question}`,
       "Pouzij VYHRADNE nize uvedene zdroje. Pokud neco nevypliva, rekni ze to z nich nejde spolehlive udelat.",

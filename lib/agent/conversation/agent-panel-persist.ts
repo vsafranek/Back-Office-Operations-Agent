@@ -110,3 +110,48 @@ export function agentAnswerSliceFromPersistPayload(raw: unknown): Pick<
     dataPanelBundles: out
   };
 }
+
+/** Panely, které patří do navigace „Tabulka / graf“ (ne e-mail ani potvrzení cron úlohy). */
+const TABLE_OR_CHART_PANEL_KINDS = new Set<AgentDataPanel["kind"]>([
+  "clients_q1",
+  "leads_sales_6m",
+  "clients_filtered",
+  "deal_sales_detail",
+  "market_listings"
+]);
+
+function bundlesFromSlice(slice: NonNullable<ReturnType<typeof agentAnswerSliceFromPersistPayload>>) {
+  return slice.dataPanelBundles && slice.dataPanelBundles.length > 0
+    ? slice.dataPanelBundles
+    : slice.dataPanel
+      ? [{ dataPanel: slice.dataPanel }]
+      : [];
+}
+
+/** True, pokud v uloženém payloadu je aspoň jeden tabulkový / grafický panel. */
+export function agentPayloadHasTableOrChartPanel(raw: unknown): boolean {
+  const slice = agentAnswerSliceFromPersistPayload(raw);
+  if (!slice) return false;
+  return bundlesFromSlice(slice).some((b) => TABLE_OR_CHART_PANEL_KINDS.has(b.dataPanel.kind));
+}
+
+/** Návrh e-mailu (prohlídka) v persistovaném payloadu zprávy. */
+export function agentPayloadHasViewingEmailDraft(raw: unknown): boolean {
+  const slice = agentAnswerSliceFromPersistPayload(raw);
+  if (!slice) return false;
+  return bundlesFromSlice(slice).some((b) => b.dataPanel.kind === "viewing_email_draft");
+}
+
+/** Krátký popis pro přepínač běhů (předmět návrhu). */
+export function viewingEmailDraftPreviewFromPayload(raw: unknown): string | null {
+  const slice = agentAnswerSliceFromPersistPayload(raw);
+  if (!slice) return null;
+  for (const b of bundlesFromSlice(slice)) {
+    if (b.dataPanel.kind === "viewing_email_draft") {
+      const s = b.dataPanel.draft.subject?.trim();
+      if (s && s.length > 0) return s.length > 64 ? `${s.slice(0, 61)}…` : s;
+      return "Návrh e-mailu (prohlídka)";
+    }
+  }
+  return null;
+}

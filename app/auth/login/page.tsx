@@ -4,6 +4,8 @@ import { Anchor, Button, Divider, Paper, PasswordInput, Stack, Text, TextInput, 
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { googleSupabaseSignInScopeString } from "@/lib/integrations/google-integration-scopes";
+import { MICROSOFT_GRAPH_INTEGRATION_SCOPES } from "@/lib/integrations/microsoft-graph-oauth-scopes";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 export default function LoginPage() {
@@ -14,6 +16,7 @@ export default function LoginPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [microsoftLoading, setMicrosoftLoading] = useState(false);
 
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -44,7 +47,11 @@ export default function LoginPage() {
       provider: "google",
       options: {
         redirectTo,
-        scopes: ["openid", "email", "profile"].join(" ")
+        scopes: googleSupabaseSignInScopeString(),
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent"
+        }
       }
     });
 
@@ -54,12 +61,31 @@ export default function LoginPage() {
     }
   }
 
+  async function handleMicrosoftLogin() {
+    setMicrosoftLoading(true);
+    setMessage(null);
+
+    const redirectTo = `${window.location.origin}/dashboard`;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "azure",
+      options: {
+        redirectTo,
+        scopes: MICROSOFT_GRAPH_INTEGRATION_SCOPES
+      }
+    });
+
+    setMicrosoftLoading(false);
+    if (error) {
+      setMessage(error.message);
+    }
+  }
+
   return (
     <Paper shadow="sm" p="xl" radius="md" withBorder>
       <Title order={2}>Přihlášení</Title>
       <Text size="sm" c="dimmed" mt="xs">
-        E-mail a heslo, nebo Google. Účty se stejným e-mailem sloučíme v aplikaci (integrace a konverzace) po
-        přihlášení.
+        E-mail a heslo, nebo přihlášení přes <strong>Google</strong> / <strong>Microsoft</strong>. Účty se stejným e-mailem v aplikaci po
+        přihlášení sloučíme.
       </Text>
 
       <form onSubmit={handleLogin}>
@@ -92,9 +118,14 @@ export default function LoginPage() {
 
       <Divider label="nebo" labelPosition="center" my="lg" />
 
-      <Button variant="light" fullWidth onClick={() => void handleGoogleLogin()} loading={googleLoading}>
-        {googleLoading ? "Přesměrovávám na Google..." : "Přihlásit přes Google"}
-      </Button>
+      <Stack gap="sm">
+        <Button variant="light" fullWidth onClick={() => void handleGoogleLogin()} loading={googleLoading}>
+          {googleLoading ? "Přesměrovávám…" : "Přihlásit přes Google"}
+        </Button>
+        <Button variant="light" fullWidth onClick={() => void handleMicrosoftLogin()} loading={microsoftLoading}>
+          {microsoftLoading ? "Přesměrovávám…" : "Přihlásit přes Microsoft"}
+        </Button>
+      </Stack>
 
       <Text size="sm" mt="lg">
         Nemáš účet?{" "}

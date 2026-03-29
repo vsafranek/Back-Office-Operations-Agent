@@ -1,12 +1,10 @@
 import { getEnv } from "@/lib/config/env";
+import { MICROSOFT_GRAPH_INTEGRATION_SCOPES } from "@/lib/integrations/microsoft-graph-oauth-scopes";
 import { encryptToken, decryptToken } from "@/lib/security/token-crypto";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 
-const GRAPH_SCOPE =
-  "offline_access openid profile email https://graph.microsoft.com/Calendars.Read https://graph.microsoft.com/Mail.ReadWrite";
-
 export function getMicrosoftOAuthScopes() {
-  return GRAPH_SCOPE;
+  return MICROSOFT_GRAPH_INTEGRATION_SCOPES;
 }
 
 export async function getMicrosoftAccessTokenForUser(params: { userId: string }): Promise<string> {
@@ -48,7 +46,7 @@ export async function getMicrosoftAccessTokenForUser(params: { userId: string })
     client_secret: env.MICROSOFT_OAUTH_CLIENT_SECRET,
     grant_type: "refresh_token",
     refresh_token: refresh,
-    scope: GRAPH_SCOPE
+    scope: MICROSOFT_GRAPH_INTEGRATION_SCOPES
   });
 
   const res = await fetch(tokenUrl, {
