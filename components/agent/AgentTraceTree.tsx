@@ -12,6 +12,11 @@ type Props = {
    * `embedded` — bez vnějšího tlačítka, načte trace po vykreslení (např. uvnitř bubliny).
    */
   variant?: "standalone" | "embedded";
+  /**
+   * `flat` (výchozí) — větve stromu jsou vždy vidět, rozkliknutí jen vstup/výstup uzlu; prvky do hloubky 2 startují rozbalené.
+   * `nested` — uzly začínají sbalené (jen řádek kroku); rozkliknutím se ukáže detail i poduzly.
+   */
+  structureMode?: "flat" | "nested";
 };
 
 function kindStyle(kind: string): CSSProperties {
@@ -38,14 +43,20 @@ function kindStyle(kind: string): CSSProperties {
 function TraceNode({
   node,
   byParent,
-  depth
+  depth,
+  structureMode
 }: {
   node: AgentTraceEventRow;
   byParent: Map<string | null, AgentTraceEventRow[]>;
   depth: number;
+  structureMode: "flat" | "nested";
 }) {
-  const [open, setOpen] = useState(depth < 2);
+  const nested = structureMode === "nested";
+  const [open, setOpen] = useState(() => (nested ? false : depth < 2));
   const children = byParent.get(node.id) ?? [];
+
+  const showPayloadBlock = open;
+  const showChildList = nested ? open && children.length > 0 : children.length > 0;
 
   return (
     <li style={{ listStyle: "none", margin: "4px 0" }}>
@@ -84,7 +95,7 @@ function TraceNode({
             <span style={{ color: "#64748b", fontSize: 12 }}>{node.duration_ms} ms</span>
           ) : null}
         </button>
-        {open ? (
+        {showPayloadBlock ? (
           <div style={{ marginTop: 6, marginBottom: 10 }}>
             {node.input_payload != null ? (
               <div style={{ marginBottom: 8 }}>
@@ -129,10 +140,10 @@ function TraceNode({
             ) : null}
           </div>
         ) : null}
-        {children.length > 0 ? (
+        {showChildList ? (
           <ul style={{ paddingLeft: 0, margin: 0 }}>
             {children.map((c) => (
-              <TraceNode key={c.id} node={c} byParent={byParent} depth={depth + 1} />
+              <TraceNode key={c.id} node={c} byParent={byParent} depth={depth + 1} structureMode={structureMode} />
             ))}
           </ul>
         ) : null}
@@ -141,7 +152,12 @@ function TraceNode({
   );
 }
 
-export function AgentTraceTree({ runId, getAccessToken, variant = "standalone" }: Props) {
+export function AgentTraceTree({
+  runId,
+  getAccessToken,
+  variant = "standalone",
+  structureMode = "flat"
+}: Props) {
   const [events, setEvents] = useState<AgentTraceEventRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -219,7 +235,7 @@ export function AgentTraceTree({ runId, getAccessToken, variant = "standalone" }
       {events && events.length > 0 ? (
         <ul style={{ paddingLeft: 0, margin: "8px 0 0" }}>
           {roots.map((r) => (
-            <TraceNode key={r.id} node={r} byParent={byParent} depth={0} />
+            <TraceNode key={r.id} node={r} byParent={byParent} depth={0} structureMode={structureMode} />
           ))}
         </ul>
       ) : null}

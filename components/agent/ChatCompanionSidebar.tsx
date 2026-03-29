@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ActionIcon,
   Code,
   Divider,
   Group,
@@ -16,6 +17,8 @@ import {
   IconBook,
   IconCalendar,
   IconChartBar,
+  IconChevronLeft,
+  IconChevronRight,
   IconHome,
   IconLayoutSidebarRightExpand,
   IconMail,
@@ -38,6 +41,13 @@ import {
 import type { AgentUiOption } from "@/lib/agent/config/types";
 import type { AgentAnswer } from "@/lib/agent/types";
 import { findViewingEmailDataPanel } from "@/lib/agent/viewing-email-answer-helpers";
+import {
+  companionRunNavCanGoNewer,
+  companionRunNavCanGoOlder,
+  companionRunNavCursor,
+  companionRunNavGoNewer,
+  companionRunNavGoOlder
+} from "@/lib/ui/companion-run-nav";
 import type { VizAnswerRunOption } from "@/components/agent/companion/CompanionToolPanels";
 
 export type CompanionSectionId =
@@ -69,6 +79,8 @@ export type ChatCompanionSidebarProps = {
   viewingEmailRuns?: VizAnswerRunOption[];
   /** Assistant runId v pořadí konverzace (nejstarší první) — šipky mezi maily a tabulkami. */
   assistantRunIdsInOrder?: string[];
+  /** Všechny odpovědi asistenta s runId — šipky v Kontextu u stromu volání. */
+  assistantAnswerRuns?: VizAnswerRunOption[];
   onSelectVizAnswerRun?: (runId: string) => void;
   onNavigateConversation: (conversationId: string, runId?: string | null) => void;
   /** Šířka rozbaleného panelu (px). */
@@ -94,6 +106,7 @@ export function ChatCompanionSidebar({
   vizAnswerRuns = [],
   viewingEmailRuns = [],
   assistantRunIdsInOrder = [],
+  assistantAnswerRuns = [],
   onSelectVizAnswerRun,
   onNavigateConversation,
   expandedWidthPx = 680,
@@ -101,7 +114,7 @@ export function ChatCompanionSidebar({
   disableWidthTransition = false,
   onViewingEmailBodyChange
 }: ChatCompanionSidebarProps) {
-  const [activeSection, setActiveSection] = useState<CompanionSectionId>("context");
+  const [activeSection, setActiveSection] = useState<CompanionSectionId>("mail");
   const agent = agentOptions.find((a) => a.id === selectedAgentId);
   const mailAutoOpenRunRef = useRef<string | null>(null);
 
@@ -110,70 +123,126 @@ export function ChatCompanionSidebar({
     const isViewing = findViewingEmailDataPanel(lastAgentAnswer) != null;
     if (isViewing && runId && mailAutoOpenRunRef.current !== runId) {
       mailAutoOpenRunRef.current = runId;
-      setActiveSection("mail");
+      /** Neukrápat Kalendář / Tabulku při šipkách mezi běhy — tam mění runId záměrně. */
+      setActiveSection((prev) =>
+        prev === "calendar" || prev === "viz" || prev === "context" ? prev : "mail"
+      );
     }
     if (!isViewing) mailAutoOpenRunRef.current = null;
   }, [lastAgentAnswer]);
 
   const navItems: { id: CompanionSectionId; label: string; icon: ReactNode }[] = [
-    { id: "context", label: "Kontext", icon: <IconLayoutSidebarRightExpand size={20} stroke={1.5} /> },
     { id: "mail", label: "Maily", icon: <IconMail size={20} stroke={1.5} /> },
     { id: "calendar", label: "Kalendář", icon: <IconCalendar size={20} stroke={1.5} /> },
-    { id: "data", label: "Data (presety)", icon: <IconDatabase size={20} stroke={1.5} /> },
+    { id: "data", label: "Data", icon: <IconDatabase size={20} stroke={1.5} /> },
     { id: "viz", label: "Tabulka / graf", icon: <IconChartBar size={20} stroke={1.5} /> },
     { id: "market", label: "Nabídky", icon: <IconHome size={20} stroke={1.5} /> },
     { id: "trace", label: "Trace", icon: <IconGitBranch size={20} stroke={1.5} /> },
     { id: "audit", label: "Audit", icon: <IconShieldCheck size={20} stroke={1.5} /> },
     { id: "storage", label: "Storage", icon: <IconFolder size={20} stroke={1.5} /> },
+    { id: "context", label: "Kontext", icon: <IconLayoutSidebarRightExpand size={20} stroke={1.5} /> },
     { id: "help", label: "Nápověda", icon: <IconBook size={20} stroke={1.5} /> }
   ];
 
   function renderContent() {
     switch (activeSection) {
-      case "context":
+      case "context": {
+        const runs = assistantAnswerRuns;
+        const ctxNavRunId = lastAgentAnswer?.runId ?? focusRunId ?? null;
+        const ctxNavCursor = companionRunNavCursor(runs, ctxNavRunId, assistantRunIdsInOrder);
+        const ctxRunCount = runs.length;
+        const showCtxAnswerNav = ctxRunCount > 0 && onSelectVizAnswerRun != null;
+        const effectiveRunId = focusRunId ?? lastAgentAnswer?.runId ?? null;
+        let ctxDisplayIdx =
+          effectiveRunId != null ? runs.findIndex((r) => r.runId === effectiveRunId) : ctxNavCursor;
+        if (ctxDisplayIdx < 0 && ctxRunCount > 0) ctxDisplayIdx = ctxRunCount - 1;
+        const ctxSlotLabel = ctxDisplayIdx >= 0 ? ctxDisplayIdx + 1 : "—";
+
+        const runForContext =
+          (effectiveRunId ? runs.find((r) => r.runId === effectiveRunId) : null) ??
+          (ctxNavCursor >= 0 ? runs[ctxNavCursor] : ctxRunCount > 0 ? runs[ctxRunCount - 1] : null);
+        const userQuestion = runForContext?.userPrompt?.trim();
+
         return (
           <Stack gap="sm">
-            <div>
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                Konverzace
-              </Text>
-              <Text size="sm" fw={500}>
-                {conversationTitle?.trim() || (conversationId ? `Konverzace ${conversationId.slice(0, 8)}…` : "—")}
-              </Text>
-              {conversationId ? (
-                <Code block mt={6} fz="xs">
-                  {conversationId}
-                </Code>
-              ) : (
-                <Text size="xs" c="dimmed" mt={4}>
-                  Žádná aktivní konverzace — spusťte dotaz nebo vytvořte konverzaci vlevo.
+            {showCtxAnswerNav ? (
+              <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
+                <Tooltip label="Předchozí zpráva (asistent)">
+                  <ActionIcon
+                    variant="default"
+                    size="sm"
+                    aria-label="Předchozí zpráva"
+                    disabled={ctxRunCount <= 1 || !companionRunNavCanGoOlder(ctxNavCursor)}
+                    onClick={() => companionRunNavGoOlder(runs, ctxNavCursor, onSelectVizAnswerRun!)}
+                  >
+                    <IconChevronLeft size={18} stroke={1.5} />
+                  </ActionIcon>
+                </Tooltip>
+                <Text size="xs" ta="center" fw={600} lineClamp={1} style={{ flex: 1, minWidth: 0 }}>
+                  Zpráva {ctxSlotLabel} / {ctxRunCount || "—"}
                 </Text>
-              )}
-            </div>
-            <div>
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-                Agent
-              </Text>
+                <Tooltip label="Další zpráva (asistent)">
+                  <ActionIcon
+                    variant="default"
+                    size="sm"
+                    aria-label="Další zpráva"
+                    disabled={ctxRunCount <= 1 || !companionRunNavCanGoNewer(ctxNavCursor, ctxRunCount)}
+                    onClick={() => companionRunNavGoNewer(runs, ctxNavCursor, onSelectVizAnswerRun!)}
+                  >
+                    <IconChevronRight size={18} stroke={1.5} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            ) : null}
+
+            <Text size="xs" c="dimmed" lineClamp={1}>
+              {conversationTitle?.trim() || (conversationId ? `Konverzace ${conversationId.slice(0, 8)}…` : "—")}
               {agent ? (
-                <Stack gap={4} mt={4}>
-                  <Text size="sm" fw={600}>
-                    {agent.label}{" "}
-                    <Text span c="dimmed" size="sm" fw={400}>
-                      ({agent.mode})
-                    </Text>
+                <>
+                  {" · "}
+                  <Text span fw={600} c="dimmed">
+                    {agent.label}
                   </Text>
-                  <Text size="xs" c="dimmed">
-                    {agent.description}
-                  </Text>
-                </Stack>
+                </>
+              ) : null}
+            </Text>
+
+            <div>
+              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb={6}>
+                Otázka uživatele
+              </Text>
+              {userQuestion ? (
+                <Text size="sm" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {userQuestion}
+                </Text>
+              ) : effectiveRunId ? (
+                <Text size="sm" c="dimmed">
+                  U této odpovědi nebyla v konverzaci nalezena předchozí uživatelská zpráva.
+                </Text>
               ) : (
                 <Text size="sm" c="dimmed">
-                  {selectedAgentId}
+                  Spusťte dotaz ve vlákně — zobrazí se otázka a strom volání pro vybraný běh.
                 </Text>
               )}
             </div>
+
+            <Divider label="Strom volání" labelPosition="center" />
+            {focusRunId ? (
+              <AgentTraceTree
+                key={focusRunId}
+                runId={focusRunId}
+                getAccessToken={getAccessToken}
+                variant="embedded"
+                structureMode="nested"
+              />
+            ) : (
+              <Text size="sm" c="dimmed">
+                Spusťte agenta dotazem ve středu obrazovky. Po dokončení běhu se zde zobrazí strom volání.
+              </Text>
+            )}
           </Stack>
         );
+      }
       case "mail":
         return (
           <MailToolPanel
@@ -189,7 +258,17 @@ export function ChatCompanionSidebar({
           />
         );
       case "calendar":
-        return <CalendarToolPanel getAccessToken={getAccessToken} />;
+        return (
+          <CalendarToolPanel
+            getAccessToken={getAccessToken}
+            lastAgentAnswer={lastAgentAnswer}
+            focusRunId={focusRunId}
+            viewingEmailRuns={viewingEmailRuns}
+            assistantRunIdsInOrder={assistantRunIdsInOrder}
+            onSelectViewingEmailRun={onSelectVizAnswerRun}
+            onViewingEmailBodyChange={onViewingEmailBodyChange}
+          />
+        );
       case "data":
         return <DataPresetPanel getAccessToken={getAccessToken} />;
       case "viz":
@@ -246,7 +325,8 @@ export function ChatCompanionSidebar({
                 Ikonová navigace
               </Text>{" "}
               — vyberte sekci v pravém sloupci; obsah je vlevo od něj. Ikonky zůstávají viditelné i ve sbaleném
-              panelu. Trace a Audit vycházejí z posledního běhu v aktuální konverzaci.
+              panelu. V sekci <Text span fw={600}>Kontext</Text> je strom volání pro zvolený běh (šipkami jako u
+              dalších nástrojů); samostatná záložka Trace zobrazuje totéž pro rychlý přístup. Audit vychází ze zvoleného běhu v konverzaci.
             </Text>
             <Text size="sm">
               <Text span fw={600}>
@@ -323,7 +403,7 @@ export function ChatCompanionSidebar({
       }}
     >
       {isDesktop && !panelOpen ? (
-        <Stack align="center" gap={6} pt={4} pb="md" px={0} style={{ flex: 1, minHeight: 0, width: "100%" }}>
+        <Stack align="center" gap={6} pt={0} pb="md" px={0} style={{ flex: 1, minHeight: 0, width: "100%" }}>
           <UnstyledButton
             type="button"
             onClick={onTogglePanel}

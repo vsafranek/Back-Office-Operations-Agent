@@ -51,6 +51,16 @@ describe("fallbackPlanFromQuestion (záloha bez LLM)", () => {
     expect(p.dataset).toBe("leads_vs_sales_6m");
   });
 
+  it("pipeline / souhrn leadů bez měsíční agregace → lead_pipeline_summary", () => {
+    const p = fallbackPlanFromQuestion("Dej souhrn leadů v pipeline podle stavu");
+    expect(p.dataset).toBe("lead_pipeline_summary");
+  });
+
+  it("tabulka nemovitostí bez rekonstrukce → properties", () => {
+    const p = fallbackPlanFromQuestion("Potřebuju tabulku nemovitostí v CRM");
+    expect(p.dataset).toBe("properties");
+  });
+
   it("graf vývoje leadů a prodaných za 6 měsíců (přesná uživatelská věta)", () => {
     const p = fallbackPlanFromQuestion(
       "Vytvoř graf vývoje počtu leadů a prodaných nemovitostí za posledních 6 měsíců."

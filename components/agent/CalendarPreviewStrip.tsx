@@ -16,6 +16,10 @@ type Props = {
   selectedSlot?: Block | null;
   /** Oddělení zvýraznění: návrh z radií vs. vlastní klik do volna. */
   selectedSource?: "agent" | "manual" | null;
+  /**
+   * Bez interaktivního výběru: označí volná pole, kde by délka schůzky kolidovala s busy (náhled „nelze začít“).
+   */
+  previewDurationCollisions?: boolean;
 };
 
 const VIEW_START_MIN = 8 * 60;
@@ -154,9 +158,11 @@ export function CalendarPreviewStrip({
   durationMs = DEFAULT_DURATION_MS,
   onSlotPick,
   selectedSlot = null,
-  selectedSource = null
+  selectedSource = null,
+  previewDurationCollisions = false
 }: Props) {
   const interactive = typeof onSlotPick === "function";
+  const showDurationRules = interactive || previewDurationCollisions;
   const [pageStart, setPageStart] = useState(0);
   const [nowTick, setNowTick] = useState(() => Date.now());
 
@@ -428,7 +434,7 @@ export function CalendarPreviewStrip({
             const kind = cellKind(day, slot, busy, proposedSlots);
             const proposedBlock = kind === "proposed" ? proposedSlotForCell(day, slot, proposedSlots) : null;
             const freeBlocked =
-              kind === "free" && interactive && isFreeStartInvalid(day, slot, durationMs, busy, rs, re);
+              kind === "free" && showDurationRules && isFreeStartInvalid(day, slot, durationMs, busy, rs, re);
 
             const selected = cellSelected(day, slot, selectedSlot);
             const isTodayCol = sameLocalDay(day, now);
@@ -447,6 +453,8 @@ export function CalendarPreviewStrip({
                 "Nelze začít zde — prohlídka by zasáhla do obsazeného času nebo přesáhla zobrazené rozmezí.";
             } else if (interactive) {
               title = `Volný začátek ${slotLabel(slot)} — klik vybere termín zvolené délky`;
+            } else if (previewDurationCollisions) {
+              title = `Volný začátek ${slotLabel(slot)} — při zvolené délce lze zde začít (náhled, bez výběru)`;
             } else {
               title = "Volno";
             }

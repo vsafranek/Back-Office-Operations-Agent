@@ -8,8 +8,12 @@ import { ClientFiltersSchema } from "@/lib/agent/tools/clients-table-query";
 export const DATASET_IDS = [
   "new_clients_q1",
   "leads_vs_sales_6m",
+  "lead_pipeline_summary",
   "deal_sales_detail",
   "clients",
+  "properties",
+  "deals",
+  "leads",
   "missing_reconstruction"
 ] as const;
 
@@ -50,11 +54,28 @@ const ROW_TEXT_COLUMNS = [
   "property_type_interest",
   "buyer_legal_name",
   "internal_deal_ref",
-  "listing_ref"
+  "listing_ref",
+  "status",
+  "client_full_name",
+  "client_email",
+  "property_title",
+  "property_internal_ref",
+  "property_kind_label",
+  "lead_notes",
+  "lost_reason",
+  "notes",
+  "listing_status"
 ] as const;
 
 /** Sloupce řádků z `fn_missing_reconstruction_data` a obdobných výpisů nemovitostí. */
-const PROPERTY_ROW_TEXT_COLUMNS = ["title", "city", "district", "internal_ref"] as const;
+const PROPERTY_ROW_TEXT_COLUMNS = [
+  "title",
+  "city",
+  "district",
+  "internal_ref",
+  "property_kind",
+  "listing_status"
+] as const;
 
 const ADDRESS_SEARCH_KEYS = [
   "city",
@@ -180,6 +201,23 @@ export function fallbackPlanFromQuestion(question: string): DataPullPlan {
     };
   }
 
+  const wantsLeadPipelineSummary =
+    n.includes("pipeline") ||
+    (n.includes("lead") && (n.includes("status") || n.includes("faze"))) ||
+    (n.includes("souhrn") && n.includes("lead"));
+
+  if (wantsLeadPipelineSummary && !n.includes("mesic")) {
+    return {
+      dataset: "lead_pipeline_summary",
+      row_text_narrowing: null,
+      client_filters: null,
+      filter_label: "Leady — souhrn podle stavu (pipeline)",
+      suggest_source_channel_chart: false,
+      suggest_derived_charts: false,
+      derived_chart_kind_hint: null
+    };
+  }
+
   if ((n.includes("lead") || n.includes("prodej") || n.includes("prodan")) && n.includes("mesic")) {
     return {
       dataset: "leads_vs_sales_6m",
@@ -296,6 +334,22 @@ export function fallbackPlanFromQuestion(question: string): DataPullPlan {
     };
   }
 
+  if (
+    (n.includes("nemovitost") || n.includes("portfolio")) &&
+    n.includes("tabulk") &&
+    !n.includes("rekonstruk")
+  ) {
+    return {
+      dataset: "properties",
+      row_text_narrowing: null,
+      client_filters: null,
+      filter_label: "Nemovitosti — tabulka",
+      suggest_source_channel_chart: false,
+      suggest_derived_charts: false,
+      derived_chart_kind_hint: null
+    };
+  }
+
   if (mentionsClient) {
     return {
       dataset: "clients",
@@ -352,13 +406,17 @@ export async function inferDataPullPlan(params: {
     "Z uzivatele otazky vyber JEDEN zpusob dotazu nad daty v aplikaci. Vrat POUZE jeden JSON objekt (bez markdownu).",
     "Povinne klice: dataset, row_text_narrowing (string|null), client_filters (pole|null), filter_label (string|null), suggest_source_channel_chart (boolean), suggest_derived_charts (boolean), derived_chart_kind_hint (\"bar\"|\"line\"|\"pie\"|null).",
     "",
-    'dataset: presne jedna z retezcu: "new_clients_q1" | "leads_vs_sales_6m" | "deal_sales_detail" | "clients" | "missing_reconstruction".',
+    'dataset: presne jedna z retezcu: "new_clients_q1" | "leads_vs_sales_6m" | "lead_pipeline_summary" | "deal_sales_detail" | "clients" | "properties" | "deals" | "leads" | "missing_reconstruction".',
     "",
     "Dostupne datasety:",
     "- new_clients_q1: rychla kohorta „novi v Q1 bezného roku“ pres view (Europe/Prague). Pouze kdyz presne sedi toto okno; jinak vzdy dataset clients + filtry na created_at.",
     "- leads_vs_sales_6m: mesicni souhrn — leady (vsechny) vs prodane byty za poslednich ~6 mesicu (agregacni view; prodane = deals s nemovitosti kind byt, bez cancelled).",
+    "- lead_pipeline_summary: agregace leadu podle stavu (status) — pocet, soucet expected_value_czk, nejstarsi/nejnovější lead; view vw_lead_pipeline_summary. „Pipeline“, „leady podle fáze“, „souhrn leadů“.",
     "- deal_sales_detail: seznam jednotlivych uzavrenych obchodu — nemovitost, kupec (clients), sold_at, cena, volitelne pravni jmeno kupce; view vw_deal_sales_detail. Pouzij pri „kdo koupil“, „seznam prodanych“, detailu prodeju bez casove osy po mesicich.",
     "- clients: primarni zdroj pro klienty — vsechny sloupce tabulky; kombinuj client_filters (viz nize) a/nebo row_text_narrowing. Pro libovolne obdobi / rok / kvartal: ts_gte a ts_lte na created_at (ISO 8601, napr. 2025-01-01T00:00:00.000Z). Tim obejdes nutnost mit view pro kazdy use case.",
+    "- properties: primarni tabulka nemovitosti (crm) — title, internal_ref, property_kind, listing_status, adresa jsonb atd.; uzivatelsky „portfolio“, evidence nemovitosti.",
+    "- deals: primarni tabulka obchodu (join na clients, properties, leads) — vystup ma misto cizich klicu rozvinute nazvy; neplést s deal_sales_detail (view uzavrenych prodeju).",
+    "- leads: primarni tabulka leadu s rozvinutym klientem a nemovitosti — jednotlive radky pipeline (ne agregace jako lead_pipeline_summary).",
     "- missing_reconstruction: nemovitosti bez rekonstrukcnich udaju / stavebnich uprav ve smyslu interniho checku.",
     "",
     "Vyber dataset podle SMYSLU entity a obdobi, ne podle klicovych slov:",
@@ -366,7 +424,7 @@ export async function inferDataPullPlan(params: {
     "- jiny rok, jine kvartal, rozsah od-do, poslednich N dni (vyjadreno datumy) → clients + ts_gte/ts_lte na created_at.",
     "- obecny dotaz na klienty → clients.",
     "",
-    "row_text_narrowing: u clients volitelne OR pres full_name, email, phone, source_channel, preferred_*, property_* (stejna logika jako backend). u missing_reconstruction OR v title, city, address jsonb, internal_ref, property_id. null pokud staci jen client_filters.",
+    "row_text_narrowing: u clients volitelne OR pres full_name, email, phone, source_channel, preferred_*, property_* (stejna logika jako backend). u properties OR v title, internal_ref, property_kind, listing_status, address jsonb. u deals a leads OR v rozvinutych textovych sloupcich (jmeno klienta, titul nemovitosti, ref., stav leadu, poznamky). u lead_pipeline_summary OR v sloupci status. u missing_reconstruction OR v title, city, address jsonb, internal_ref, property_id. null pokud staci jen client_filters.",
     "",
     "client_filters: pole az 20 podminek pro dataset clients — kazda polozka ma \"kind\":",
     '- text_ilike | text_eq | text_starts_with: column = full_name|email|phone|source_channel|preferred_city|preferred_district|property_type_interest|property_notes; value string',
@@ -385,7 +443,7 @@ export async function inferDataPullPlan(params: {
     "",
     "suggest_derived_charts:",
     "- true jen pro dataset clients, kdy uzivatel chce graf / rozklad / podil / srovnani podle mesta, kanalu, typu nemovitosti, casove osy (mesice) apod. nad vytazenou tabulkou — backend z stejnych radku agreguje, bez dalsiho SQL.",
-    "- false pro new_clients_q1, leads_vs_sales_6m, deal_sales_detail, missing_reconstruction i kdyby v JSON omylem prislo true (ignoruje se mimo clients).",
+    "- false pro new_clients_q1, leads_vs_sales_6m, lead_pipeline_summary, deal_sales_detail, properties, deals, leads, missing_reconstruction i kdyby v JSON omylem prislo true (ignoruje se mimo clients).",
     "",
     "derived_chart_kind_hint: jen pro clients a kdyz suggest_derived_charts true — volitelne \"bar\" | \"line\" | \"pie\" podle slov jako kolac/podil (pie), casova osa (line), jinak null."
   ].join("\n");

@@ -14,6 +14,7 @@ import {
   Collapse,
   ScrollArea,
   Select,
+  Skeleton,
   Stack,
   Text,
   Textarea,
@@ -24,15 +25,26 @@ import {
 import Link from "next/link";
 import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { useDisclosure } from "@mantine/hooks";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarPreviewStrip } from "@/components/agent/CalendarPreviewStrip";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
 import { ViewingEmailDraftPanel } from "@/components/agent/ViewingEmailDraftPanel";
 import { MarketListingsDataPanelSection } from "@/components/agent/MarketListingsDataPanelSection";
-import { DATASET_IDS } from "@/lib/agent/tools/data-pull-plan";
 import type { FetchMarketListingsInput } from "@/lib/agent/tools/market-listings-tool";
 import type { AgentAnswer, AgentDataPanel as AgentDataPanelModel } from "@/lib/agent/types";
+import {
+  buildViewingEmailPreviewRange,
+  clampViewingMeetDurationMinutes,
+  VIEWING_MEET_DURATION_MAX_MIN,
+  VIEWING_MEET_DURATION_MIN_MIN,
+  viewingSlotDurationMs
+} from "@/lib/agent/viewing-email-calendar-ui";
 import { findViewingEmailDataPanel } from "@/lib/agent/viewing-email-answer-helpers";
+import {
+  applyViewingConfirmedSlotToBody,
+  formatViewingSlotRange,
+  parseViewingConfirmedSlotFromBody
+} from "@/lib/agent/viewing-email-slot-body";
 import {
   companionRunNavCanGoNewer,
   companionRunNavCanGoOlder,
@@ -42,7 +54,12 @@ import {
   companionRunNavGoOlder
 } from "@/lib/ui/companion-run-nav";
 
-export type VizAnswerRunOption = { runId: string; preview: string };
+export type VizAnswerRunOption = {
+  runId: string;
+  preview: string;
+  /** Poslední uživatelská zpráva před touto odpovědí asistenta (Kontext). */
+  userPrompt?: string;
+};
 
 const VIZ_SIDEBAR_KINDS = new Set<AgentDataPanelModel["kind"]>([
   "clients_q1",
@@ -568,12 +585,116 @@ export function MailToolPanel(props: {
   );
 }
 
-export function CalendarToolPanel({ getAccessToken }: { getAccessToken: () => Promise<string | null> }) {
+type CompanionViewingSlotSel = { mode: "none" } | { mode: "slot"; start: string; end: string };
+
+export function CalendarToolPanel({
+  getAccessToken,
+  lastAgentAnswer = null,
+  focusRunId = null,
+  viewingEmailRuns = [],
+  assistantRunIdsInOrder = [],
+  onSelectViewingEmailRun,
+  onViewingEmailBodyChange
+}: {
+  getAccessToken: () => Promise<string | null>;
+  lastAgentAnswer?: AgentAnswer | null;
+  focusRunId?: string | null;
+  viewingEmailRuns?: VizAnswerRunOption[];
+  assistantRunIdsInOrder?: string[];
+  onSelectViewingEmailRun?: (runId: string) => void;
+  onViewingEmailBodyChange?: (body: string) => void;
+}) {
   const [weekOffset, setWeekOffset] = useState(0);
   const [events, setEvents] = useState<CalendarEv[]>([]);
   const [provider, setProvider] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [personalMeetDurationMin, setPersonalMeetDurationMin] = useState(60);
+  const [viewingSlotSel, setViewingSlotSel] = useState<CompanionViewingSlotSel>({ mode: "none" });
+  const [viewingMeetDurationMin, setViewingMeetDurationMin] = useState(60);
+
+  const viewingEmailPanel = useMemo(() => findViewingEmailDataPanel(lastAgentAnswer), [lastAgentAnswer]);
+  const viewingPreviewRange = useMemo(
+    () => buildViewingEmailPreviewRange(viewingEmailPanel),
+    [viewingEmailPanel]
+  );
+
+  const calendarNavRunId = lastAgentAnswer?.runId ?? focusRunId ?? null;
+  const calendarNavCursor = companionRunNavCursor(viewingEmailRuns, calendarNavRunId, assistantRunIdsInOrder);
+  const calendarAnswerCount = viewingEmailRuns.length;
+  const showCalendarAnswerNav = calendarAnswerCount > 1 && onSelectViewingEmailRun != null;
+  const calendarDisplaySlot = companionRunNavDisplayedSlotNumber(calendarNavCursor, calendarAnswerCount);
+  const calendarPreviewText =
+    calendarNavCursor >= 0
+      ? viewingEmailRuns[calendarNavCursor]?.preview
+      : calendarAnswerCount > 0
+        ? viewingEmailRuns[0]?.preview
+        : undefined;
+  const viewingCalendarInteractive = Boolean(viewingEmailPanel && onViewingEmailBodyChange);
+
+  const viewingSlotInitKeyRef = useRef<string>("");
+  useEffect(() => {
+    const slotInitKey = `${lastAgentAnswer?.runId ?? "__no_run__"}|${viewingPreviewRange?.rangeStart ?? "__nr__"}|${viewingPreviewRange?.rangeEnd ?? "__nr__"}`;
+    if (slotInitKey === viewingSlotInitKeyRef.current) return;
+    viewingSlotInitKeyRef.current = slotInitKey;
+    const panel = findViewingEmailDataPanel(lastAgentAnswer);
+    if (!panel || !viewingPreviewRange) {
+      setViewingSlotSel({ mode: "none" });
+      return;
+    }
+    const parsed = parseViewingConfirmedSlotFromBody(panel.draft.body, viewingPreviewRange);
+    if (parsed) {
+      setViewingSlotSel({ mode: "slot", start: parsed.start, end: parsed.end });
+      return;
+    }
+    if (panel.slots.length > 0) {
+      const first = panel.slots[0]!;
+      setViewingSlotSel({ mode: "slot", start: first.start, end: first.end });
+    } else {
+      setViewingSlotSel({ mode: "none" });
+    }
+  }, [lastAgentAnswer?.runId, lastAgentAnswer, viewingPreviewRange]);
+
+  useEffect(() => {
+    if (!viewingEmailPanel || !viewingPreviewRange) return;
+    const parsed = parseViewingConfirmedSlotFromBody(viewingEmailPanel.draft.body, viewingPreviewRange);
+    if (parsed) {
+      setViewingSlotSel((prev) =>
+        prev.mode === "slot" && prev.start === parsed.start && prev.end === parsed.end
+          ? prev
+          : { mode: "slot", start: parsed.start, end: parsed.end }
+      );
+    }
+  }, [viewingEmailPanel?.draft.body, viewingPreviewRange]);
+
+  const viewingCalendarRunIdRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const rid = lastAgentAnswer?.runId ?? "__no_run__";
+    if (!viewingEmailPanel) return;
+    if (rid !== viewingCalendarRunIdRef.current) {
+      viewingCalendarRunIdRef.current = rid;
+      const fromPanel = viewingEmailPanel.meetingDurationMinutes;
+      const fromSlots = viewingSlotDurationMs(viewingEmailPanel.slots) / 60000;
+      setViewingMeetDurationMin(clampViewingMeetDurationMinutes(fromPanel != null ? fromPanel : fromSlots));
+    }
+  }, [lastAgentAnswer?.runId, viewingEmailPanel]);
+
+  const selectedSlotForViewing = useMemo(() => {
+    if (!viewingEmailPanel || viewingSlotSel.mode !== "slot") return null;
+    return { start: viewingSlotSel.start, end: viewingSlotSel.end };
+  }, [viewingEmailPanel, viewingSlotSel]);
+
+  const calendarSelectedSource = useMemo((): "agent" | "manual" | null => {
+    if (viewingSlotSel.mode !== "slot" || !viewingEmailPanel) return null;
+    const { start, end } = viewingSlotSel;
+    return viewingEmailPanel.slots.some((s) => s.start === start && s.end === end) ? "agent" : "manual";
+  }, [viewingEmailPanel, viewingSlotSel]);
+
+  function applyCompanionBodySlot(slot: { start: string; end: string } | null) {
+    if (!viewingEmailPanel || !onViewingEmailBodyChange) return;
+    const next = applyViewingConfirmedSlotToBody(viewingEmailPanel.draft.body, slot, formatViewingSlotRange);
+    onViewingEmailBodyChange(next);
+  }
 
   const range = useMemo(() => {
     const base = addDays(startOfWeekMonday(new Date()), weekOffset * 7);
@@ -614,6 +735,27 @@ export function CalendarToolPanel({ getAccessToken }: { getAccessToken: () => Pr
     [events]
   );
 
+  const stripBusy = useMemo(() => {
+    if (!viewingPreviewRange) return eventBusy;
+    const rs = new Date(viewingPreviewRange.rangeStart).getTime();
+    const re = new Date(viewingPreviewRange.rangeEnd).getTime();
+    if (Number.isNaN(rs) || Number.isNaN(re)) return [...viewingPreviewRange.busy, ...eventBusy];
+    const extra = eventBusy.filter((b) => {
+      const bs = new Date(b.start).getTime();
+      const be = new Date(b.end).getTime();
+      return Number.isFinite(bs) && Number.isFinite(be) && be > rs && bs < re;
+    });
+    return [...viewingPreviewRange.busy, ...extra];
+  }, [viewingPreviewRange, eventBusy]);
+
+  const stripRange =
+    viewingPreviewRange != null
+      ? { rangeStart: viewingPreviewRange.rangeStart, rangeEnd: viewingPreviewRange.rangeEnd }
+      : { rangeStart: range.timeMin, rangeEnd: range.timeMax };
+
+  const stripDurationMin = viewingPreviewRange != null ? viewingMeetDurationMin : personalMeetDurationMin;
+  const setStripDurationMin = viewingPreviewRange != null ? setViewingMeetDurationMin : setPersonalMeetDurationMin;
+
   return (
     <Stack gap="sm">
       <Text size="sm" c="dimmed">
@@ -643,8 +785,70 @@ export function CalendarToolPanel({ getAccessToken }: { getAccessToken: () => Pr
           {err}
         </Text>
       ) : null}
-      {loading ? <Text size="sm">Načítám…</Text> : null}
-      {!loading && !err ? (
+
+      {showCalendarAnswerNav ? (
+        <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
+          <Tooltip label="Starší návrh e-mailu (dříve v konverzaci)">
+            <ActionIcon
+              variant="default"
+              size="sm"
+              aria-label="Starší návrh e-mailu"
+              disabled={!companionRunNavCanGoOlder(calendarNavCursor)}
+              onClick={() => companionRunNavGoOlder(viewingEmailRuns, calendarNavCursor, onSelectViewingEmailRun!)}
+            >
+              <IconChevronLeft size={18} stroke={1.5} />
+            </ActionIcon>
+          </Tooltip>
+          <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+            <Text size="xs" ta="center" fw={600} lineClamp={1}>
+              Kalendář · návrh {calendarDisplaySlot ?? "—"} / {calendarAnswerCount}
+            </Text>
+            {calendarPreviewText ? (
+              <Text size="xs" c="dimmed" ta="center" lineClamp={2} style={{ wordBreak: "break-word" }}>
+                {calendarPreviewText}
+              </Text>
+            ) : null}
+          </Stack>
+          <Tooltip label="Novější návrh e-mailu">
+            <ActionIcon
+              variant="default"
+              size="sm"
+              aria-label="Novější návrh e-mailu"
+              disabled={!companionRunNavCanGoNewer(calendarNavCursor, calendarAnswerCount)}
+              onClick={() => companionRunNavGoNewer(viewingEmailRuns, calendarNavCursor, onSelectViewingEmailRun!)}
+            >
+              <IconChevronRight size={18} stroke={1.5} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      ) : null}
+
+      {showCalendarAnswerNav && !viewingEmailPanel ? (
+        <Text size="xs" c="dimmed">
+          Aktivní běh nemá návrh e-mailu v tomto panelu — šipkami přejděte na jiný dotaz s prohlídkou.
+        </Text>
+      ) : null}
+
+      {loading && !err ? (
+        <div
+          style={{
+            border: "1px solid var(--mantine-color-default-border)",
+            borderRadius: 8,
+            padding: 10,
+            background: "var(--mantine-color-body)"
+          }}
+          aria-busy="true"
+          aria-label="Načítání kalendáře"
+        >
+          <Skeleton height={13} width="55%" mb={10} />
+          <Skeleton height={12} width="88%" mb={14} />
+          <Group justify="space-between" mb="xs" wrap="nowrap" gap="sm">
+            <Skeleton height={14} width={120} />
+            <Skeleton height={32} width={140} radius="sm" />
+          </Group>
+          <Skeleton height={220} radius="sm" />
+        </div>
+      ) : !err ? (
         <div
           style={{
             border: "1px solid var(--mantine-color-default-border)",
@@ -653,135 +857,118 @@ export function CalendarToolPanel({ getAccessToken }: { getAccessToken: () => Pr
             background: "var(--mantine-color-body)"
           }}
         >
-          <Text size="xs" fw={600} mb={8}>
-            Přehled (mřížka 8:00–18:00, krok 30 min — stejně jako u návrhu prohlídky v chatu)
-          </Text>
-          <Text size="xs" c="dimmed" mb={8}>
-            Šedě jsou naplánované úseky z kalendáře; u e-mailu k prohlídce agent zeleně vyznačí navrhované sloty.
-          </Text>
+          {viewingPreviewRange && viewingEmailPanel ? (
+            <>
+              <Text size="xs" fw={600} mb={4}>
+                Termín prohlídky v tomto dotazu
+              </Text>
+              <Text size="xs" c="dimmed" mb={8}>
+                Zvýraznění odpovídá řádku „Termín prohlídky“ v těle mailu (záložka Maily). Zeleně = návrh agenta (A),
+                klik respektuje délku schůzky.
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text size="xs" fw={600} mb={8}>
+                Váš kalendář — přehled 8:00–18:00 (krok 30 min)
+              </Text>
+              <Text size="xs" c="dimmed" mb={8}>
+                Šedě jsou naplánované úseky. Pruhovaná volná pole: při zvolené délce schůzky by začátek kolidoval s
+                obsazením (jen náhled, bez výběru slotu).
+              </Text>
+            </>
+          )}
+          <Group justify="space-between" align="center" wrap="wrap" gap="sm" mb="xs">
+            <Text size="xs" fw={600}>
+              {viewingPreviewRange && viewingEmailPanel ? "Délka schůzky (pro klik na volno)" : "Délka schůzky (náhled kolizí)"}
+            </Text>
+            <Group gap={6} wrap="nowrap">
+              <ActionIcon
+                type="button"
+                variant="default"
+                size="sm"
+                aria-label="Zkrátit o 15 minut"
+                disabled={stripDurationMin <= VIEWING_MEET_DURATION_MIN_MIN}
+                onClick={() => setStripDurationMin((m) => clampViewingMeetDurationMinutes(m - 15))}
+              >
+                <span style={{ fontSize: 16, fontWeight: 600, lineHeight: 1 }}>−</span>
+              </ActionIcon>
+              <Text size="sm" w={76} ta="center" fw={600}>
+                {stripDurationMin} min
+              </Text>
+              <ActionIcon
+                type="button"
+                variant="default"
+                size="sm"
+                aria-label="Prodloužit o 15 minut"
+                disabled={stripDurationMin >= VIEWING_MEET_DURATION_MAX_MIN}
+                onClick={() => setStripDurationMin((m) => clampViewingMeetDurationMinutes(m + 15))}
+              >
+                <span style={{ fontSize: 16, fontWeight: 600, lineHeight: 1 }}>+</span>
+              </ActionIcon>
+            </Group>
+          </Group>
           <CalendarPreviewStrip
-            busy={eventBusy}
-            proposedSlots={[]}
-            rangeStart={range.timeMin}
-            rangeEnd={range.timeMax}
+            busy={viewingPreviewRange ? stripBusy : eventBusy}
+            proposedSlots={viewingEmailPanel?.slots ?? []}
+            rangeStart={stripRange.rangeStart}
+            rangeEnd={stripRange.rangeEnd}
+            durationMs={stripDurationMin * 60 * 1000}
+            selectedSlot={viewingEmailPanel ? selectedSlotForViewing : null}
+            selectedSource={viewingEmailPanel ? calendarSelectedSource : null}
+            previewDurationCollisions={!viewingEmailPanel}
+            onSlotPick={
+              viewingCalendarInteractive
+                ? (start, end) => {
+                    setViewingSlotSel({ mode: "slot", start, end });
+                    applyCompanionBodySlot({ start, end });
+                  }
+                : undefined
+            }
           />
+          {viewingCalendarInteractive ? (
+            <Button
+              type="button"
+              variant="default"
+              size="xs"
+              mt="sm"
+              onClick={() => {
+                setViewingSlotSel({ mode: "none" });
+                applyCompanionBodySlot(null);
+              }}
+            >
+              Odebrat řádek „Termín prohlídky“ z těla
+            </Button>
+          ) : null}
         </div>
       ) : null}
       <ScrollArea.Autosize mah={400} type="auto">
         <Stack gap={6}>
-          {events.map((e) => (
-            <div key={e.id} style={{ padding: 8, borderRadius: 8, border: "1px solid var(--mantine-color-default-border)" }}>
-              <Text size="sm" fw={600}>
-                {e.summary}
-              </Text>
-              <Text size="xs" c="dimmed">
-                {new Date(e.start).toLocaleString("cs-CZ")} – {new Date(e.end).toLocaleString("cs-CZ")}
-              </Text>
-              {e.htmlLink ? (
-                <Anchor href={e.htmlLink} target="_blank" rel="noreferrer" size="xs">
-                  Otevřít v kalendáři
-                </Anchor>
-              ) : null}
-            </div>
-          ))}
+          {loading && !err ? (
+            <>
+              {Array.from({ length: 5 }, (_, i) => (
+                <Skeleton key={i} height={76} radius={8} />
+              ))}
+            </>
+          ) : (
+            events.map((e) => (
+              <div key={e.id} style={{ padding: 8, borderRadius: 8, border: "1px solid var(--mantine-color-default-border)" }}>
+                <Text size="sm" fw={600}>
+                  {e.summary}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {new Date(e.start).toLocaleString("cs-CZ")} – {new Date(e.end).toLocaleString("cs-CZ")}
+                </Text>
+                {e.htmlLink ? (
+                  <Anchor href={e.htmlLink} target="_blank" rel="noreferrer" size="xs">
+                    Otevřít v kalendáři
+                  </Anchor>
+                ) : null}
+              </div>
+            ))
+          )}
           {!loading && events.length === 0 ? <Text size="sm" c="dimmed">Žádné události v tomto týdnu.</Text> : null}
         </Stack>
-      </ScrollArea.Autosize>
-    </Stack>
-  );
-}
-
-const DATA_OPTIONS = DATASET_IDS.map((id) => ({ value: id, label: id }));
-
-export function DataPresetPanel({ getAccessToken }: { getAccessToken: () => Promise<string | null> }) {
-  const [dataset, setDataset] = useState<string>(DATASET_IDS[0]!);
-  const [narrow, setNarrow] = useState("");
-  const [limit, setLimit] = useState(80);
-  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
-  const [source, setSource] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function run() {
-    setLoading(true);
-    setErr(null);
-    const token = await getAccessToken();
-    if (!token) {
-      setErr("Nejste přihlášeni.");
-      setLoading(false);
-      return;
-    }
-    const res = await fetch("/api/data/preset-query", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        dataset,
-        row_text_narrowing: narrow.trim() || null,
-        limit
-      })
-    });
-    const data = (await res.json()) as {
-      rows?: Record<string, unknown>[];
-      source?: string;
-      error?: string;
-    };
-    setLoading(false);
-    if (!res.ok) {
-      setErr(data.error ?? "Dotaz selhal.");
-      return;
-    }
-    setRows(data.rows ?? []);
-    setSource(data.source ?? "");
-  }
-
-  const keys = rows[0] ? Object.keys(rows[0]) : [];
-
-  return (
-    <Stack gap="sm">
-      <Text size="sm" c="dimmed">
-        Předdefinované datasety (bez vlastního SQL).
-      </Text>
-      <Select label="Dataset" data={DATA_OPTIONS} value={dataset} onChange={(v) => setDataset(v ?? DATASET_IDS[0]!)} size="xs" />
-      <TextInput label="Textové zúžení (volitelně)" value={narrow} onChange={(e) => setNarrow(e.currentTarget.value)} size="xs" />
-      <NumberInput label="Limit řádků" value={limit} onChange={(v) => setLimit(typeof v === "number" ? v : 80)} min={1} max={200} size="xs" />
-      <Button size="xs" onClick={() => void run()} loading={loading}>
-        Spustit dotaz
-      </Button>
-      {err ? (
-        <Text size="sm" c="red">
-          {err}
-        </Text>
-      ) : null}
-      {source ? (
-        <Text size="xs" c="dimmed">
-          {source}
-        </Text>
-      ) : null}
-      <ScrollArea.Autosize mah={320} type="auto">
-        <div style={{ overflow: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr>
-                {keys.map((k) => (
-                  <th key={k} style={{ textAlign: "left", padding: 6, borderBottom: "1px solid #e2e8f0" }}>
-                    {k}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, ri) => (
-                <tr key={ri}>
-                  {keys.map((k) => (
-                    <td key={k} style={{ padding: 6, borderBottom: "1px solid #f1f5f9", maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {row[k] == null ? "—" : String(row[k])}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       </ScrollArea.Autosize>
     </Stack>
   );
@@ -1014,3 +1201,5 @@ export function VizPanel(props: {
     </Stack>
   );
 }
+
+export { DataPresetPanel } from "./DataBrowserPanel";

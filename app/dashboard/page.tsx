@@ -157,6 +157,29 @@ export default function DashboardPage() {
     return out;
   }, [messages]);
 
+  /** Odpovědi asistenta + předchozí otázka uživatele — šipky a Kontext (strom volání). */
+  const assistantAnswerRuns = useMemo(() => {
+    const out: { runId: string; preview: string; userPrompt?: string }[] = [];
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i]!;
+      if (m.role !== "assistant") continue;
+      const runId = (m.metadata as { runId?: string }).runId;
+      if (typeof runId !== "string" || !runId.trim()) continue;
+      let userPrompt: string | undefined;
+      for (let j = i - 1; j >= 0; j--) {
+        if (messages[j]!.role === "user") {
+          userPrompt = messages[j]!.content.replace(/\s+/g, " ").trim() || undefined;
+          break;
+        }
+      }
+      const full = m.content.replace(/\s+/g, " ").trim();
+      const short = full.slice(0, 56);
+      const preview = full.length > 56 ? `${short}…` : short || "Odpověď asistenta";
+      out.push({ runId, preview, userPrompt });
+    }
+    return out;
+  }, [messages]);
+
   useEffect(() => {
     if (!activeConversationId?.trim() || !companionRunId?.trim()) return;
     persistCompanionRunForConversation(activeConversationId, companionRunId);
@@ -859,6 +882,7 @@ export default function DashboardPage() {
             vizAnswerRuns={vizAnswerRuns}
             viewingEmailRuns={viewingEmailRuns}
             assistantRunIdsInOrder={assistantRunIdsInOrder}
+            assistantAnswerRuns={assistantAnswerRuns}
             onSelectVizAnswerRun={setCompanionRunId}
             onNavigateConversation={navigateToConversation}
             expandedWidthPx={companionWidthPx}

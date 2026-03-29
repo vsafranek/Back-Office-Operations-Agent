@@ -47,8 +47,16 @@ export async function GET(request: Request) {
 
     const tokenJson = (await tokenRes.json()) as Record<string, unknown>;
     if (!tokenRes.ok) {
-      const desc = typeof tokenJson.error_description === "string" ? tokenJson.error_description : JSON.stringify(tokenJson);
-      return Response.redirect(`${settingsUrl}?oauth=error&provider=google&reason=${encodeURIComponent(desc)}`);
+      const errCode = typeof tokenJson.error === "string" ? tokenJson.error : "";
+      const desc =
+        typeof tokenJson.error_description === "string"
+          ? tokenJson.error_description
+          : errCode || JSON.stringify(tokenJson);
+      const hint =
+        errCode === "redirect_uri_mismatch"
+          ? `${desc} Zkontrolujte v Google Cloud → Credentials, zda přesně odpovídá redirect URI (včetně http/https a portu) adrese: ${redirectUri}.`
+          : desc;
+      return Response.redirect(`${settingsUrl}?oauth=error&provider=google&reason=${encodeURIComponent(hint)}`);
     }
 
     const accessToken = typeof tokenJson.access_token === "string" ? tokenJson.access_token : null;

@@ -11,6 +11,49 @@ import {
 import { buildClientsTableQuery } from "@/lib/agent/tools/clients-table-query";
 import type { ChartKind } from "@/lib/agent/types";
 
+function embeddedRecord(v: unknown): Record<string, unknown> | null {
+  if (typeof v === "object" && v !== null && !Array.isArray(v)) return v as Record<string, unknown>;
+  return null;
+}
+
+/** Zploštění FK z PostgREST — v UI místo holých UUID klient / nemovitost / lead. */
+function flattenDealRow(row: Record<string, unknown>): Record<string, unknown> {
+  const clients = embeddedRecord(row.clients);
+  const properties = embeddedRecord(row.properties);
+  const leadEmb = embeddedRecord(row.leads);
+  const { clients: _c, properties: _p, leads: _l, ...rest } = row;
+  return {
+    ...rest,
+    client_full_name: typeof clients?.full_name === "string" ? clients.full_name : null,
+    client_email: typeof clients?.email === "string" ? clients.email : null,
+    client_phone: typeof clients?.phone === "string" ? clients.phone : null,
+    property_title: typeof properties?.title === "string" ? properties.title : null,
+    property_internal_ref: typeof properties?.internal_ref === "string" ? properties.internal_ref : null,
+    property_kind_label: typeof properties?.property_kind === "string" ? properties.property_kind : null,
+    property_listed_price: properties?.listed_price ?? null,
+    lead_status: typeof leadEmb?.status === "string" ? leadEmb.status : null,
+    lead_expected_value_czk: leadEmb?.expected_value_czk ?? null,
+    lead_source_channel: typeof leadEmb?.source_channel === "string" ? leadEmb.source_channel : null,
+    lead_notes: typeof leadEmb?.notes === "string" ? leadEmb.notes : null
+  };
+}
+
+function flattenLeadRow(row: Record<string, unknown>): Record<string, unknown> {
+  const clients = embeddedRecord(row.clients);
+  const properties = embeddedRecord(row.properties);
+  const { clients: _c, properties: _p, ...rest } = row;
+  return {
+    ...rest,
+    client_full_name: typeof clients?.full_name === "string" ? clients.full_name : null,
+    client_email: typeof clients?.email === "string" ? clients.email : null,
+    client_phone: typeof clients?.phone === "string" ? clients.phone : null,
+    property_title: typeof properties?.title === "string" ? properties.title : null,
+    property_internal_ref: typeof properties?.internal_ref === "string" ? properties.internal_ref : null,
+    property_kind_label: typeof properties?.property_kind === "string" ? properties.property_kind : null,
+    property_listed_price: properties?.listed_price ?? null
+  };
+}
+
 /** Identifikátor zvoleného datového zdroje (pro logy a UI); doplňuje ho plán dotahu, ne soupis presetů. */
 export type SqlQueryResultMeta = {
   preset: string;
@@ -49,6 +92,79 @@ async function executePlan(plan: DataPullPlan, limit: number) {
       if (error) throw new Error(`clients query failed: ${error.message}`);
       return { rows: data ?? [], source: sourceLabel };
     }
+    case "properties": {
+      let { data, error } = await supabase
+        .from("properties")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(fetchCap);
+      if (error) throw new Error(`properties query failed: ${error.message}`);
+      let rows = (data ?? []) as Record<string, unknown>[];
+      if (narrowing) rows = narrowRowsByText(rows, narrowing).slice(0, limit);
+      else rows = rows.slice(0, limit);
+      const sourceLabel =
+        narrowing != null ? `public.properties · text «${narrowing}»` : "public.properties";
+      return { rows, source: sourceLabel };
+    }
+    case "deals": {
+      let { data, error } = await supabase
+        .from("deals")
+        .select(
+          `
+          id,
+          property_id,
+          client_id,
+          lead_id,
+          sold_price,
+          sold_at,
+          created_at,
+          status,
+          commission_czk,
+          commission_rate_pct,
+          deal_source,
+          clients ( full_name, email, phone ),
+          properties ( title, internal_ref, property_kind, listed_price ),
+          leads ( status, expected_value_czk, source_channel, notes )
+        `
+        )
+        .order("sold_at", { ascending: false, nullsFirst: false })
+        .limit(fetchCap);
+      if (error) throw new Error(`deals query failed: ${error.message}`);
+      let rows = (data ?? []).map((r) => flattenDealRow(r as Record<string, unknown>));
+      if (narrowing) rows = narrowRowsByText(rows, narrowing).slice(0, limit);
+      else rows = rows.slice(0, limit);
+      const sourceLabel = narrowing != null ? `public.deals · text «${narrowing}»` : "public.deals";
+      return { rows, source: sourceLabel };
+    }
+    case "leads": {
+      let { data, error } = await supabase
+        .from("leads")
+        .select(
+          `
+          id,
+          client_id,
+          property_id,
+          status,
+          source_channel,
+          created_at,
+          updated_at,
+          last_contact_at,
+          expected_value_czk,
+          lost_reason,
+          notes,
+          clients ( full_name, email, phone ),
+          properties ( title, internal_ref, property_kind, listed_price )
+        `
+        )
+        .order("created_at", { ascending: false })
+        .limit(fetchCap);
+      if (error) throw new Error(`leads query failed: ${error.message}`);
+      let rows = (data ?? []).map((r) => flattenLeadRow(r as Record<string, unknown>));
+      if (narrowing) rows = narrowRowsByText(rows, narrowing).slice(0, limit);
+      else rows = rows.slice(0, limit);
+      const sourceLabel = narrowing != null ? `public.leads · text «${narrowing}»` : "public.leads";
+      return { rows, source: sourceLabel };
+    }
     case "leads_vs_sales_6m": {
       const { data, error } = await supabase.from("vw_leads_vs_sales_6m").select("*").limit(limit);
       if (error) throw new Error(`vw_leads_vs_sales_6m query failed: ${error.message}`);
@@ -58,6 +174,16 @@ async function executePlan(plan: DataPullPlan, limit: number) {
       }
       rows = rows.slice(0, limit);
       return { rows, source: "vw_leads_vs_sales_6m" };
+    }
+    case "lead_pipeline_summary": {
+      const { data, error } = await supabase.from("vw_lead_pipeline_summary").select("*").limit(fetchCap);
+      if (error) throw new Error(`vw_lead_pipeline_summary query failed: ${error.message}`);
+      let rows = data ?? [];
+      if (narrowing) rows = narrowRowsByText(rows, narrowing).slice(0, limit);
+      else rows = rows.slice(0, limit);
+      const sourceLabel =
+        narrowing != null ? `vw_lead_pipeline_summary · text «${narrowing}»` : "vw_lead_pipeline_summary";
+      return { rows, source: sourceLabel };
     }
     case "deal_sales_detail": {
       let { data, error } = await supabase

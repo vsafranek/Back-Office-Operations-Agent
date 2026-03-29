@@ -14,7 +14,6 @@ import {
   List,
   Modal,
   Select,
-  SegmentedControl,
   Stack,
   Tabs,
   Text,
@@ -692,53 +691,51 @@ select cron.schedule(
           setIntegrationConnectModalError(null);
           integrationConnectHandlers.close();
         }}
-        title="Připojit účet pro kalendář a poštu"
+        title={
+          integrationConnectProvider === "google" ? "Připojit Google" : "Připojit Microsoft 365"
+        }
         size="lg"
         radius="md"
       >
         <Stack gap="md">
           <Text size="sm" c="dimmed">
-            Vyberte poskytovatele a potvrďte pokračování. Otevře se přihlášení u Google nebo Microsoftu a poté se vrátíte zpět do
-            aplikace.
+            {integrationConnectProvider === "google"
+              ? "Po potvrzení vás přesměrujeme na Google. Po návratu bude účet zobrazen výše v integracích."
+              : "Po potvrzení vás přesměrujeme na Microsoft. Po návratu bude účet zobrazen výše v integracích."}
           </Text>
 
           <div>
             <Text size="sm" fw={600} mb={6}>
-              Poskytovatel
+              Informace o oprávněních
             </Text>
-            <SegmentedControl
-              fullWidth
-              value={integrationConnectProvider}
-              onChange={(v) => {
-                setIntegrationConnectProvider(v as "google" | "microsoft");
-                setIntegrationConnectConsent(false);
-                setIntegrationConnectModalError(null);
-              }}
-              data={[
-                { label: "Google", value: "google" },
-                { label: "Microsoft 365", value: "microsoft" }
-              ]}
-            />
+            {integrationConnectProvider === "google" ? (
+              <List size="sm" spacing="xs" c="dimmed">
+                <List.Item>
+                  <strong>Google Calendar</strong> — přístup k vašim kalendářům: prohlížení i úpravy událostí (stejné rozhraní API jako
+                  plný přístup k Calendaru dle zvoleného scope v Google účtu).
+                </List.Item>
+                <List.Item>
+                  <strong>Gmail</strong> — čtení a úpravy schránky včetně konceptů; odeslání zásilek dál probíhá v aplikaci podle vašeho
+                  schválení.
+                </List.Item>
+              </List>
+            ) : (
+              <List size="sm" spacing="xs" c="dimmed">
+                <List.Item>
+                  <strong>Outlook / kalendář</strong> — čtení i zápis kalendáře (Microsoft Graph, Calendars.ReadWrite).
+                </List.Item>
+                <List.Item>
+                  <strong>Pošta</strong> — čtení a zápis Outlooku (Mail.ReadWrite).
+                </List.Item>
+                <List.Item>
+                  <strong>Obnovení relace</strong> — offline_access a základní profil (openid, email).
+                </List.Item>
+              </List>
+            )}
           </div>
 
-          <Text size="sm" fw={600}>
-            Požadovaná oprávnění
-          </Text>
-          {integrationConnectProvider === "google" ? (
-            <List size="sm" spacing="xs" c="dimmed">
-              <List.Item>Google Kalendář — čtení (volné termíny, události)</List.Item>
-              <List.Item>Gmail — úprava schránky včetně konceptů a odeslání po vašem schválení v aplikaci</List.Item>
-            </List>
-          ) : (
-            <List size="sm" spacing="xs" c="dimmed">
-              <List.Item>Microsoft Graph — čtení kalendáře (Outlook)</List.Item>
-              <List.Item>Microsoft Graph — čtení a zápis pošty (Outlook)</List.Item>
-              <List.Item>Obnovování přístupu na pozadí (offline)</List.Item>
-            </List>
-          )}
-
           <Checkbox
-            label="Rozumím a chci pokračovat na přihlášení u vybraného poskytovatele."
+            label="Rozumím výše uvedeným oprávněním a chci pokračovat na přihlášení u poskytovatele."
             checked={integrationConnectConsent}
             onChange={(e) => {
               const c = e.currentTarget.checked;
@@ -751,87 +748,6 @@ select cron.schedule(
               {integrationConnectModalError}
             </Alert>
           ) : null}
-
-          <Accordion variant="contained" radius="md">
-            <Accordion.Item value="ms-admin">
-              <Accordion.Control>Pro správce: Microsoft Entra ID (Azure)</Accordion.Control>
-              <Accordion.Panel>
-                <Stack gap="sm">
-                  <Text size="sm">
-                    V{" "}
-                    <Anchor href="https://entra.microsoft.com/" target="_blank" rel="noreferrer">
-                      Microsoft Entra admin center
-                    </Anchor>{" "}
-                    → <strong>Identity</strong> → <strong>Applications</strong> → <strong>App registrations</strong> →{" "}
-                    <strong>New registration</strong>.
-                  </Text>
-                  <List type="ordered" size="sm" spacing="xs">
-                    <List.Item>
-                      Typ účtů: podle potřeby (např. více tenantů + osobní účty odpovídá tenantovi{" "}
-                      <Code>common</Code> v env).
-                    </List.Item>
-                    <List.Item>
-                      <strong>Redirect URI (Web)</strong> — přidejte <em>obě</em> adresy (jedna Entra aplikace může sloužit pro
-                      integraci i přihlášení):
-                      <List size="sm" mt="xs" withPadding>
-                        <List.Item>
-                          Integrace (Next):{" "}
-                          <Code>
-                            {"{NEXT_PUBLIC_APP_URL nebo origin}"}/api/integrations/oauth/microsoft/callback
-                          </Code>
-                        </List.Item>
-                        <List.Item>
-                          Přihlášení (Supabase): <Code>https://{"{SUPABASE_REF}"}.supabase.co/auth/v1/callback</Code>
-                        </List.Item>
-                      </List>
-                      <Text size="xs" c="dimmed" mt={4}>
-                        Lokální integrace např. <Code>http://localhost:3000/…/microsoft/callback</Code>. V Supabase → Authentication →
-                        Providers → <strong>Azure</strong> zadejte stejné Client ID, secret a tenant jako v env.
-                      </Text>
-                    </List.Item>
-                    <List.Item>
-                      V přehledu aplikace zkopírujte <strong>Application (client) ID</strong> → env{" "}
-                      <Code>MICROSOFT_OAUTH_CLIENT_ID</Code>.
-                    </List.Item>
-                    <List.Item>
-                      <strong>Certificates &amp; secrets</strong> → nový client secret → env{" "}
-                      <Code>MICROSOFT_OAUTH_CLIENT_SECRET</Code>.
-                    </List.Item>
-                    <List.Item>
-                      <strong>API permissions</strong> → Microsoft Graph → <em>Delegated</em>:{" "}
-                      <Code>Calendars.ReadWrite</Code> (nebo Read), <Code>Mail.ReadWrite</Code>, <Code>offline_access</Code>,{" "}
-                      <Code>openid</Code>, <Code>profile</Code>, <Code>email</Code>. U firemních tenantů často{" "}
-                      <strong>Grant admin consent</strong>.
-                    </List.Item>
-                    <List.Item>
-                      Volitelně <Code>MICROSOFT_OAUTH_TENANT</Code>: výchozí <Code>common</Code>, nebo{" "}
-                      <Code>organizations</Code>, nebo konkrétní ID tenanta.
-                    </List.Item>
-                  </List>
-                  <Text size="xs" c="dimmed">
-                    Bez ID a secretu server vrátí chybu 501. Scopes v kódu: viz{" "}
-                    <Code>getMicrosoftOAuthScopes()</Code> v repozitáři.
-                  </Text>
-                </Stack>
-              </Accordion.Panel>
-            </Accordion.Item>
-            <Accordion.Item value="google-admin">
-              <Accordion.Control>Pro správce: Google Cloud Console</Accordion.Control>
-              <Accordion.Panel>
-                <List type="ordered" size="sm" spacing="xs">
-                  <List.Item>Projekt → APIs &amp; Services → Credentials → OAuth 2.0 Client (Web application).</List.Item>
-                  <List.Item>
-                    Authorized redirect URIs: integrační callback <Code>{"{origin}"}/api/integrations/oauth/google/callback</Code> a
-                    pro přihlášení přes Supabase také <Code>https://{"{SUPABASE_REF}"}.supabase.co/auth/v1/callback</Code>.
-                  </List.Item>
-                  <List.Item>
-                    Client ID a client secret vložte do env <Code>GOOGLE_OAUTH_CLIENT_ID</Code> a{" "}
-                    <Code>GOOGLE_OAUTH_CLIENT_SECRET</Code>.
-                  </List.Item>
-                </List>
-              </Accordion.Panel>
-            </Accordion.Item>
-          </Accordion>
 
           <Group justify="flex-end" mt="md">
             <Button
@@ -848,7 +764,11 @@ select cron.schedule(
               loading={connecting === integrationConnectProvider}
               disabled={!integrationConnectConsent || connecting !== null}
             >
-              {connecting === integrationConnectProvider ? "Přesměrovávám…" : "Přihlásit se u poskytovatele"}
+              {connecting === integrationConnectProvider
+                ? "Přesměrovávám…"
+                : integrationConnectProvider === "google"
+                  ? "Pokračovat na Google"
+                  : "Pokračovat na Microsoft"}
             </Button>
           </Group>
         </Stack>

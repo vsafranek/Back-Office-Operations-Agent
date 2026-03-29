@@ -144,9 +144,17 @@ export async function runAnalyticsSubAgent(params: {
         ].join(" ")
       : data.preset === "leads_vs_sales_6m"
         ? "Časové okno: view posledních ~6 měsíců — leady (všechny) vs. prodané byty (obchody bez cancelled, nemovitost typu byt nebo bez vazby na nemovitost); není libovolné období od–do zadané uživatelem."
-        : data.preset === "deal_sales_detail"
-          ? "Dataset: jednotlivé uzavřené obchody (kdo koupil, jaká nemovitost, datum, cena) z interního pohledu vw_deal_sales_detail."
-          : "";
+        : data.preset === "lead_pipeline_summary"
+          ? "Dataset: agregovaný pohled leadů podle stavu (vw_lead_pipeline_summary) — počty, součet expected_value_czk, rozsah created_at v každé skupině."
+          : data.preset === "deal_sales_detail"
+            ? "Dataset: jednotlivé uzavřené obchody (kdo koupil, jaká nemovitost, datum, cena) z interního pohledu vw_deal_sales_detail."
+            : data.preset === "properties"
+              ? "Dataset: řádky tabulky public.properties (portfolio; adresa v jsonb)."
+              : data.preset === "deals"
+                ? "Dataset: řádky public.deals s doplněnými údaji o klientovi, nemovitosti a leadu (JOIN v dotazu, ne holá UUID)."
+                : data.preset === "leads"
+                  ? "Dataset: řádky public.leads s rozvinutým klientem a nemovitostí."
+                  : "";
 
   const sampleRows = data.rows.slice(0, 50);
   const pngList =
