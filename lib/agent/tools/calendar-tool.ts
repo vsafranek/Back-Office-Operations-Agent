@@ -1,6 +1,9 @@
 import { google } from "googleapis";
 import { getGoogleAuthForUser } from "@/lib/integrations/google-user-auth";
-import { browseMicrosoftCalendarAvailability } from "@/lib/integrations/microsoft-graph-calendar";
+import {
+  browseMicrosoftCalendarAvailability,
+  listMicrosoftCalendarEvents
+} from "@/lib/integrations/microsoft-graph-calendar";
 import { fetchUserIntegrationSettings } from "@/lib/integrations/user-integration-settings";
 
 export type CalendarTimeRange = { start: string; end: string };
@@ -100,6 +103,61 @@ export function buildViewingSlotsFromCalendarAvailability(
   }
 
   return slots;
+}
+
+export type CalendarEventListItem = {
+  id: string;
+  summary: string;
+  start: string;
+  end: string;
+  htmlLink?: string;
+};
+
+/**
+ * Události v kalendáři uživatele (Google nebo Microsoft podle calendar_provider).
+ */
+export async function listUserCalendarEvents(params: {
+  userId: string;
+  timeMin: string;
+  timeMax: string;
+}): Promise<{ events: CalendarEventListItem[]; provider: "google" | "microsoft" }> {
+  const settings = await fetchUserIntegrationSettings(params.userId);
+  const calendarProvider = settings?.calendar_provider ?? "google";
+
+  if (calendarProvider === "microsoft") {
+    const events = await listMicrosoftCalendarEvents({
+      userId: params.userId,
+      timeMin: params.timeMin,
+      timeMax: params.timeMax
+    });
+    return { events, provider: "microsoft" };
+  }
+
+  const { auth, calendarId } = await getGoogleAuthForUser({
+    userId: params.userId,
+    scopes: ["https://www.googleapis.com/auth/calendar.readonly"]
+  });
+  const calendar = google.calendar({ version: "v3", auth });
+  const res = await calendar.events.list({
+    calendarId,
+    timeMin: params.timeMin,
+    timeMax: params.timeMax,
+    singleEvents: true,
+    orderBy: "startTime",
+    maxResults: 50
+  });
+
+  const events: CalendarEventListItem[] = (res.data.items ?? [])
+    .filter((e) => e.id && (e.start?.dateTime || e.start?.date))
+    .map((e) => ({
+      id: e.id!,
+      summary: e.summary ?? "(Bez názvu)",
+      start: e.start?.dateTime ?? e.start?.date ?? "",
+      end: e.end?.dateTime ?? e.end?.date ?? "",
+      htmlLink: e.htmlLink ?? undefined
+    }));
+
+  return { events, provider: "google" };
 }
 
 export async function suggestViewingSlots(params: {

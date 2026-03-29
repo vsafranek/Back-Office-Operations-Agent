@@ -107,3 +107,44 @@ export async function browseMicrosoftCalendarAvailability(params: {
     rangeEnd: timeMax
   };
 }
+
+export type MicrosoftCalendarEventRow = {
+  id: string;
+  summary: string;
+  start: string;
+  end: string;
+  htmlLink?: string;
+};
+
+/**
+ * Seznam událostí v rozmezí (Outlook / Microsoft 365).
+ */
+export async function listMicrosoftCalendarEvents(params: {
+  userId: string;
+  timeMin: string;
+  timeMax: string;
+}): Promise<MicrosoftCalendarEventRow[]> {
+  const accessToken = await getMicrosoftAccessTokenForUser({ userId: params.userId });
+  const min = encodeURIComponent(params.timeMin);
+  const max = encodeURIComponent(params.timeMax);
+  const path = `/me/calendar/calendarView?startDateTime=${min}&endDateTime=${max}&$orderby=start/dateTime&$top=50`;
+
+  type Row = {
+    id?: string;
+    subject?: string;
+    start?: { dateTime?: string; date?: string };
+    end?: { dateTime?: string; date?: string };
+    webLink?: string;
+  };
+  const data = await graphFetchJson<{ value?: Row[] }>(accessToken, path);
+
+  return (data.value ?? [])
+    .map((e) => ({
+      id: e.id ?? "",
+      summary: e.subject ?? "(Bez názvu)",
+      start: e.start?.dateTime ?? e.start?.date ?? "",
+      end: e.end?.dateTime ?? e.end?.date ?? "",
+      htmlLink: e.webLink
+    }))
+    .filter((e) => e.id && e.start);
+}

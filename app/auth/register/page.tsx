@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { Anchor, Button, Divider, Paper, PasswordInput, Stack, Text, TextInput, Title } from "@mantine/core";
 import Link from "next/link";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
@@ -59,35 +60,59 @@ export default function RegisterPage() {
   }
 
   return (
-    <main style={{ maxWidth: 420 }}>
-      <h1>Registrace</h1>
-      <p style={{ fontSize: 14, color: "#64748b", marginTop: 0 }}>
+    <Paper shadow="sm" p="xl" radius="md" withBorder>
+      <Title order={2}>Registrace</Title>
+      <Text size="sm" c="dimmed" mt="xs">
         Založte účet e-mailem (ověření e-mailu podle nastavení Supabase) nebo přes Google. Kalendář a poštu
-        připojíte později v <Link href="/settings">Nastavení integrací</Link>.
-      </p>
-      <form onSubmit={handleRegister} style={{ display: "grid", gap: 12 }}>
-        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="E-mail" type="email" required />
-        <input
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Heslo"
-          type="password"
-          required
-          minLength={8}
-        />
-        <button type="submit" disabled={loading}>
-          {loading ? "Registruji..." : "Registrovat e-mailem"}
-        </button>
+        připojíte později v{" "}
+        <Anchor component={Link} href="/settings" size="sm">
+          Nastavení integrací
+        </Anchor>
+        .
+      </Text>
+
+      <form onSubmit={handleRegister}>
+        <Stack gap="md" mt="lg">
+          <TextInput
+            label="E-mail"
+            value={email}
+            onChange={(e) => setEmail(e.currentTarget.value)}
+            type="email"
+            required
+            autoComplete="email"
+          />
+          <PasswordInput
+            label="Heslo"
+            value={password}
+            onChange={(e) => setPassword(e.currentTarget.value)}
+            required
+            minLength={8}
+            autoComplete="new-password"
+          />
+          <Button type="submit" fullWidth loading={loading}>
+            {loading ? "Registruji..." : "Registrovat e-mailem"}
+          </Button>
+        </Stack>
       </form>
-      <div style={{ marginTop: 12 }}>
-        <button type="button" onClick={handleGoogleRegister} disabled={googleLoading}>
-          {googleLoading ? "Přesměrovávám na Google..." : "Registrovat / Přihlásit přes Google"}
-        </button>
-      </div>
-      <p style={{ marginTop: 12 }}>
-        Už máš účet? <a href="/auth/login">Přihlásit se</a>
-      </p>
-      {message ? <p>{message}</p> : null}
-    </main>
+
+      <Divider label="nebo" labelPosition="center" my="lg" />
+
+      <Button variant="light" fullWidth onClick={() => void handleGoogleRegister()} loading={googleLoading}>
+        {googleLoading ? "Přesměrovávám na Google..." : "Registrovat / Přihlásit přes Google"}
+      </Button>
+
+      <Text size="sm" mt="lg">
+        Už máš účet?{" "}
+        <Anchor component={Link} href="/auth/login" size="sm">
+          Přihlásit se
+        </Anchor>
+      </Text>
+
+      {message ? (
+        <Text c={message.includes("proběhla") ? "dimmed" : "red"} size="sm" mt="md">
+          {message}
+        </Text>
+      ) : null}
+    </Paper>
   );
 }

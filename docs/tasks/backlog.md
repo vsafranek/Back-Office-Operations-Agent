@@ -1,6 +1,6 @@
 # Back Office Agent Backlog
 
-Last updated: 2026-03-27 (provoz cronu naplánovaných úloh + backlog sync)
+Last updated: 2026-03-28 (chat bubbles, trace v bublině, SegmentedControl agent)
 
 ## How to use
 - `status`: `todo` | `in_progress` | `blocked` | `done`
@@ -31,9 +31,12 @@ Last updated: 2026-03-27 (provoz cronu naplánovaných úloh + backlog sync)
 | BOA-018 | Excel (.xlsx) z analytiky + extra listy Properties/Leads | done | P1 | `exceljs`, `generateReportArtifacts` → Storage `report.xlsx`, MCP `xlsxPublic`; heuristika „excel/xlsx/portfolio/nemovitosti“ → `fetchCrmSheetsForReport`; weekly report má Excel artefakt; Vitest `tests/report-tool.test.ts`. Migrace: `011_leads_portfolio_scale.sql`. |
 | BOA-019 | E-mail panel: výběr leadů z CRM (místo ručního UUID) | todo | P2 | Vyhledání leadů podle jména/e-mailu, multi-select, zápis do `leadIds` při draft/send. Volitelně auto-doplnění z kontextu agenta. |
 | BOA-020 | Naplánované úlohy agenta (cron + system prompt + potvrzení v panelu) | done | P1 | Migrace **019** (remote). API `/api/settings/scheduled-tasks`, `POST /api/cron/scheduled-agent-tasks` + `x-cron-secret`. UI `/settings` + agent `scheduled_agent_task` + panel potvrzení. **Provoz:** `CRON_SECRET` na hostu + Supabase HTTP cron na produkční URL — nasazení potvrzeno. |
+| BOA-021 | Chat UI přestavba: composer, historie, bubliny, artefakty | in_progress | P1 | Hotovo: střední panel jako vlákno (`ConfigurableAgentPanel` + `ChatMessageBubble`), composer dole, bubliny user/asistent, trace pod tlačítkem v bublině asistenta (`AgentTraceTree` `embedded`), streaming průběh jako dočasná bublina, artefakty/další kroky z metadat v bublině; rozšířený výstup = data panel + audit. Zbývá z **BOA-008**: markdown a karty v textu odpovědi. |
+| BOA-022 | Přepínání a pojmenování agentů v UI | done | P2 | `SegmentedControl` + podpis `mode` a `description`; výběr agenta se po načtení konverzace obnoví z poslední user zprávy (`metadata.agentId` z `runBackOfficeAgent`). Volitelný follow-up: explicitní persist preference per user. |
 
 ## Nedávno dodáno (mimo tabulku)
 
+- **Dashboard:** střední chat (`ChatMessageBubble`, trace uvnitř bubliny); pravý companion panel (`ChatCompanionSidebar`); `onRunComplete` + `companionRunId`; domovská stránka Mantine landing (`app/page.tsx`).
 - **Naplánované úlohy agenta (BOA-020):** tabulka + RLS, tik z Supabase na Next, uživatelské úlohy v nastavení / potvrzení v chatu.
 - **Kalendář / prohlídka:** MCP `browseCalendarAvailability`, náhled v `CalendarPreviewStrip`, podpis odesílatele, expert na maily v `calendar-email-subagent`.
 - **Gmail:** čtení schránky (`listGmailMessages`, `getGmailMessage`), sloučené odeslání `sendGmailOutbound`.

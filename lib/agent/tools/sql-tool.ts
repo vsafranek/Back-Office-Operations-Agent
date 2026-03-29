@@ -4,6 +4,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 import type { AgentTraceRecorder } from "@/lib/agent/trace/recorder";
 import {
   type DataPullPlan,
+  DataPullPlanSchema,
   inferDataPullPlan,
   narrowRowsByText
 } from "@/lib/agent/tools/data-pull-plan";
@@ -72,6 +73,30 @@ async function executePlan(plan: DataPullPlan, limit: number) {
       throw new Error(`Neznamy dataset: ${String(_)}`);
     }
   }
+}
+
+/** Bez LLM — jen allowlistovaný plán (např. HTTP API z UI). */
+export async function runDataPullPlanDirect(
+  planInput: unknown,
+  limitOverride?: number
+): Promise<{
+  rows: Record<string, unknown>[];
+  source: string;
+  preset: string;
+  suggestSourceChannelChart: boolean;
+  filterLabel?: string;
+}> {
+  const plan = DataPullPlanSchema.parse(planInput);
+  const env = getEnv();
+  const cap = Math.min(Math.max(limitOverride ?? env.AGENT_MAX_QUERY_ROWS, 1), 200);
+  const { rows, source } = await executePlan(plan, cap);
+  return {
+    rows,
+    source,
+    preset: plan.dataset,
+    suggestSourceChannelChart: plan.suggest_source_channel_chart ?? false,
+    filterLabel: plan.filter_label ?? undefined
+  };
 }
 
 export async function runSqlPreset(params: {

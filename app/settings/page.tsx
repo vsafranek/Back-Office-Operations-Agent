@@ -1,5 +1,24 @@
 "use client";
 
+import {
+  Accordion,
+  Alert,
+  Anchor,
+  Button,
+  Card,
+  Checkbox,
+  Code,
+  Divider,
+  Group,
+  Select,
+  Stack,
+  Text,
+  Textarea,
+  TextInput,
+  Title
+} from "@mantine/core";
+import { modals } from "@mantine/modals";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
@@ -310,25 +329,32 @@ export default function SettingsPage() {
     await refreshScheduledTasks(accessToken);
   }
 
-  async function deleteScheduledTask(id: string) {
-    if (!confirm("Opravdu smazat tuto naplánovanou úlohu?")) return;
-    const sessionResult = await supabase.auth.getSession();
-    const accessToken = sessionResult.data.session?.access_token;
-    if (!accessToken) return;
-    setSchedLoading(true);
-    setSchedMessage(null);
-    const res = await fetch(`/api/settings/scheduled-tasks/${id}`, {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${accessToken}` }
+  function deleteScheduledTask(id: string) {
+    modals.openConfirmModal({
+      title: "Smazat naplánovanou úlohu?",
+      children: <Text size="sm">Tuto akci nelze vrátit zpět.</Text>,
+      labels: { confirm: "Smazat", cancel: "Zrušit" },
+      confirmProps: { color: "red" },
+      onConfirm: async () => {
+        const sessionResult = await supabase.auth.getSession();
+        const accessToken = sessionResult.data.session?.access_token;
+        if (!accessToken) return;
+        setSchedLoading(true);
+        setSchedMessage(null);
+        const res = await fetch(`/api/settings/scheduled-tasks/${id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        setSchedLoading(false);
+        const payload = (await res.json()) as { error?: string };
+        if (!res.ok) {
+          setSchedMessage(payload.error ?? "Smazání selhalo.");
+          return;
+        }
+        setSchedMessage("Úloha byla smazána.");
+        await refreshScheduledTasks(accessToken);
+      }
     });
-    setSchedLoading(false);
-    const payload = (await res.json()) as { error?: string };
-    if (!res.ok) {
-      setSchedMessage(payload.error ?? "Smazání selhalo.");
-      return;
-    }
-    setSchedMessage("Úloha byla smazána.");
-    await refreshScheduledTasks(accessToken);
   }
 
   async function handleSetPassword(event: React.FormEvent<HTMLFormElement>) {
@@ -354,240 +380,7 @@ export default function SettingsPage() {
     setPassMessage("Heslo bylo nastaveno. Můžete se přihlásit e-mailem na /auth/login.");
   }
 
-  return (
-    <main style={{ maxWidth: 760 }}>
-      <h1>Nastavení integrací</h1>
-      <p>
-        Přihlášení do aplikace je nezávislé na poště a kalendáři. Kalendář a e-mail používáte až po připojení účtu níže
-        (jako v n8n).
-      </p>
-      <p>
-        <a href="/dashboard">Zpět na dashboard</a>
-      </p>
-
-      <section style={{ marginBottom: 28, padding: 16, border: "1px solid #e2e8f0", borderRadius: 10 }}>
-        <h2 style={{ marginTop: 0, fontSize: 18 }}>Připojené účty</h2>
-        <div style={{ display: "grid", gap: 12 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-            <span>
-              Google (kalendář + Gmail): <strong>{form.has_google_tokens ? "připojeno" : "nepřipojeno"}</strong>
-            </span>
-            <button type="button" onClick={() => void startGoogleConnect()} disabled={connecting !== null}>
-              {connecting === "google" ? "Přesměrovávám…" : "Připojit Google"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void disconnect("google")}
-              disabled={disconnecting !== null || !form.has_google_tokens}
-            >
-              {disconnecting === "google" ? "Odpojuji…" : "Odpojit Google"}
-            </button>
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-            <span>
-              Microsoft 365 (Outlook + kalendář):{" "}
-              <strong>{form.has_microsoft_tokens ? "připojeno" : "nepřipojeno"}</strong>
-            </span>
-            <button type="button" onClick={() => void startMicrosoftConnect()} disabled={connecting !== null}>
-              {connecting === "microsoft" ? "Přesměrovávám…" : "Připojit Microsoft 365"}
-            </button>
-            <button
-              type="button"
-              onClick={() => void disconnect("microsoft")}
-              disabled={disconnecting !== null || !form.has_microsoft_tokens}
-            >
-              {disconnecting === "microsoft" ? "Odpojuji…" : "Odpojit Microsoft"}
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <form onSubmit={saveSettings} style={{ display: "grid", gap: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>Který účet použít</h2>
-        <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>
-          Vyberte poskytovatele pro nástroje agenta. Musíte mít připojené tokeny pro danou volbu.
-        </p>
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Kalendář (free/busy)</span>
-          <select
-            value={form.calendar_provider}
-            onChange={(e) =>
-              setForm({ ...form, calendar_provider: e.target.value as "google" | "microsoft" })
-            }
-          >
-            <option value="google">Google Calendar</option>
-            <option value="microsoft">Microsoft (Outlook kalendář)</option>
-          </select>
-        </label>
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Účet kalendáře (e-mail / SMTP adresa)</span>
-          <input
-            type="email"
-            value={form.calendar_account_email}
-            onChange={(e) => setForm({ ...form, calendar_account_email: e.target.value })}
-            placeholder="např. jmeno@firma.cz"
-          />
-        </label>
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Calendar ID (Google: často primary)</span>
-          <input
-            value={form.calendar_id}
-            onChange={(e) => setForm({ ...form, calendar_id: e.target.value })}
-          />
-        </label>
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Pošta (draft / odeslání / inbox)</span>
-          <select
-            value={form.mail_provider}
-            onChange={(e) => setForm({ ...form, mail_provider: e.target.value as "gmail" | "outlook" })}
-          >
-            <option value="gmail">Gmail</option>
-            <option value="outlook">Outlook (Microsoft 365)</option>
-          </select>
-        </label>
-        <label style={{ display: "grid", gap: 6 }}>
-          <span>Odesílatel (zobrazovaný / výchozí mailbox)</span>
-          <input
-            type="email"
-            value={form.mail_from_email}
-            onChange={(e) => setForm({ ...form, mail_from_email: e.target.value })}
-            placeholder="Volitelné"
-          />
-        </label>
-        <button type="submit" disabled={loading}>
-          {loading ? "Ukládám…" : "Uložit volby"}
-        </button>
-      </form>
-
-      <section style={{ marginTop: 28, padding: 16, border: "1px solid #ddd6fe", borderRadius: 10, background: "#faf5ff" }}>
-        <h2 style={{ marginTop: 0, fontSize: 18, color: "#5b21b6" }}>Naplánované úlohy agenta (cron)</h2>
-        <p style={{ margin: "0 0 12px", fontSize: 14, color: "#5b21b6" }}>
-          Zde nastavíte opakované spouštění agenta: cron výraz ve formátu <strong>pg_cron</strong> (5 polí: minuta, hodina, den v
-          měsíci, měsíc, den v týdnu), časová zóna, systémové zadání pro každý běh a text dotazu při každém běhu. Úlohu lze také
-          navrhnout v chatu s agentem — po zobrazení panelu vpravo ji potvrdíte.
-        </p>
-        <p style={{ margin: "0 0 16px", fontSize: 13, color: "#6b21a8" }}>
-          Na Supabase zapněte rozšíření <code>pg_cron</code> a (pro HTTP volání) <code>pg_net</code>. Aplikace sama cron nezakládá —
-          musíte zavolat <code>POST /api/cron/scheduled-agent-tasks</code> s hlavičkou <code>x-cron-secret</code> (hodnota env{" "}
-          <code>CRON_SECRET</code>), stejně jako u ostatních cron tras v projektu.
-        </p>
-
-        <h3 style={{ fontSize: 16, margin: "16px 0 8px" }}>Vaše úlohy</h3>
-        {scheduledTasks.length === 0 ? (
-          <p style={{ margin: "0 0 12px", fontSize: 14, color: "#64748b" }}>Zatím žádná uložená úloha.</p>
-        ) : (
-          <ul style={{ margin: "0 0 16px", paddingLeft: 20, fontSize: 14 }}>
-            {scheduledTasks.map((t) => (
-              <li key={t.id} style={{ marginBottom: 10 }}>
-                <strong>{t.title}</strong> — <code>{t.cron_expression}</code> ({t.timezone}) · profil {t.agent_id}
-                {t.last_run_at ? (
-                  <span style={{ color: "#64748b" }}>
-                    {" "}
-                    · poslední běh {new Date(t.last_run_at).toLocaleString("cs-CZ")}
-                  </span>
-                ) : null}
-                <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                  <label style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 13 }}>
-                    <input
-                      type="checkbox"
-                      checked={t.enabled}
-                      disabled={schedLoading}
-                      onChange={(e) => void toggleScheduledTask(t, e.target.checked)}
-                    />
-                    Zapnuto
-                  </label>
-                  <button type="button" disabled={schedLoading} onClick={() => void deleteScheduledTask(t.id)}>
-                    Smazat
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <h3 style={{ fontSize: 16, margin: "16px 0 8px" }}>Nová úloha</h3>
-        <form onSubmit={(e) => void saveScheduledTask(e)} style={{ display: "grid", gap: 10, maxWidth: 640 }}>
-          <label style={{ display: "grid", gap: 4 }}>
-            <span>Název</span>
-            <input
-              value={schedForm.title}
-              onChange={(e) => setSchedForm({ ...schedForm, title: e.target.value })}
-              placeholder="např. Ranní monitoring nabídek"
-            />
-          </label>
-          <label style={{ display: "grid", gap: 4 }}>
-            <span>Cron (5 polí, jako v pg_cron)</span>
-            <input
-              value={schedForm.cron_expression}
-              onChange={(e) => setSchedForm({ ...schedForm, cron_expression: e.target.value })}
-              placeholder="0 8 * * *"
-            />
-          </label>
-          <label style={{ display: "grid", gap: 4 }}>
-            <span>Časová zóna (IANA)</span>
-            <input
-              value={schedForm.timezone}
-              onChange={(e) => setSchedForm({ ...schedForm, timezone: e.target.value })}
-            />
-          </label>
-          <label style={{ display: "grid", gap: 4 }}>
-            <span>Systémové zadání (prompt pro každý běh)</span>
-            <textarea
-              rows={6}
-              value={schedForm.system_prompt}
-              onChange={(e) => setSchedForm({ ...schedForm, system_prompt: e.target.value })}
-              placeholder="Instrukce pro agenta: role, co má hlídat, formát výstupu…"
-            />
-          </label>
-          <label style={{ display: "grid", gap: 4 }}>
-            <span>Dotaz při každém běhu</span>
-            <textarea
-              rows={3}
-              value={schedForm.user_question}
-              onChange={(e) => setSchedForm({ ...schedForm, user_question: e.target.value })}
-            />
-          </label>
-          <label style={{ display: "grid", gap: 4 }}>
-            <span>Profil agenta</span>
-            <select
-              value={schedForm.agent_id}
-              onChange={(e) =>
-                setSchedForm({
-                  ...schedForm,
-                  agent_id: e.target.value as "basic" | "thinking-orchestrator"
-                })
-              }
-            >
-              <option value="basic">basic</option>
-              <option value="thinking-orchestrator">thinking-orchestrator</option>
-            </select>
-          </label>
-          <button type="submit" disabled={schedSaving}>
-            {schedSaving ? "Ukládám…" : "Vytvořit úlohu"}
-          </button>
-        </form>
-
-        {schedMessage ? (
-          <p role="status" style={{ marginTop: 12 }}>
-            {schedMessage}
-          </p>
-        ) : null}
-
-        <details style={{ marginTop: 20 }}>
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Příklad: pg_cron + pg_net (Supabase SQL)</summary>
-          <pre
-            style={{
-              marginTop: 10,
-              padding: 12,
-              background: "#1e1b4b",
-              color: "#e9d5ff",
-              borderRadius: 8,
-              fontSize: 12,
-              overflow: "auto",
-              maxWidth: "100%"
-            }}
-          >
-            {`-- Nahraďte URL a tajemství (v Vault / secrets, ne v repu).
+  const cronExample = `-- Nahraďte URL a tajemství (v Vault / secrets, ne v repu).
 select cron.schedule(
   'backoffice_scheduled_agent_tasks',
   '*/10 * * * *',
@@ -601,42 +394,300 @@ select cron.schedule(
     body := '{}'::jsonb
   );
   $$
-);`}
-          </pre>
-        </details>
-      </section>
+);`;
 
-      <section style={{ marginTop: 28, padding: 16, border: "1px solid #e2e8f0", borderRadius: 10 }}>
-        <h2 style={{ marginTop: 0, fontSize: 18 }}>Heslo pro přihlášení e-mailem</h2>
-        <p style={{ margin: "0 0 12px", fontSize: 14, color: "#64748b" }}>
-          Doplní nebo změní heslo k tomuto účtu (včetně účtů založených přes Google). Zapomenuté heslo:{" "}
-          <a href="/auth/forgot-password">obnova e-mailem</a>.
-        </p>
-        <form onSubmit={handleSetPassword} style={{ display: "grid", gap: 10, maxWidth: 400 }}>
-          <input
-            type="password"
-            value={passNew}
-            onChange={(e) => setPassNew(e.target.value)}
-            placeholder="Nové heslo (min. 8 znaků)"
-            minLength={8}
-            autoComplete="new-password"
+  return (
+    <Stack gap="xl" maw={800}>
+      <div>
+        <Title order={1}>Nastavení integrací</Title>
+        <Text c="dimmed" mt="xs">
+          Přihlášení do aplikace je nezávislé na poště a kalendáři. Kalendář a e-mail používáte až po připojení účtu níže
+          (jako v n8n).
+        </Text>
+        <Anchor component={Link} href="/dashboard" size="sm" mt="sm" display="inline-block">
+          Zpět na dashboard
+        </Anchor>
+      </div>
+
+      {message ? (
+        <Alert color="blue" title="Stav">
+          {message}
+        </Alert>
+      ) : null}
+
+      <Card withBorder padding="lg" radius="md">
+        <Title order={3} mb="md">
+          Připojené účty
+        </Title>
+        <Stack gap="md">
+          <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
+            <Text size="sm">
+              Google (kalendář + Gmail):{" "}
+              <Text span fw={700}>
+                {form.has_google_tokens ? "připojeno" : "nepřipojeno"}
+              </Text>
+            </Text>
+            <Group gap="xs">
+              <Button size="sm" onClick={() => void startGoogleConnect()} disabled={connecting !== null}>
+                {connecting === "google" ? "Přesměrovávám…" : "Připojit Google"}
+              </Button>
+              <Button
+                size="sm"
+                variant="light"
+                color="red"
+                onClick={() => void disconnect("google")}
+                disabled={disconnecting !== null || !form.has_google_tokens}
+              >
+                {disconnecting === "google" ? "Odpojuji…" : "Odpojit Google"}
+              </Button>
+            </Group>
+          </Group>
+          <Divider />
+          <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
+            <Text size="sm">
+              Microsoft 365 (Outlook + kalendář):{" "}
+              <Text span fw={700}>
+                {form.has_microsoft_tokens ? "připojeno" : "nepřipojeno"}
+              </Text>
+            </Text>
+            <Group gap="xs">
+              <Button size="sm" onClick={() => void startMicrosoftConnect()} disabled={connecting !== null}>
+                {connecting === "microsoft" ? "Přesměrovávám…" : "Připojit Microsoft 365"}
+              </Button>
+              <Button
+                size="sm"
+                variant="light"
+                color="red"
+                onClick={() => void disconnect("microsoft")}
+                disabled={disconnecting !== null || !form.has_microsoft_tokens}
+              >
+                {disconnecting === "microsoft" ? "Odpojuji…" : "Odpojit Microsoft"}
+              </Button>
+            </Group>
+          </Group>
+        </Stack>
+      </Card>
+
+      <Card withBorder padding="lg" radius="md">
+        <Title order={3} mb="xs">
+          Který účet použít
+        </Title>
+        <Text size="sm" c="dimmed" mb="md">
+          Vyberte poskytovatele pro nástroje agenta. Musíte mít připojené tokeny pro danou volbu.
+        </Text>
+        <form onSubmit={saveSettings}>
+          <Stack gap="md">
+          <Select
+            label="Kalendář (free/busy)"
+            value={form.calendar_provider}
+            onChange={(v) =>
+              setForm({ ...form, calendar_provider: (v as "google" | "microsoft") ?? "google" })
+            }
+            data={[
+              { value: "google", label: "Google Calendar" },
+              { value: "microsoft", label: "Microsoft (Outlook kalendář)" }
+            ]}
           />
-          <input
-            type="password"
-            value={passNew2}
-            onChange={(e) => setPassNew2(e.target.value)}
-            placeholder="Nové heslo znovu"
-            minLength={8}
-            autoComplete="new-password"
+          <TextInput
+            label="Účet kalendáře (e-mail / SMTP adresa)"
+            type="email"
+            value={form.calendar_account_email}
+            onChange={(e) => setForm({ ...form, calendar_account_email: e.currentTarget.value })}
+            placeholder="např. jmeno@firma.cz"
           />
-          <button type="submit" disabled={passLoading}>
-            {passLoading ? "Ukládám…" : "Nastavit / změnit heslo"}
-          </button>
+          <TextInput
+            label="Calendar ID (Google: často primary)"
+            value={form.calendar_id}
+            onChange={(e) => setForm({ ...form, calendar_id: e.currentTarget.value })}
+          />
+          <Select
+            label="Pošta (draft / odeslání / inbox)"
+            value={form.mail_provider}
+            onChange={(v) => setForm({ ...form, mail_provider: (v as "gmail" | "outlook") ?? "gmail" })}
+            data={[
+              { value: "gmail", label: "Gmail" },
+              { value: "outlook", label: "Outlook (Microsoft 365)" }
+            ]}
+          />
+          <TextInput
+            label="Odesílatel (zobrazovaný / výchozí mailbox)"
+            type="email"
+            value={form.mail_from_email}
+            onChange={(e) => setForm({ ...form, mail_from_email: e.currentTarget.value })}
+            placeholder="Volitelné"
+          />
+          <Button type="submit" loading={loading}>
+            {loading ? "Ukládám…" : "Uložit volby"}
+          </Button>
+          </Stack>
         </form>
-        {passMessage ? <p role="status">{passMessage}</p> : null}
-      </section>
+      </Card>
 
-      {message ? <p role="status">{message}</p> : null}
-    </main>
+      <Card withBorder padding="lg" radius="md" bg="violet.0">
+        <Title order={3} c="violet.9" mb="xs">
+          Naplánované úlohy agenta (cron)
+        </Title>
+        <Text size="sm" c="violet.9" mb="sm">
+          Zde nastavíte opakované spouštění agenta: cron výraz ve formátu <strong>pg_cron</strong> (5 polí: minuta, hodina, den v
+          měsíci, měsíc, den v týdnu), časová zóna, systémové zadání pro každý běh a text dotazu při každém běhu. Úlohu lze také
+          navrhnout v chatu s agentem — po zobrazení panelu vpravo ji potvrdíte.
+        </Text>
+        <Text size="xs" c="violet.8" mb="lg">
+          Na Supabase zapněte rozšíření <Code>pg_cron</Code> a (pro HTTP volání) <Code>pg_net</Code>. Aplikace sama cron nezakládá —
+          musíte zavolat <Code>POST /api/cron/scheduled-agent-tasks</Code> s hlavičkou <Code>x-cron-secret</Code> (hodnota env{" "}
+          <Code>CRON_SECRET</Code>), stejně jako u ostatních cron tras v projektu.
+        </Text>
+
+        <Title order={4} mb="sm">
+          Vaše úlohy
+        </Title>
+        {scheduledTasks.length === 0 ? (
+          <Text size="sm" c="dimmed" mb="md">
+            Zatím žádná uložená úloha.
+          </Text>
+        ) : (
+          <Stack gap="md" mb="lg">
+            {scheduledTasks.map((t) => (
+              <Card key={t.id} withBorder padding="sm" radius="sm" bg="white">
+                <Text size="sm" fw={600}>
+                  {t.title}
+                </Text>
+                <Text size="xs" c="dimmed" mt={4}>
+                  <Code>{t.cron_expression}</Code> ({t.timezone}) · profil {t.agent_id}
+                  {t.last_run_at ? ` · poslední běh ${new Date(t.last_run_at).toLocaleString("cs-CZ")}` : ""}
+                </Text>
+                <Group mt="sm" gap="md">
+                  <Checkbox
+                    label="Zapnuto"
+                    checked={t.enabled}
+                    disabled={schedLoading}
+                    onChange={(e) => void toggleScheduledTask(t, e.currentTarget.checked)}
+                  />
+                  <Button size="xs" variant="light" color="red" disabled={schedLoading} onClick={() => deleteScheduledTask(t.id)}>
+                    Smazat
+                  </Button>
+                </Group>
+              </Card>
+            ))}
+          </Stack>
+        )}
+
+        <Title order={4} mb="sm">
+          Nová úloha
+        </Title>
+        <form
+          onSubmit={(e) => void saveScheduledTask(e)}
+          style={{ maxWidth: 640 }}
+        >
+          <Stack gap="md">
+          <TextInput
+            label="Název"
+            value={schedForm.title}
+            onChange={(e) => setSchedForm({ ...schedForm, title: e.currentTarget.value })}
+            placeholder="např. Ranní monitoring nabídek"
+          />
+          <TextInput
+            label="Cron (5 polí, jako v pg_cron)"
+            value={schedForm.cron_expression}
+            onChange={(e) => setSchedForm({ ...schedForm, cron_expression: e.currentTarget.value })}
+            placeholder="0 8 * * *"
+          />
+          <TextInput
+            label="Časová zóna (IANA)"
+            value={schedForm.timezone}
+            onChange={(e) => setSchedForm({ ...schedForm, timezone: e.currentTarget.value })}
+          />
+          <Textarea
+            label="Systémové zadání (prompt pro každý běh)"
+            minRows={6}
+            value={schedForm.system_prompt}
+            onChange={(e) => setSchedForm({ ...schedForm, system_prompt: e.currentTarget.value })}
+            placeholder="Instrukce pro agenta: role, co má hlídat, formát výstupu…"
+          />
+          <Textarea
+            label="Dotaz při každém běhu"
+            minRows={3}
+            value={schedForm.user_question}
+            onChange={(e) => setSchedForm({ ...schedForm, user_question: e.currentTarget.value })}
+          />
+          <Select
+            label="Profil agenta"
+            value={schedForm.agent_id}
+            onChange={(v) =>
+              setSchedForm({
+                ...schedForm,
+                agent_id: (v as "basic" | "thinking-orchestrator") ?? "basic"
+              })
+            }
+            data={[
+              { value: "basic", label: "basic" },
+              { value: "thinking-orchestrator", label: "thinking-orchestrator" }
+            ]}
+          />
+          <Button type="submit" loading={schedSaving}>
+            {schedSaving ? "Ukládám…" : "Vytvořit úlohu"}
+          </Button>
+          </Stack>
+        </form>
+
+        {schedMessage ? (
+          <Text role="status" mt="md" size="sm" fw={500}>
+            {schedMessage}
+          </Text>
+        ) : null}
+
+        <Accordion mt="xl" variant="contained">
+          <Accordion.Item value="sql">
+            <Accordion.Control>Příklad: pg_cron + pg_net (Supabase SQL)</Accordion.Control>
+            <Accordion.Panel>
+              <Code block fz="xs" style={{ whiteSpace: "pre-wrap" }}>
+                {cronExample}
+              </Code>
+            </Accordion.Panel>
+          </Accordion.Item>
+        </Accordion>
+      </Card>
+
+      <Card withBorder padding="lg" radius="md">
+        <Title order={3} mb="xs">
+          Heslo pro přihlášení e-mailem
+        </Title>
+        <Text size="sm" c="dimmed" mb="md">
+          Doplní nebo změní heslo k tomuto účtu (včetně účtů založených přes Google). Zapomenuté heslo:{" "}
+          <Anchor component={Link} href="/auth/forgot-password" size="sm">
+            obnova e-mailem
+          </Anchor>
+          .
+        </Text>
+        <form onSubmit={handleSetPassword}>
+          <Stack gap="md" maw={400}>
+            <TextInput
+              type="password"
+              value={passNew}
+              onChange={(e) => setPassNew(e.currentTarget.value)}
+              placeholder="Nové heslo (min. 8 znaků)"
+              minLength={8}
+              autoComplete="new-password"
+            />
+            <TextInput
+              type="password"
+              value={passNew2}
+              onChange={(e) => setPassNew2(e.currentTarget.value)}
+              placeholder="Nové heslo znovu"
+              minLength={8}
+              autoComplete="new-password"
+            />
+            <Button type="submit" loading={passLoading}>
+              {passLoading ? "Ukládám…" : "Nastavit / změnit heslo"}
+            </Button>
+          </Stack>
+        </form>
+        {passMessage ? (
+          <Text role="status" mt="md" size="sm">
+            {passMessage}
+          </Text>
+        ) : null}
+      </Card>
+    </Stack>
   );
 }

@@ -1,30 +1,50 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActionIcon,
+  Alert,
+  Box,
+  Button,
+  Divider,
+  Group,
+  List,
+  Menu,
+  Paper,
+  ScrollArea,
+  SimpleGrid,
+  Stack,
+  Text,
+  Textarea,
+  Title
+} from "@mantine/core";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
 import { AuditRunSummary } from "@/components/agent/AuditRunSummary";
-import { AgentTraceTree } from "@/components/agent/AgentTraceTree";
+import { ChatMessageBubble, type ChatThreadMessage } from "@/components/agent/ChatMessageBubble";
 import type { AgentUiOption } from "@/lib/agent/config/types";
 import type { AgentAnswer } from "@/lib/agent/types";
 
+export type { ChatThreadMessage };
+
 export type AgentPanelRunOptions = {
-  /** Voláno pro každou fázi při streamovaném běhu (/api/agent/stream). */
   onPhase?: (label: string) => void;
-  /** Tokeny úvahy thinking orchestrátoru (jen profil thinking). */
   onOrchestratorDelta?: (chunk: string) => void;
 };
 
 export type ConfigurableAgentPanelProps = {
   agents: AgentUiOption[];
   defaultAgentId: string;
+  /** Zprávy aktivní konverzace (GET /api/conversations/.../messages). */
+  threadMessages: ChatThreadMessage[];
   onRun: (
     params: { question: string; agentId: string },
     options?: AgentPanelRunOptions
   ) => Promise<AgentAnswer>;
   getAccessToken: () => Promise<string | null>;
-  /** Pro DOM id / přístupnost: práce v kontextu konkrétní konverzace. */
   conversationContext?: { id: string | null; title?: string };
+  onRunComplete?: (answer: AgentAnswer) => void;
+  onAgentChange?: (agentId: string) => void;
 };
 
 const visuallyHidden: CSSProperties = {
@@ -43,12 +63,136 @@ function convSlug(id: string | null | undefined): string {
   return id ?? "no-conv";
 }
 
+function IconChevronDown({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+function IconArrowUp({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 19V5M12 5l-6 6M12 5l6 6" />
+    </svg>
+  );
+}
+
+const pillButtonProps = {
+  size: "compact-sm" as const,
+  radius: "xl" as const,
+  variant: "light" as const,
+  color: "gray" as const,
+  styles: {
+    root: {
+      fontWeight: 500,
+      border: "1px solid var(--mantine-color-default-border)"
+    }
+  }
+};
+
+function AgentProgressUnderQuestion({
+  phaseLog,
+  loading,
+  orchestratorStreamText,
+  agentId
+}: {
+  phaseLog: string[];
+  loading: boolean;
+  orchestratorStreamText: string;
+  agentId: string;
+}) {
+  const showThinking = agentId === "thinking-orchestrator" && (loading || orchestratorStreamText.length > 0);
+  return (
+    <Box
+      pl="md"
+      ml="xs"
+      style={{
+        borderLeft: "3px solid var(--mantine-color-indigo-4)",
+        display: "flex",
+        justifyContent: "flex-start"
+      }}
+    >
+      <Paper
+        radius="md"
+        px="md"
+        py="sm"
+        maw="min(96%, 640px)"
+        withBorder
+        bg="indigo.0"
+        style={{ borderStyle: "dashed" }}
+        aria-live="polite"
+      >
+        <Text size="sm" fw={600} mb="xs" c="indigo.8">
+          Průběh akcí agenta
+        </Text>
+        {loading && phaseLog.length === 0 ? (
+          <Text size="sm" c="dimmed">
+            Zahajuji…
+          </Text>
+        ) : null}
+        {phaseLog.length > 0 ? (
+          <List type="ordered" size="sm" spacing="xs">
+            {phaseLog.map((line, i) => (
+              <List.Item key={`${i}-${line.slice(0, 24)}`}>{line}</List.Item>
+            ))}
+          </List>
+        ) : null}
+        {loading ? (
+          <Text size="xs" c="dimmed" mt="sm">
+            Probíhá zpracování…
+          </Text>
+        ) : null}
+        {showThinking ? (
+          <Box mt="md" pt="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
+            <Text fw={600} size="xs" mb="xs" c="blue.9">
+              Úvaha orchestrátoru
+            </Text>
+            <Text size="sm" style={{ whiteSpace: "pre-wrap" }} c="dark.7">
+              {orchestratorStreamText}
+              {loading && orchestratorStreamText.length === 0 ? (
+                <Text span c="dimmed">
+                  Čekám na první tokeny…
+                </Text>
+              ) : null}
+            </Text>
+          </Box>
+        ) : null}
+      </Paper>
+    </Box>
+  );
+}
+
 export function ConfigurableAgentPanel({
   agents,
   defaultAgentId,
+  threadMessages,
   onRun,
   getAccessToken,
-  conversationContext
+  conversationContext,
+  onRunComplete,
+  onAgentChange
 }: ConfigurableAgentPanelProps) {
   const [agentId, setAgentId] = useState(defaultAgentId);
   const [question, setQuestion] = useState("");
@@ -57,6 +201,19 @@ export function ConfigurableAgentPanel({
   const [result, setResult] = useState<AgentAnswer | null>(null);
   const [phaseLog, setPhaseLog] = useState<string[]>([]);
   const [orchestratorStreamText, setOrchestratorStreamText] = useState("");
+  const [optimisticUserContent, setOptimisticUserContent] = useState<string | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setAgentId(defaultAgentId);
+  }, [defaultAgentId]);
+
+  const agentLabelById = useMemo(() => Object.fromEntries(agents.map((a) => [a.id, a.label])), [agents]);
+  const selectedAgent = useMemo(() => agents.find((a) => a.id === agentId), [agents, agentId]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [threadMessages, loading, phaseLog.length, orchestratorStreamText, result?.runId]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -64,15 +221,18 @@ export function ConfigurableAgentPanel({
     setResult(null);
     setPhaseLog([]);
     setOrchestratorStreamText("");
+    setOptimisticUserContent(null);
 
     if (!question.trim()) {
       setError("Zadejte text dotazu.");
       return;
     }
 
+    const q = question.trim();
+    setOptimisticUserContent(q);
     setLoading(true);
     try {
-      const payload = await onRun({ question: question.trim(), agentId }, {
+      const payload = await onRun({ question: q, agentId }, {
         onPhase: (label) => {
           setPhaseLog((prev) => [...prev, label]);
         },
@@ -80,12 +240,17 @@ export function ConfigurableAgentPanel({
           setOrchestratorStreamText((prev) => prev + chunk);
         }
       });
-      setResult(payload);
+      setPhaseLog([]);
       setOrchestratorStreamText("");
+      setResult(payload);
+      onRunComplete?.(payload);
     } catch (e) {
+      setPhaseLog([]);
+      setOrchestratorStreamText("");
       setError(e instanceof Error ? e.message : "Neznámá chyba");
     } finally {
       setLoading(false);
+      setOptimisticUserContent(null);
     }
   }
 
@@ -94,294 +259,267 @@ export function ConfigurableAgentPanel({
     conversationContext?.title?.trim() ||
     (conversationContext?.id ? `Konverzace ${conversationContext.id.slice(0, 8)}…` : "Bez vybrané konverzace");
 
+  const lastUser = [...threadMessages].reverse().find((m) => m.role === "user");
+  const showOptimisticUser =
+    Boolean(loading && optimisticUserContent) &&
+    !(lastUser?.role === "user" && lastUser.content === optimisticUserContent);
+
   return (
-    <div
+    <Stack
       id={`agent-workspace--conv--${cId}`}
-      style={{ display: "grid", gap: 16 }}
+      gap="md"
       data-conversation-id={conversationContext?.id ?? undefined}
       data-conversation-label={convLabel}
+      style={{
+        height: "100%",
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column"
+      }}
     >
       <span id={`agent-workspace-context--conv--${cId}`} style={visuallyHidden}>
-        Chatbot a výsledek — {convLabel}
+        Chat — {convLabel}
       </span>
-      <form
-        id={`chat-composer--conv--${cId}`}
-        onSubmit={(e) => void handleSubmit(e)}
-        style={{ display: "grid", gap: 12 }}
-        aria-describedby={`agent-workspace-context--conv--${cId}`}
+
+      <Paper
+        component="section"
+        withBorder
+        p="md"
+        radius="md"
+        aria-labelledby={`chat-thread-heading--${cId}`}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden"
+        }}
       >
-        <fieldset style={{ border: "1px solid #cbd5e1", borderRadius: 8, padding: 12 }}>
-          <legend style={{ fontWeight: 600 }}>Profil agenta</legend>
-          <div style={{ display: "grid", gap: 10 }}>
-            {agents.map((a) => (
-              <label
-                key={a.id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "auto 1fr",
-                  gap: 8,
-                  alignItems: "start",
-                  cursor: "pointer"
-                }}
-              >
-                <input
-                  type="radio"
-                  name="agent"
-                  checked={agentId === a.id}
-                  onChange={() => setAgentId(a.id)}
+        <Title order={3} id={`chat-thread-heading--${cId}`} mb="md" size="h4" fw={600}>
+          Konverzace
+        </Title>
+
+        <Box style={{ flex: 1, minHeight: 0, position: "relative" }}>
+          <ScrollArea type="auto" offsetScrollbars h="100%" scrollbars="y">
+            <Stack gap="md" pr="xs" pb="lg">
+              {threadMessages.length === 0 && !loading && !showOptimisticUser ? (
+                <Text size="sm" c="dimmed">
+                  Napište zprávu do pole úplně dole. Po odeslání uvidíte průběh pod otázkou, poté odpověď a případné
+                  panely (tabulka, graf, audit) pod ní.
+                </Text>
+              ) : null}
+
+              {threadMessages.map((msg) => (
+                <ChatMessageBubble
+                  key={msg.id}
+                  message={msg}
+                  getAccessToken={getAccessToken}
+                  agentLabelById={agentLabelById}
                 />
-                <span>
-                  <strong>{a.label}</strong>
-                  <span style={{ color: "#64748b" }}> ({a.mode})</span>
-                  <br />
-                  <small style={{ color: "#475569" }}>{a.description}</small>
-                </span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
+              ))}
 
-        <label style={{ display: "grid", gap: 6 }}>
-          <span style={{ fontWeight: 600 }}>Dotaz</span>
-          <textarea
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            rows={4}
-            placeholder="Zadejte vlastní dotaz nebo zadání pro agenta."
-          />
-        </label>
+              {showOptimisticUser && optimisticUserContent ? (
+                <ChatMessageBubble
+                  message={{
+                    id: "__optimistic-user__",
+                    role: "user",
+                    content: optimisticUserContent,
+                    created_at: new Date().toISOString(),
+                    metadata: { agentId }
+                  }}
+                  getAccessToken={getAccessToken}
+                  agentLabelById={agentLabelById}
+                />
+              ) : null}
 
-        <button type="submit" disabled={loading || !question.trim()}>
-          {loading ? "Zpracovávám..." : "Spustit agenta"}
-        </button>
-      </form>
+              {loading ? (
+                <AgentProgressUnderQuestion
+                  phaseLog={phaseLog}
+                  loading={loading}
+                  orchestratorStreamText={orchestratorStreamText}
+                  agentId={agentId}
+                />
+              ) : null}
 
-      {error ? <p style={{ color: "crimson" }}>{error}</p> : null}
+              {result ? (
+                <Stack gap="md" pt="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
+                  <Title order={4} size="h5" fw={600}>
+                    Související výstupy poslední odpovědi
+                  </Title>
+                  <section
+                    id={
+                      result.runId
+                        ? `agent-extras--conv--${cId}--run--${result.runId}`
+                        : `agent-extras--conv--${cId}--pending`
+                    }
+                    data-conversation-id={conversationContext?.id ?? undefined}
+                    data-run-id={result.runId ?? undefined}
+                    aria-label="Rozšířený výstup posledního běhu"
+                  >
+                    <SimpleGrid
+                      cols={{ base: 1, lg: result.dataPanel ? 2 : 1 }}
+                      spacing="lg"
+                      verticalSpacing="lg"
+                      styles={{
+                        root: {
+                          alignItems: "flex-start"
+                        }
+                      }}
+                    >
+                      <Stack gap="md" miw={0}>
+                        {result.dataPanel?.kind === "scheduled_task_confirmation" ? (
+                          <Text size="sm" c="violet.8">
+                            V pravém panelu potvrďte nebo zrušte uložení naplánované úlohy (cron na straně Supabase volá
+                            aplikaci podle návodu v Nastavení).
+                          </Text>
+                        ) : null}
 
-      {loading || phaseLog.length > 0 ? (
-        <section
-          id={`agent-progress--conv--${cId}`}
-          data-conversation-id={conversationContext?.id ?? undefined}
-          style={{
-            border: "1px dashed #94a3b8",
-            borderRadius: 8,
-            padding: 12,
-            background: "#f8fafc"
-          }}
-          aria-live="polite"
-        >
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>Průběh</div>
-          {loading && phaseLog.length === 0 ? (
-            <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>Zahajuji…</p>
-          ) : null}
-          <ol style={{ margin: 0, paddingLeft: 22, fontSize: 14, color: "#334155", lineHeight: 1.5 }}>
-            {phaseLog.map((line, i) => (
-              <li key={`${i}-${line.slice(0, 24)}`}>{line}</li>
-            ))}
-          </ol>
-          {loading ? (
-            <p style={{ margin: "10px 0 0", fontSize: 13, color: "#64748b" }}>Probíhá zpracování…</p>
-          ) : null}
-        </section>
+                        {result.runId ? (
+                          <AuditRunSummary runId={result.runId} getAccessToken={getAccessToken} />
+                        ) : null}
+
+                        {!result.dataPanel ? (
+                          <Text size="xs" c="dimmed">
+                            U tohoto dotazu nejsou další panely — text a artefakty jsou v bublině asistenta výše.
+                          </Text>
+                        ) : null}
+                      </Stack>
+
+                      {result.dataPanel ? (
+                        <div
+                          id={
+                            result.runId
+                              ? `agent-data-panel--conv--${cId}--run--${result.runId}`
+                              : `agent-data-panel--conv--${cId}`
+                          }
+                          data-conversation-id={conversationContext?.id ?? undefined}
+                          data-panel-kind={result.dataPanel.kind}
+                        >
+                          <AgentDataPanel
+                            panel={result.dataPanel}
+                            getAccessToken={getAccessToken}
+                            dataPanelDownloads={result.dataPanelDownloads}
+                          />
+                        </div>
+                      ) : null}
+                    </SimpleGrid>
+                  </section>
+                </Stack>
+              ) : null}
+
+              <div ref={endRef} />
+            </Stack>
+          </ScrollArea>
+        </Box>
+      </Paper>
+
+      {error ? (
+        <Alert color="red" title="Chyba" style={{ flexShrink: 0 }}>
+          {error}
+        </Alert>
       ) : null}
 
-      {agentId === "thinking-orchestrator" && (loading || orchestratorStreamText.length > 0) ? (
-        <section
-          id={`agent-orchestrator-stream--conv--${cId}`}
-          data-conversation-id={conversationContext?.id ?? undefined}
-          style={{
-            border: "1px solid #bfdbfe",
-            borderRadius: 8,
-            padding: 12,
-            background: "#eff6ff"
-          }}
-          aria-live="polite"
+      <Box style={{ flexShrink: 0 }}>
+        <form
+          id={`chat-composer--conv--${cId}`}
+          onSubmit={(e) => void handleSubmit(e)}
+          aria-describedby={`agent-workspace-context--conv--${cId}`}
         >
-          <div style={{ fontWeight: 600, marginBottom: 8, color: "#1e3a5f" }}>Úvaha orchestrátoru</div>
-          <p style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 14, color: "#1e293b", lineHeight: 1.55 }}>
-            {orchestratorStreamText}
-            {loading && orchestratorStreamText.length === 0 ? (
-              <span style={{ color: "#64748b" }}>Čekám na první tokeny…</span>
-            ) : null}
-          </p>
-        </section>
-      ) : null}
-
-      {result ? (
-        <section
-          id={
-            result.runId
-              ? `agent-answer--conv--${cId}--run--${result.runId}`
-              : `agent-answer--conv--${cId}--pending`
-          }
-          style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}
-          data-conversation-id={conversationContext?.id ?? undefined}
-          data-run-id={result.runId ?? undefined}
-          aria-labelledby={`agent-answer-heading--conv--${cId}`}
-        >
-          <h2 id={`agent-answer-heading--conv--${cId}`} style={{ margin: "0 0 12px" }}>
-            Výsledek ({convLabel}
-            {result.runId ? ` · běh ${result.runId.slice(0, 8)}…` : ""})
-          </h2>
-          <div
+          <Box
+            p={2}
             style={{
-              display: "grid",
-              gridTemplateColumns:
-                result.dataPanel?.kind === "market_listings"
-                  ? "1fr minmax(320px, 520px)"
-                  : result.dataPanel?.kind === "viewing_email_draft"
-                    ? "1fr minmax(340px, 560px)"
-                    : result.dataPanel?.kind === "scheduled_task_confirmation"
-                      ? "1fr minmax(340px, 520px)"
-                      : result.dataPanel
-                        ? "1fr minmax(300px, 420px)"
-                        : "1fr",
-              gap: 20,
-              alignItems: "start"
+              border: "1px solid var(--mantine-color-default-border)",
+              borderRadius: "var(--mantine-radius-md)",
+              backgroundColor: "var(--mantine-color-body)"
             }}
           >
-            <div
-              id={
-                result.runId
-                  ? `agent-answer-main--conv--${cId}--run--${result.runId}`
-                  : `agent-answer-main--conv--${cId}`
-              }
-              style={{ display: "grid", gap: 12, minWidth: 0 }}
-              data-conversation-id={conversationContext?.id ?? undefined}
-            >
-              {result.orchestration ? (
-                <div
-                  id={
-                    result.runId
-                      ? `agent-orchestration-meta--conv--${cId}--run--${result.runId}`
-                      : undefined
-                  }
-                  style={{
-                    background: "#f1f5f9",
-                    borderRadius: 8,
-                    padding: 12,
-                    fontSize: 14
-                  }}
-                  data-conversation-id={conversationContext?.id ?? undefined}
-                >
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                    Orchestrace: {result.orchestration.agentId} ({result.orchestration.mode})
-                  </div>
-                  {result.orchestration.reasoning ? (
-                    <div>
-                      <div style={{ fontWeight: 600, marginBottom: 4 }}>Úvaha orchestrátoru</div>
-                      <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{result.orchestration.reasoning}</p>
-                    </div>
-                  ) : (
-                    <p style={{ margin: 0, color: "#64748b" }}>Bez rozšířené úvahy (základní režim).</p>
-                  )}
-                </div>
-              ) : null}
-
-              <div
-                id={
-                  result.runId
-                    ? `agent-answer-text--conv--${cId}--run--${result.runId}`
-                    : `agent-answer-text--conv--${cId}`
+            <Textarea
+              id={`chat-message--${cId}`}
+              aria-label="Zpráva"
+              variant="unstyled"
+              value={question}
+              onChange={(e) => setQuestion(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || e.shiftKey) return;
+                if (loading || !question.trim()) return;
+                e.preventDefault();
+                e.currentTarget.form?.requestSubmit();
+              }}
+              minRows={2}
+              autosize
+              maxRows={10}
+              placeholder="Zpráva… Enter = odeslat, Shift+Enter = nový řádek"
+              disabled={loading}
+              styles={{
+                input: {
+                  fontSize: "var(--mantine-font-size-sm)",
+                  padding: "10px 12px",
+                  lineHeight: 1.45
                 }
-                data-conversation-id={conversationContext?.id ?? undefined}
-              >
-                <div style={{ fontWeight: 600, marginBottom: 6 }}>Odpověď</div>
-                <p style={{ margin: 0, whiteSpace: "pre-wrap" }}>{result.answer_text}</p>
-              </div>
-
-              <div style={{ fontSize: 14, color: "#475569" }}>
-                Spolehlivost: {result.confidence.toFixed(2)} · Zdroje: {result.sources.join(", ") || "—"}
-              </div>
-
-              {result.next_actions.length > 0 ? (
-                <div>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Další kroky</div>
-                  <ul style={{ margin: 0, paddingLeft: 20 }}>
-                    {result.next_actions.map((a, i) => (
-                      <li key={i}>{a}</li>
+              }}
+            />
+            <Divider my={2} />
+            <Group justify="space-between" align="center" wrap="nowrap" gap="sm" px={6} pb={6} pt={2}>
+              <Box style={{ minWidth: 0, flex: 1 }}>
+                <Menu withinPortal position="top-start" shadow="md" width={280}>
+                  <Menu.Target>
+                    <Button
+                      {...pillButtonProps}
+                      leftSection={
+                        <Text span fz={14} fw={700} lh={1} c="dimmed" aria-hidden>
+                          ∞
+                        </Text>
+                      }
+                      rightSection={<IconChevronDown />}
+                      disabled={loading}
+                      aria-label={`Agent: ${selectedAgent?.label ?? "vyberte"}`}
+                      style={{ maxWidth: "min(100%, 220px)" }}
+                    >
+                      <Text component="span" size="sm" truncate>
+                        {selectedAgent?.label ?? "Agent"}
+                      </Text>
+                    </Button>
+                  </Menu.Target>
+                  <Menu.Dropdown>
+                    <Menu.Label>Profil agenta</Menu.Label>
+                    {agents.map((a) => (
+                      <Menu.Item
+                        key={a.id}
+                        onClick={() => {
+                          setAgentId(a.id);
+                          onAgentChange?.(a.id);
+                        }}
+                        closeMenuOnClick
+                      >
+                        <Text size="sm" fw={a.id === agentId ? 700 : 500}>
+                          {a.label}
+                          {a.id === agentId ? " ✓" : ""}
+                        </Text>
+                        <Text size="xs" c="dimmed" lineClamp={3}>
+                          {a.mode} — {a.description}
+                        </Text>
+                      </Menu.Item>
                     ))}
-                  </ul>
-                </div>
-              ) : null}
+                  </Menu.Dropdown>
+                </Menu>
+              </Box>
 
-              {result.generated_artifacts.length > 0 ? (
-                <div
-                  id={
-                    result.runId
-                      ? `agent-artifacts--conv--${cId}--run--${result.runId}`
-                      : `agent-artifacts--conv--${cId}`
-                  }
-                  data-conversation-id={conversationContext?.id ?? undefined}
-                >
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Artefakty</div>
-                  <ul style={{ margin: 0, paddingLeft: 20 }}>
-                    {result.generated_artifacts.map((art, i) => (
-                <li
-                  key={i}
-                  id={
-                    result.runId
-                      ? `agent-artifact--conv--${cId}--run--${result.runId}--${i}`
-                      : `agent-artifact--conv--${cId}--${i}`
-                  }
-                >
-                        {art.label}
-                        {art.url ? (
-                          <>
-                            {" "}
-                            <a href={art.url} target="_blank" rel="noreferrer">
-                              odkaz
-                            </a>
-                          </>
-                        ) : null}
-                        {art.content && !art.url ? (
-                          <pre style={{ fontSize: 12, whiteSpace: "pre-wrap", maxHeight: 160, overflow: "auto" }}>
-                            {art.content.slice(0, 2000)}
-                            {art.content.length > 2000 ? "…" : ""}
-                          </pre>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              {result.runId ? <AuditRunSummary runId={result.runId} getAccessToken={getAccessToken} /> : null}
-              {result.runId ? <AgentTraceTree runId={result.runId} getAccessToken={getAccessToken} /> : null}
-
-              {result.dataPanel ? null : (
-                <p style={{ margin: 0, fontSize: 13, color: "#94a3b8" }}>
-                  Pravý panel (tabulka / graf / karty) se zapojí u analytických dotazů nebo monitoru trhu. CSV, Excel a další
-                  soubory jsou v sekci Artefakty výše (odkaz = otevření nebo stažení v prohlížeči).
-                </p>
-              )}
-              {result.dataPanel?.kind === "scheduled_task_confirmation" ? (
-                <p style={{ margin: 0, fontSize: 13, color: "#6b21a8" }}>
-                  V pravém panelu potvrďte nebo zrušte uložení naplánované úlohy (cron na straně Supabase volá aplikaci podle návodu v Nastavení).
-                </p>
-              ) : null}
-            </div>
-
-            {result.dataPanel ? (
-              <div
-                id={
-                  result.runId
-                    ? `agent-data-panel--conv--${cId}--run--${result.runId}`
-                    : `agent-data-panel--conv--${cId}`
-                }
-                data-conversation-id={conversationContext?.id ?? undefined}
-                data-panel-kind={result.dataPanel.kind}
+              <ActionIcon
+                type="submit"
+                size={40}
+                radius="xl"
+                variant="filled"
+                color="indigo"
+                disabled={loading || !question.trim()}
+                loading={loading}
+                aria-label="Odeslat zprávu"
               >
-                <AgentDataPanel
-                  panel={result.dataPanel}
-                  getAccessToken={getAccessToken}
-                  dataPanelDownloads={result.dataPanelDownloads}
-                />
-              </div>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
-    </div>
+                <IconArrowUp />
+              </ActionIcon>
+            </Group>
+          </Box>
+        </form>
+      </Box>
+    </Stack>
   );
 }

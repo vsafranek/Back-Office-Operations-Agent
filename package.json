@@ -15,7 +15,12 @@
   "license": "UNLICENSED",
   "description": "",
   "dependencies": {
+    "@mantine/core": "^8.3.18",
+    "@mantine/hooks": "^8.3.18",
+    "@mantine/modals": "^8.3.18",
+    "@mantine/notifications": "^8.3.18",
     "@supabase/supabase-js": "^2.100.1",
+    "@tabler/icons-react": "^3.41.0",
     "ai": "^6.0.138",
     "cheerio": "^1.2.0",
     "cron-parser": "^5.5.0",
@@ -37,6 +42,9 @@
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "postcss": "^8.5.8",
+    "postcss-preset-mantine": "^1.18.0",
+    "postcss-simple-vars": "^7.0.1",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"
   }

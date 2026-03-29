@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Anchor, Button, Paper, PasswordInput, Stack, Text, Title } from "@mantine/core";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
@@ -46,41 +47,47 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <main style={{ maxWidth: 420 }}>
-      <h1>Nové heslo</h1>
+    <Paper shadow="sm" p="xl" radius="md" withBorder>
+      <Title order={2}>Nové heslo</Title>
       {!ready ? (
-        <p style={{ fontSize: 14, color: "#64748b" }}>
+        <Text size="sm" c="dimmed" mt="md">
           Otevřete odkaz z e-mailu v tomto prohlížeči. Pokud relace nepřijde, zkuste znovu „Zapomenuté heslo“.
-        </p>
+        </Text>
       ) : (
-        <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
-          <input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Nové heslo"
-            type="password"
-            required
-            minLength={8}
-            autoComplete="new-password"
-          />
-          <input
-            value={password2}
-            onChange={(e) => setPassword2(e.target.value)}
-            placeholder="Nové heslo znovu"
-            type="password"
-            required
-            minLength={8}
-            autoComplete="new-password"
-          />
-          <button type="submit" disabled={loading}>
-            {loading ? "Ukládám…" : "Nastavit heslo"}
-          </button>
+        <form onSubmit={handleSubmit}>
+          <Stack gap="md" mt="lg">
+            <PasswordInput
+              label="Nové heslo"
+              value={password}
+              onChange={(e) => setPassword(e.currentTarget.value)}
+              required
+              minLength={8}
+              autoComplete="new-password"
+            />
+            <PasswordInput
+              label="Nové heslo znovu"
+              value={password2}
+              onChange={(e) => setPassword2(e.currentTarget.value)}
+              required
+              minLength={8}
+              autoComplete="new-password"
+            />
+            <Button type="submit" fullWidth loading={loading}>
+              {loading ? "Ukládám…" : "Nastavit heslo"}
+            </Button>
+          </Stack>
         </form>
       )}
-      <p style={{ marginTop: 16 }}>
-        <Link href="/auth/login">Přihlášení</Link>
-      </p>
-      {message ? <p role="alert">{message}</p> : null}
-    </main>
+
+      <Anchor component={Link} href="/auth/login" size="sm" mt="lg" display="inline-block">
+        Přihlášení
+      </Anchor>
+
+      {message ? (
+        <Text role="alert" c="red" size="sm" mt="md">
+          {message}
+        </Text>
+      ) : null}
+    </Paper>
   );
 }

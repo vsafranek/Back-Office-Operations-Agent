@@ -1,11 +1,17 @@
 "use client";
 
-import { useCallback, useState, type CSSProperties } from "react";
+import { Box, Loader, Text } from "@mantine/core";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import type { AgentTraceEventRow } from "@/lib/agent/trace/types";
 
 type Props = {
   runId: string;
   getAccessToken: () => Promise<string | null>;
+  /**
+   * `standalone` — tlačítko Zobrazit/skrýt (výchozí).
+   * `embedded` — bez vnějšího tlačítka, načte trace po vykreslení (např. uvnitř bubliny).
+   */
+  variant?: "standalone" | "embedded";
 };
 
 function kindStyle(kind: string): CSSProperties {
@@ -135,7 +141,7 @@ function TraceNode({
   );
 }
 
-export function AgentTraceTree({ runId, getAccessToken }: Props) {
+export function AgentTraceTree({ runId, getAccessToken, variant = "standalone" }: Props) {
   const [events, setEvents] = useState<AgentTraceEventRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -174,6 +180,11 @@ export function AgentTraceTree({ runId, getAccessToken }: Props) {
   }
   const roots = byParent.get(null) ?? [];
 
+  useEffect(() => {
+    if (variant !== "embedded") return;
+    void load();
+  }, [variant, load]);
+
   const toggle = () => {
     if (!expanded) {
       setExpanded(true);
@@ -185,26 +196,47 @@ export function AgentTraceTree({ runId, getAccessToken }: Props) {
     }
   };
 
+  const body = (
+    <>
+      {loading && events == null ? (
+        <Box py="xs">
+          <Loader size="sm" type="dots" />
+          <Text size="xs" c="dimmed" mt="xs">
+            Načítám trace…
+          </Text>
+        </Box>
+      ) : null}
+      {err ? (
+        <Text size="sm" c="red">
+          {err}
+        </Text>
+      ) : null}
+      {events && events.length === 0 ? (
+        <Text size="sm" c="dimmed">
+          Žádné záznamy trace.
+        </Text>
+      ) : null}
+      {events && events.length > 0 ? (
+        <ul style={{ paddingLeft: 0, margin: "8px 0 0" }}>
+          {roots.map((r) => (
+            <TraceNode key={r.id} node={r} byParent={byParent} depth={0} />
+          ))}
+        </ul>
+      ) : null}
+    </>
+  );
+
+  if (variant === "embedded") {
+    return <div>{body}</div>;
+  }
+
   return (
     <div style={{ marginTop: 8 }}>
       <button type="button" onClick={toggle}>
         {expanded ? "Skrýt strom agent ↔ nástroje" : "Zobrazit strom agent ↔ nástroje"}{" "}
         <span style={{ fontFamily: "monospace", fontSize: 12 }}>({runId.slice(0, 8)}…)</span>
       </button>
-      {expanded ? (
-        <div style={{ marginTop: 8 }}>
-          {loading && events == null ? <p style={{ color: "#64748b" }}>Načítám trace…</p> : null}
-          {err ? <p style={{ color: "crimson" }}>{err}</p> : null}
-          {events && events.length === 0 ? <p style={{ color: "#64748b" }}>Žádné záznamy trace.</p> : null}
-          {events && events.length > 0 ? (
-            <ul style={{ paddingLeft: 0, margin: "8px 0 0" }}>
-              {roots.map((r) => (
-                <TraceNode key={r.id} node={r} byParent={byParent} depth={0} />
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
+      {expanded ? <div style={{ marginTop: 8 }}>{body}</div> : null}
     </div>
   );
 }

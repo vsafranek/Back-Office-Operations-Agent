@@ -1,5 +1,6 @@
 "use client";
 
+import { Loader, Paper, Stack, Text, Title } from "@mantine/core";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
@@ -29,8 +30,16 @@ export default function AuthCallbackPage() {
   }, [router]);
 
   return (
-    <main style={{ maxWidth: 420 }}>
-      <p>{message}</p>
-    </main>
+    <Paper shadow="sm" p="xl" radius="md" withBorder>
+      <Stack align="center" gap="md">
+        <Loader size="sm" />
+        <div style={{ textAlign: "center" }}>
+          <Title order={4}>Ověření účtu</Title>
+          <Text size="sm" c="dimmed" mt="xs">
+            {message}
+          </Text>
+        </div>
+      </Stack>
+    </Paper>
   );
 }
