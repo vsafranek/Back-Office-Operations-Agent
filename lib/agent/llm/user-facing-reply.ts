@@ -116,8 +116,23 @@ export async function generateUserFacingReply(params: {
     });
 
   const streamFirst = Boolean(params.onAnswerDelta);
-  let llm = streamFirst
-    ? await streamWithAzureProxy({
+  const streamMessages: Parameters<typeof streamWithAzureProxy>[0]["messages"] = [
+    { role: "system", content: system },
+    { role: "user", content: params.userContent }
+  ];
+
+  let llm: Awaited<ReturnType<typeof generateWithAzureProxy>>;
+  if (streamFirst) {
+    const onTextDelta = (() => {
+      let buf = "";
+      let lastLen = 0;
+      return (chunk: string) => {
+        buf += chunk;
+        lastLen = emitAnswerStreamDelta(params.onAnswerDelta, buf, lastLen);
+      };
+    })();
+    try {
+      llm = await streamWithAzureProxy({
         runId: params.runId,
         maxTokens: params.maxTokens ?? 900,
         trace: params.trace
@@ -127,20 +142,34 @@ export async function generateUserFacingReply(params: {
               name: `${llmName}`
             }
           : undefined,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: params.userContent }
-        ],
-        onTextDelta: (() => {
-          let buf = "";
-          let lastLen = 0;
-          return (chunk: string) => {
-            buf += chunk;
-            lastLen = emitAnswerStreamDelta(params.onAnswerDelta, buf, lastLen);
-          };
-        })()
-      })
-    : await run(params.userContent, "");
+        messages: streamMessages,
+        onTextDelta
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (
+        msg.includes("did not include message content") ||
+        msg.includes("Streamed completion did not include message content")
+      ) {
+        llm = await generateWithAzureProxy({
+          runId: params.runId,
+          maxTokens: params.maxTokens ?? 900,
+          trace: params.trace
+            ? {
+                recorder: params.trace.recorder,
+                parentId: params.trace.parentId,
+                name: `${llmName}.nonstream-fallback`
+              }
+            : undefined,
+          messages: streamMessages
+        });
+      } else {
+        throw err;
+      }
+    }
+  } else {
+    llm = await run(params.userContent, "");
+  }
 
   let parsed = tryParseJsonObject(UserReplySchema, llm.text);
   if (parsed) {

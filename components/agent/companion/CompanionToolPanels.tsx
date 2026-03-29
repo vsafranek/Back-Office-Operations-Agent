@@ -66,6 +66,7 @@ const VIZ_SIDEBAR_KINDS = new Set<AgentDataPanelModel["kind"]>([
   "leads_sales_6m",
   "clients_filtered",
   "deal_sales_detail",
+  "missing_reconstruction",
   "market_listings"
 ]);
 

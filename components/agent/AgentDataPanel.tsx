@@ -8,6 +8,7 @@ import {
   getAnalyticsTableDisplayKeys,
   type AnalyticsTablePanelKind
 } from "@/lib/agent/analytics/table-display-columns";
+import { columnHeaderLabel, formatBrowserCell } from "@/lib/data/data-browser-presets";
 import type {
   AgentDataPanel as AgentDataPanelModel,
   AgentDataPanelDownloads,
@@ -58,11 +59,18 @@ function orderedKeysForRows(rows: Record<string, unknown>[]): string[] {
 
 function ClientsTable({
   rows,
-  orderedKeys
+  orderedKeys,
+  headerForKey,
+  formatCellValue
 }: {
   rows: Record<string, unknown>[];
   orderedKeys: string[];
+  headerForKey?: (key: string) => string;
+  /** Hodnota buňky; výchozí `formatCell`. */
+  formatCellValue?: (key: string, value: unknown) => string;
 }) {
+  const th = headerForKey ?? headerLabel;
+  const cell = formatCellValue ?? ((_k: string, v: unknown) => formatCell(v));
   return (
     <div style={{ overflow: "auto", maxHeight: 320, border: "1px solid #e2e8f0", borderRadius: 8 }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -70,7 +78,7 @@ function ClientsTable({
           <tr style={{ background: "#f1f5f9", textAlign: "left" }}>
             {orderedKeys.map((key) => (
               <th key={key} style={{ padding: "8px 10px", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" }}>
-                {headerLabel(key)}
+                {th(key)}
               </th>
             ))}
           </tr>
@@ -96,7 +104,7 @@ function ClientsTable({
                       textOverflow: "ellipsis"
                     }}
                   >
-                    {formatCell(row[key])}
+                    {cell(key, row[key])}
                   </td>
                 ))}
               </tr>
@@ -506,10 +514,22 @@ type AnalyticsPanelCommon = {
   title?: string;
   /** Sloupce tabulky v UI — exporty dál berou všechny sloupce z dat. */
   analyticsTableKind: AnalyticsTablePanelKind;
+  /** Stejné hlavičky a formát buněk jako Data panel (rekonstrukce). */
+  tablePresentation?: "default" | "missing_reconstruction";
 };
 
 function AnalyticsDataPanelTabs(props: AnalyticsPanelCommon) {
-  const { source, rows, charts, hideChart, rowsTruncationNote, dataPanelDownloads, title, analyticsTableKind } = props;
+  const {
+    source,
+    rows,
+    charts,
+    hideChart,
+    rowsTruncationNote,
+    dataPanelDownloads,
+    title,
+    analyticsTableKind,
+    tablePresentation = "default"
+  } = props;
   const fullKeys = useMemo(() => orderedKeysForRows(rows), [rows]);
   const displayKeys = useMemo(
     () => getAnalyticsTableDisplayKeys(analyticsTableKind, rows),
@@ -517,18 +537,61 @@ function AnalyticsDataPanelTabs(props: AnalyticsPanelCommon) {
   );
   const orderedKeys = displayKeys.length > 0 ? displayKeys : fullKeys;
   const headerTitle = title ?? "Data z dotazu";
+  const showChartsTab = charts.length > 0;
+
+  const headerForKey =
+    tablePresentation === "missing_reconstruction"
+      ? (key: string) => columnHeaderLabel("missing_reconstruction", key)
+      : undefined;
+  const formatCellValue =
+    tablePresentation === "missing_reconstruction"
+      ? (_key: string, value: unknown) => formatBrowserCell(value)
+      : undefined;
+
+  const tableBlock = (
+    <>
+      {showChartsTab ? (
+        <p style={{ margin: "0 0 8px", fontSize: 12, color: "#64748b" }}>
+          Grafy vycházejí ze stejných {rows.length} řádků jako tato tabulka.
+        </p>
+      ) : null}
+      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 15 }}>Tabulka</div>
+      <ClientsTable
+        rows={rows}
+        orderedKeys={orderedKeys}
+        headerForKey={headerForKey}
+        formatCellValue={formatCellValue}
+      />
+      <CompactTableDownloads downloads={dataPanelDownloads} />
+    </>
+  );
+
+  const headerBlock = (
+    <div>
+      <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>{headerTitle}</h2>
+      <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
+        Zdroj: <code>{source}</code> · {rows.length} řádků v tabulce
+      </p>
+      {rowsTruncationNote ? (
+        <p style={{ margin: "8px 0 0", fontSize: 12, color: "#b45309" }}>{rowsTruncationNote}</p>
+      ) : null}
+    </div>
+  );
+
+  if (!showChartsTab) {
+    return (
+      <div style={panelChrome}>
+        {headerBlock}
+        <div style={{ paddingTop: 16 }}>
+          {tableBlock}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={panelChrome}>
-      <div>
-        <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>{headerTitle}</h2>
-        <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
-          Zdroj: <code>{source}</code> · {rows.length} řádků v tabulce
-        </p>
-        {rowsTruncationNote ? (
-          <p style={{ margin: "8px 0 0", fontSize: 12, color: "#b45309" }}>{rowsTruncationNote}</p>
-        ) : null}
-      </div>
+      {headerBlock}
 
       <Tabs defaultValue="table" keepMounted={false}>
         <Tabs.List>
@@ -536,41 +599,26 @@ function AnalyticsDataPanelTabs(props: AnalyticsPanelCommon) {
           <Tabs.Tab value="charts">Grafy</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="table" pt="md">
-          {charts.length > 0 ? (
-            <p style={{ margin: "0 0 8px", fontSize: 12, color: "#64748b" }}>
-              Grafy vycházejí ze stejných {rows.length} řádků jako tato tabulka.
-            </p>
-          ) : null}
-          <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 15 }}>Tabulka</div>
-          <ClientsTable rows={rows} orderedKeys={orderedKeys} />
-          <CompactTableDownloads downloads={dataPanelDownloads} />
+          {tableBlock}
         </Tabs.Panel>
         <Tabs.Panel value="charts" pt="md">
-          {charts.length === 0 ? (
-            <Text size="sm" c="dimmed">
-              {hideChart
-                ? "Grafy jsou pro tento běh vypnuté podle zadání."
-                : "Pro tato data není k dispozici odvozený graf. Zkuste upřesnit dotaz (např. rozklad podle kanálu nebo města)."}
-            </Text>
-          ) : (
-            <Stack gap="lg">
-              {charts.map((c, i) => (
-                <DerivedChartView
-                  key={i}
-                  chart={c}
-                  hideChart={hideChart}
-                  pngDownload={
-                    dataPanelDownloads?.chartPngs?.[i]
-                      ? {
-                          url: dataPanelDownloads.chartPngs[i]!.url,
-                          label: dataPanelDownloads.chartPngs[i]!.label
-                        }
-                      : undefined
-                  }
-                />
-              ))}
-            </Stack>
-          )}
+          <Stack gap="lg">
+            {charts.map((c, i) => (
+              <DerivedChartView
+                key={i}
+                chart={c}
+                hideChart={hideChart}
+                pngDownload={
+                  dataPanelDownloads?.chartPngs?.[i]
+                    ? {
+                        url: dataPanelDownloads.chartPngs[i]!.url,
+                        label: dataPanelDownloads.chartPngs[i]!.label
+                      }
+                    : undefined
+                }
+              />
+            ))}
+          </Stack>
         </Tabs.Panel>
       </Tabs>
     </div>
@@ -621,6 +669,21 @@ export function AgentDataPanel({
         dataPanelDownloads={dataPanelDownloads}
         title="Leady vs prodané byty"
         analyticsTableKind="leads_sales_6m"
+      />
+    );
+  }
+
+  if (panel.kind === "missing_reconstruction") {
+    return (
+      <AnalyticsDataPanelTabs
+        source={panel.source}
+        rows={panel.rows}
+        charts={[]}
+        rowsTruncationNote={panel.rowsTruncationNote}
+        dataPanelDownloads={dataPanelDownloads}
+        title={panel.title}
+        analyticsTableKind="missing_reconstruction"
+        tablePresentation="missing_reconstruction"
       />
     );
   }

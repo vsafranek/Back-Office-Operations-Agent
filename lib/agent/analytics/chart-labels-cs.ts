@@ -32,7 +32,14 @@ export const COLUMN_LABEL_CS: Record<string, string> = {
   deal_source: "Zdroj obchodu",
   property_kind: "Druh nemovitosti",
   client_id: "Klient (ID)",
-  property_id: "Nemovitost (ID)"
+  property_id: "Nemovitost (ID)",
+  address: "Adresa (strukturovaná)",
+  missing_reconstruction: "Chybí rekonstrukce",
+  missing_structural_changes: "Chybí stavební úpravy",
+  reconstruction_status: "Stav rekonstrukce",
+  building_works_checklist: "Checklist stavebních prací",
+  reconstruction_budget_estimate_czk: "Odhad rozpočtu rek. (Kč)",
+  reconstruction_last_reviewed_at: "Poslední kontrola rek."
 };
 
 /** Krátké popisky jednotek / metrik podle sloupce a kontextu. */

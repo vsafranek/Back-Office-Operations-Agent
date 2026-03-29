@@ -29,3 +29,29 @@ export async function loadUserDataBrowserPresetPlan(userId: string, presetId: st
     derived_chart_kind_hint: data.derived_chart_kind_hint ?? null
   });
 }
+
+/** Sloupcové filtry uložené u presetu (UI, filtrace až na klientovi po načtení řádků). */
+export async function loadUserBrowserPresetColumnFilters(
+  userId: string,
+  presetId: string
+): Promise<Record<string, string>> {
+  const supabase = getSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from("user_data_browser_presets")
+    .select("column_filters")
+    .eq("id", presetId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Preset: ${error.message}`);
+  const raw = data?.column_filters as unknown;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof k !== "string" || !k.trim()) continue;
+    const s = typeof v === "string" ? v : v != null ? String(v) : "";
+    if (!s) continue;
+    out[k] = s.length > 160 ? s.slice(0, 160) : s;
+  }
+  return out;
+}

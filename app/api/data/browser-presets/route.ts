@@ -8,12 +8,24 @@ export const runtime = "nodejs";
 
 const datasetEnum = z.enum(DATASET_IDS);
 
+const columnFiltersSchema = z
+  .record(z.string().max(64), z.string().max(160))
+  .optional()
+  .nullable()
+  .superRefine((val, ctx) => {
+    if (!val) return;
+    if (Object.keys(val).length > 40) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "column_filters_max_keys" });
+    }
+  });
+
 const createBodySchema = z.object({
   name: z.string().min(1).max(120),
   base_dataset: datasetEnum,
   row_text_narrowing: z.string().max(160).optional().nullable(),
   client_filters: ClientFiltersSchema.optional().nullable(),
   filter_label: z.string().max(220).optional().nullable(),
+  column_filters: columnFiltersSchema,
   suggest_source_channel_chart: z.boolean().optional(),
   suggest_derived_charts: z.boolean().optional(),
   derived_chart_kind_hint: z.enum(["bar", "line", "pie"]).optional().nullable()
@@ -29,7 +41,7 @@ export async function GET(request: Request) {
     const supabase = getSupabaseAdminClient();
     const { data, error } = await supabase
       .from("user_data_browser_presets")
-      .select("id, name, base_dataset, row_text_narrowing, created_at")
+      .select("id, name, base_dataset, row_text_narrowing, column_filters, created_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
@@ -54,6 +66,17 @@ export async function POST(request: Request) {
       return Response.json({ error: "Neplatné parametry.", details: parsed.error.flatten() }, { status: 400 });
     }
     const b = parsed.data;
+    const cfRaw = b.column_filters;
+    const column_filters =
+      cfRaw && typeof cfRaw === "object"
+        ? Object.fromEntries(
+            Object.entries(cfRaw)
+              .filter(([k, v]) => k.trim().length > 0 && typeof v === "string" && v.trim().length > 0)
+              .map(([k, v]) => [k.trim(), v.trim().slice(0, 160)])
+          )
+        : {};
+    const column_filters_db = Object.keys(column_filters).length > 0 ? column_filters : null;
+
     const supabase = getSupabaseAdminClient();
     const { data, error } = await supabase
       .from("user_data_browser_presets")
@@ -64,12 +87,13 @@ export async function POST(request: Request) {
         row_text_narrowing: b.row_text_narrowing?.trim() || null,
         client_filters: b.client_filters ?? null,
         filter_label: b.filter_label?.trim() || null,
+        column_filters: column_filters_db,
         suggest_source_channel_chart: b.suggest_source_channel_chart ?? false,
         suggest_derived_charts: b.suggest_derived_charts ?? false,
         derived_chart_kind_hint: b.derived_chart_kind_hint ?? null,
         updated_at: new Date().toISOString()
       })
-      .select("id, name, base_dataset, row_text_narrowing, created_at")
+      .select("id, name, base_dataset, row_text_narrowing, column_filters, created_at")
       .single();
 
     if (error) throw new Error(error.message);

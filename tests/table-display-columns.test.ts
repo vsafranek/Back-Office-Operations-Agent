@@ -47,4 +47,26 @@ describe("getAnalyticsTableDisplayKeys", () => {
     expect(keys).not.toContain("buyer_snapshot");
     expect(keys.indexOf("sold_at")).toBeLessThan(keys.indexOf("full_name"));
   });
+
+  it("missing_reconstruction follows DATA_BROWSER_PRESETS order and hides id-like columns", () => {
+    const rows = [
+      {
+        property_id: "p1",
+        title: "Byt 2",
+        city: "Brno",
+        address: { street: "x" },
+        reconstruction_status: "Částečná",
+        missing_reconstruction: true,
+        missing_structural_changes: false,
+        reconstruction_budget_estimate_czk: 250_000,
+        reconstruction_last_reviewed_at: "2026-03-01",
+        building_works_checklist: ["ok"]
+      }
+    ];
+    const keys = getAnalyticsTableDisplayKeys("missing_reconstruction", rows);
+    expect(keys).not.toContain("property_id");
+    expect(keys).not.toContain("address");
+    expect(keys).not.toContain("building_works_checklist");
+    expect(keys.slice(0, 3)).toEqual(["title", "city", "reconstruction_status"]);
+  });
 });

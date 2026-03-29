@@ -18,7 +18,11 @@ import {
 import { useDisclosure } from "@mantine/hooks";
 import { IconDeviceFloppy, IconMaximize, IconTrash } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { DATASET_IDS, type DataPullDataset } from "@/lib/agent/tools/data-pull-plan";
+import {
+  DATASET_IDS,
+  type DataPullDataset,
+  normalizeAsciiForSearch
+} from "@/lib/agent/tools/data-pull-plan";
 import {
   browserPresetSourceCaption,
   columnHeaderLabel,
@@ -45,17 +49,52 @@ type SavedPresetRow = {
   name: string;
   base_dataset: DataPullDataset;
   row_text_narrowing: string | null;
+  column_filters?: unknown;
   created_at: string;
 };
+
+function normalizeColumnFiltersFromDb(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof k !== "string" || !k.trim()) continue;
+    const s = typeof v === "string" ? v : v != null ? String(v) : "";
+    const t = s.trim();
+    if (!t) continue;
+    out[k] = t.length > 160 ? t.slice(0, 160) : t;
+  }
+  return out;
+}
+
+function rowMatchesColumnFilters(
+  row: Record<string, unknown>,
+  filters: Record<string, string>
+): boolean {
+  for (const [key, raw] of Object.entries(filters)) {
+    const q = raw.trim();
+    if (!q) continue;
+    const cellText = String(formatBrowserCell(row[key]) ?? "");
+    const hay = normalizeAsciiForSearch(cellText);
+    const needle = normalizeAsciiForSearch(q);
+    if (!hay.includes(needle)) return false;
+  }
+  return true;
+}
 
 function TableBlock({
   dataset,
   displayColumns,
-  rows
+  rows,
+  columnFilters,
+  onColumnFilterChange,
+  filterEnabled
 }: {
   dataset: DataPullDataset;
   displayColumns: string[];
   rows: Record<string, unknown>[];
+  columnFilters?: Record<string, string>;
+  onColumnFilterChange?: (columnKey: string, value: string) => void;
+  filterEnabled?: boolean;
 }) {
   if (displayColumns.length === 0) {
     return (
@@ -70,8 +109,22 @@ function TableBlock({
       <Table.Thead>
         <Table.Tr>
           {displayColumns.map((k) => (
-            <Table.Th key={k} style={{ whiteSpace: "nowrap", minWidth: 90 }}>
-              {columnHeaderLabel(dataset, k)}
+            <Table.Th key={k} style={{ verticalAlign: "top", minWidth: filterEnabled ? 130 : 90 }}>
+              <Stack gap={6}>
+                <Text size="xs" fw={700} style={{ whiteSpace: "nowrap" }}>
+                  {columnHeaderLabel(dataset, k)}
+                </Text>
+                {filterEnabled && onColumnFilterChange ? (
+                  <TextInput
+                    size="xs"
+                    placeholder="Obsahuje…"
+                    aria-label={`Filtr sloupce ${columnHeaderLabel(dataset, k)}`}
+                    value={columnFilters?.[k] ?? ""}
+                    onChange={(e) => onColumnFilterChange(k, e.currentTarget.value)}
+                    maxLength={160}
+                  />
+                ) : null}
+              </Stack>
             </Table.Th>
           ))}
         </Table.Tr>
@@ -110,6 +163,7 @@ export function DataPresetPanel({ getAccessToken }: Props) {
   const [rowsPerPage, setRowsPerPage] = useState("10");
   const [page, setPage] = useState(1);
   const [globalSearch, setGlobalSearch] = useState("");
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [source, setSource] = useState("");
   const [loading, setLoading] = useState(false);
@@ -168,11 +222,14 @@ export function DataPresetPanel({ getAccessToken }: Props) {
   const needsTextFilterToSave =
     isBuiltinSelection &&
     ["clients", "new_clients_q1", "deal_sales_detail", "properties", "deals", "leads"].includes(dataset);
-  const canSaveView = Boolean(source) && (!needsTextFilterToSave || globalSearch.trim().length > 0);
+  const hasColumnFilter = Object.values(columnFilters).some((v) => v.trim().length > 0);
+  const canSaveView =
+    Boolean(source) &&
+    (!needsTextFilterToSave || globalSearch.trim().length > 0 || hasColumnFilter);
   const saveBlockReason = !source
     ? "Nejdřív načtěte data v kroku Tabulka."
-    : needsTextFilterToSave && !globalSearch.trim()
-      ? "Pro uložení doplňte rychlé vyhledávání (u této tabulky je filtr povinný)."
+    : needsTextFilterToSave && !globalSearch.trim() && !hasColumnFilter
+      ? "Pro uložení doplňte buď text v prvním kroku, nebo alespoň jeden filtr ve sloupci tabulky."
       : "";
 
   const displayColumns = useMemo(
@@ -180,20 +237,49 @@ export function DataPresetPanel({ getAccessToken }: Props) {
     [dataset, rows]
   );
 
+  useEffect(() => {
+    setColumnFilters((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const k of Object.keys(next)) {
+        if (!displayColumns.includes(k)) {
+          delete next[k];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [displayColumns]);
+
+  const filteredRows = useMemo(
+    () => rows.filter((row) => rowMatchesColumnFilters(row, columnFilters)),
+    [rows, columnFilters]
+  );
+
   const perPage = Math.max(1, Number.parseInt(rowsPerPage, 10) || 10);
-  const totalPages = Math.max(1, Math.ceil(rows.length / perPage));
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / perPage));
 
   useEffect(() => {
     setPage((p) => Math.min(Math.max(1, p), totalPages));
-  }, [totalPages, rows.length, perPage]);
+  }, [totalPages, filteredRows.length, perPage]);
 
   const pagedRows = useMemo(() => {
     const start = (page - 1) * perPage;
-    return rows.slice(start, start + perPage);
-  }, [rows, page, perPage]);
+    return filteredRows.slice(start, start + perPage);
+  }, [filteredRows, page, perPage]);
 
-  const rangeStart = rows.length === 0 ? 0 : (page - 1) * perPage + 1;
-  const rangeEnd = Math.min(page * perPage, rows.length);
+  const rangeStart = filteredRows.length === 0 ? 0 : (page - 1) * perPage + 1;
+  const rangeEnd = Math.min(page * perPage, filteredRows.length);
+
+  const setColumnFilter = useCallback((key: string, value: string) => {
+    setColumnFilters((prev) => {
+      const next = { ...prev };
+      if (!value.trim()) delete next[key];
+      else next[key] = value;
+      return next;
+    });
+    setPage(1);
+  }, []);
 
   async function loadData() {
     setLoading(true);
@@ -222,6 +308,7 @@ export function DataPresetPanel({ getAccessToken }: Props) {
       rows?: Record<string, unknown>[];
       source?: string;
       error?: string;
+      column_filters?: Record<string, string> | null;
     };
     setLoading(false);
     if (!res.ok) {
@@ -230,6 +317,15 @@ export function DataPresetPanel({ getAccessToken }: Props) {
     }
     setRows(data.rows ?? []);
     setSource(data.source ?? "");
+    if (savedIdForQuery) {
+      setColumnFilters(
+        data.column_filters && typeof data.column_filters === "object"
+          ? normalizeColumnFiltersFromDb(data.column_filters)
+          : {}
+      );
+    } else {
+      setColumnFilters({});
+    }
     setPage(1);
     setStep(1);
   }
@@ -238,6 +334,7 @@ export function DataPresetPanel({ getAccessToken }: Props) {
     setStep(0);
     setRows([]);
     setSource("");
+    setColumnFilters({});
     setPage(1);
     setErr(null);
     closeModal();
@@ -254,17 +351,21 @@ export function DataPresetPanel({ getAccessToken }: Props) {
       setSaveLoading(false);
       return;
     }
+    const cfPayload = Object.fromEntries(
+      Object.entries(columnFilters).filter(([, v]) => v.trim().length > 0)
+    );
     const res = await fetch("/api/data/browser-presets", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({
         name,
         base_dataset: dataset,
-        row_text_narrowing: globalSearch.trim() || null
+        row_text_narrowing: globalSearch.trim() || null,
+        column_filters: Object.keys(cfPayload).length > 0 ? cfPayload : null
       })
     });
     const data = (await res.json()) as {
-      preset?: { id: string; row_text_narrowing: string | null };
+      preset?: { id: string; row_text_narrowing: string | null; column_filters?: unknown };
       error?: string;
     };
     setSaveLoading(false);
@@ -276,6 +377,7 @@ export function DataPresetPanel({ getAccessToken }: Props) {
       await refreshSavedPresets();
       setSelectValue(`saved:${data.preset.id}`);
       setGlobalSearch(data.preset.row_text_narrowing ?? "");
+      setColumnFilters(normalizeColumnFiltersFromDb(data.preset.column_filters));
     }
     setSaveName("");
     closeSaveModal();
@@ -307,9 +409,11 @@ export function DataPresetPanel({ getAccessToken }: Props) {
   return (
     <Stack gap="md">
       <Text size="sm" c="dimmed">
-        Zvolte zdroj a načtěte náhled. V kroku Data můžete upravit rychlé vyhledávání a znovu načíst; uložení pohledu je
-        až potud (u tabulek Klienti / Q1 / Prodeje — detail musí být vyplněn alespoň filtr v textovém poli). Šipky pod
-        tabulkou posouvají šířku; „Zvětšit“ otevře celý výpis.
+        Zvolte zdroj a klikněte <Text span fw={600}>Načíst data</Text>. Volitelný text v prvním kroku zúží dotaz na serveru;
+        po načtení můžete v kroku <Text span fw={600}>Data</Text> filtrovat každý sloupec zvlášť (obsahuje text). Filtry
+        ve sloupcích se ukládají s pohledem. U tabulek Klienti / Q1 / Prodeje je pro uložení potřeba vyplnit buď text v
+        prvním kroku, nebo alespoň jeden sloupcový filtr. Posuvník pod tabulkou zůstává viditelný pro horizontální posun.
+        „Zvětšit“ otevře celý výpis.
       </Text>
 
       <Modal opened={saveModalOpened} onClose={closeSaveModal} title="Uložit pohled" size="sm">
@@ -323,8 +427,7 @@ export function DataPresetPanel({ getAccessToken }: Props) {
             maxLength={120}
           />
           <Text size="xs" c="dimmed">
-            Uloží se zdroj „{preset.title}“ a aktuální text rychlého vyhledávání (stejné jako v kroku Data po případné
-            úpravě filtrů).
+            Uloží se zdroj „{preset.title}“, text z prvního kroku a aktuální filtry ve sloupcích tabulky.
           </Text>
           <Group justify="flex-end">
             <Button variant="default" size="xs" onClick={closeSaveModal}>
@@ -344,11 +447,18 @@ export function DataPresetPanel({ getAccessToken }: Props) {
         fullScreen
         scrollAreaComponent={ScrollArea.Autosize}
       >
-        <ScrollArea h="calc(100dvh - 100px)" type="scroll" scrollbars="xy" offsetScrollbars>
-          <TableBlock dataset={dataset} displayColumns={displayColumns} rows={rows} />
+        <ScrollArea h="calc(100dvh - 100px)" type="always" scrollbars="xy" offsetScrollbars scrollbarSize={10}>
+          <TableBlock
+            dataset={dataset}
+            displayColumns={displayColumns}
+            rows={filteredRows}
+            columnFilters={columnFilters}
+            onColumnFilterChange={setColumnFilter}
+            filterEnabled
+          />
         </ScrollArea>
         <Text size="xs" c="dimmed" mt="md">
-          Celkem {rows.length} načtených řádků · {source}
+          Celkem {filteredRows.length} řádků po sloupcových filtrech ({rows.length} načtených) · {source}
         </Text>
       </Modal>
 
@@ -366,7 +476,12 @@ export function DataPresetPanel({ getAccessToken }: Props) {
                 if (v.startsWith("saved:")) {
                   const id = v.slice(6);
                   const p = savedPresets.find((s) => s.id === id);
-                  if (p) setGlobalSearch(p.row_text_narrowing ?? "");
+                  if (p) {
+                    setGlobalSearch(p.row_text_narrowing ?? "");
+                    setColumnFilters(normalizeColumnFiltersFromDb(p.column_filters));
+                  }
+                } else {
+                  setColumnFilters({});
                 }
                 setErr(null);
               }}
@@ -374,9 +489,9 @@ export function DataPresetPanel({ getAccessToken }: Props) {
               searchable
             />
             <TextInput
-              label="Rychlé vyhledání při prvním načtení (volitelné)"
-              description="Po zobrazení tabulky ho můžete v kroku Data upravit a znovu načíst. U pipeline view zadejte část názvu stavu leadu."
-              placeholder="Klienti: jméno, město… · Pipeline: stav…"
+              label="Textový filtr před načtením"
+              description="Nepovinné. Prázdné pole je v pořádku — načte se celý náhled. Pokud něco vyplníte, hledá se libovolný kus tohoto textu v řádcích (u klientů např. jméno nebo město; u pipeline stačí část názvu stavu). Stejný filtr upravíte znovu v kroku Data."
+              placeholder="Nechte prázdné, nebo např. Brno · Novák · rezervace…"
               value={globalSearch}
               onChange={(e) => setGlobalSearch(e.currentTarget.value)}
               size="xs"
@@ -423,7 +538,7 @@ export function DataPresetPanel({ getAccessToken }: Props) {
                   size="xs"
                   leftSection={<IconMaximize size={16} stroke={1.5} />}
                   onClick={openModal}
-                  disabled={rows.length === 0}
+                  disabled={filteredRows.length === 0}
                 >
                   Zvětšit
                 </Button>
@@ -436,9 +551,9 @@ export function DataPresetPanel({ getAccessToken }: Props) {
             {isBuiltinSelection ? (
               <Stack gap="xs">
                 <TextInput
-                  label="Rychlé vyhledávání (filtry)"
-                  description="Upravte dotaz a znovu načtěte stejný zdroj."
-                  placeholder="Stejné jako v prvním kroku — text podle typu tabulky."
+                  label="Textový filtr (server)"
+                  description="Znovu dotáhne data z API. Sloupcové filtry pod tabulkou zůstanou a po načtení je můžete upravit — pro čistý začátek je vymažte ručně."
+                  placeholder="Nechte prázdné, nebo upravte dotaz…"
                   value={globalSearch}
                   onChange={(e) => setGlobalSearch(e.currentTarget.value)}
                   size="xs"
@@ -461,22 +576,29 @@ export function DataPresetPanel({ getAccessToken }: Props) {
             ) : null}
 
             <ScrollArea
-              type="scroll"
+              type="always"
               scrollbars="x"
               offsetScrollbars
               style={{ maxWidth: "100%" }}
               maw={720}
-              scrollbarSize={8}
+              scrollbarSize={10}
             >
-              <TableBlock dataset={dataset} displayColumns={displayColumns} rows={pagedRows} />
+              <TableBlock
+                dataset={dataset}
+                displayColumns={displayColumns}
+                rows={pagedRows}
+                columnFilters={columnFilters}
+                onColumnFilterChange={setColumnFilter}
+                filterEnabled
+              />
             </ScrollArea>
 
-            {rows.length > 0 ? (
+            {filteredRows.length > 0 ? (
               <Stack gap="xs">
                 <Group justify="space-between" align="center" wrap="wrap" gap="md">
                   <Text size="xs" c="dimmed">
-                    Řádky {rangeStart}–{rangeEnd} z {rows.length}
-                    {rows.length >= BROWSER_FETCH_LIMIT ? " (dosáhnut limit náhledu)" : ""}
+                    Řádky {rangeStart}–{rangeEnd} z {filteredRows.length}
+                    {rows.length >= BROWSER_FETCH_LIMIT ? " (dosáhnut limit náhledu načtených řádků)" : ""}
                   </Text>
                   <Group gap="xs" wrap="nowrap">
                     <Text size="xs" c="dimmed">

@@ -12,6 +12,61 @@ import { generateUserFacingReply } from "@/lib/agent/llm/user-facing-reply";
 import { shouldSuppressChartInPanel } from "@/lib/agent/question-panel-hints";
 import { fetchCrmSheetsForReport, shouldAttachCrmPortfolioSheets } from "@/lib/agent/tools/crm-excel-sheets";
 
+function boolFromRow(v: unknown): boolean {
+  return v === true || v === "true";
+}
+
+/**
+ * Pevné součty pro missing_reconstruction — model je často sčítá špatně; tyto čísla musí použít v answer_text.
+ */
+function missingReconstructionStatsBlock(rows: Record<string, unknown>[]): string {
+  let both = 0;
+  let onlyReconstructionNoteMissing = 0;
+  let onlyStructuralTextMissing = 0;
+  let unexpected = 0;
+  const statusCounts = new Map<string, number>();
+
+  for (const r of rows) {
+    const mr = boolFromRow(r.missing_reconstruction);
+    const ms = boolFromRow(r.missing_structural_changes);
+    if (mr && ms) both += 1;
+    else if (mr && !ms) onlyReconstructionNoteMissing += 1;
+    else if (!mr && ms) onlyStructuralTextMissing += 1;
+    else unexpected += 1;
+
+    const st = r.reconstruction_status;
+    const key = typeof st === "string" && st.trim() ? st : "(null/empty)";
+    statusCounts.set(key, (statusCounts.get(key) ?? 0) + 1);
+  }
+
+  const noBudget = rows.filter((r) => r.reconstruction_budget_estimate_czk == null).length;
+  const noReview = rows.filter((r) => r.reconstruction_last_reviewed_at == null).length;
+
+  const statusLines = [...statusCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => `  - ${k}: ${n}`)
+    .join("\n");
+
+  const sumParts = both + onlyReconstructionNoteMissing + onlyStructuralTextMissing;
+  return [
+    "AUTOMATICKY SPOCTENE METRIKY (musis je presne prevest do odpovedi; pocet radku = soucet tri vzajemne disjunktnich skupin):",
+    `- Pocet radku celkem: ${rows.length}`,
+    `- Chybi obe poznamky (reconstruction_notes i structural_changes — viz SQL): ${both}`,
+    `- Chybi jen poznamka k rekonstrukci (structural_changes vyplnen): ${onlyReconstructionNoteMissing}`,
+    `- Chybi jen text stavebnich uprav (reconstruction_notes vyplnen): ${onlyStructuralTextMissing}`,
+    unexpected > 0 ? `- NEOKAJOVE RADKY (oba flagy false — nemely by se vyskytnout): ${unexpected}` : null,
+    `- Bez odhadu rozpoctu (reconstruction_budget_estimate_czk null): ${noBudget}`,
+    `- Bez data posledni kontroly (reconstruction_last_reviewed_at null): ${noReview}`,
+    `Součet skupin (obě / jen rek. / jen stavební): ${sumParts} — musí se rovnat ${rows.length}.`,
+    "Rozpad podle reconstruction_status:",
+    statusLines || "  - (zadne)",
+    "",
+    "Vyznam sloupcu: missing_reconstruction = prazdne pole reconstruction_notes v DB; missing_structural_changes = prazdne structural_changes. building_works_checklist JSON muze byt vyplnen i kdyz text chybi — radka muze byt v seznamu i tak."
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export async function runAnalyticsSubAgent(params: {
   toolRunner: ToolRunner;
   ctx: AgentToolContext;
@@ -124,6 +179,9 @@ export async function runAnalyticsSubAgent(params: {
   } else if (data.preset === "new_clients_q1" && !showChannelChart && !data.rowTextNarrowing) {
     chartSummary =
       "Plán dat: bez grafu podle kanálu v UI — odpovídej z tabulky a čísel. Nezmiňuj graf v pravém panelu ani odkazy na sloupcový přehled podle zdroje, protože ten v tomto běhu není.";
+  } else if (data.preset === "missing_reconstruction") {
+    chartSummary =
+      "Panel Nástroje ukazuje jen tabulku (žádná záložka Grafy) — seznam nemovitostí s mezerami v údajích o rekonstrukci / stavebních úpravách z RPC. Odpovídej z řádků a artefaktů CSV/Excel; graphem se nezabývej.";
   } else if (data.rowTextNarrowing) {
     chartSummary = `Textové zúžení: „${data.rowTextNarrowing}“. Odvozené grafy nad tabulkou jen pokud jsou v datech k dispozici (agregace stejných řádků).`;
   } else {
@@ -154,9 +212,16 @@ export async function runAnalyticsSubAgent(params: {
                 ? "Dataset: řádky public.deals s doplněnými údaji o klientovi, nemovitosti a leadu (JOIN v dotazu, ne holá UUID)."
                 : data.preset === "leads"
                   ? "Dataset: řádky public.leads s rozvinutým klientem a nemovitostí."
-                  : "";
+                  : data.preset === "missing_reconstruction"
+                    ? [
+                        "Dataset: výstup fn_missing_reconstruction_data() — řádek je v seznamu, pokud je prázdné reconstruction_notes NEBO prázdné structural_changes (text v DB).",
+                        "Sloupce missing_* odpovídají těmto dvěma textovým polím; checklist a stav rekonstrukce řádek do výběru nedávají."
+                      ].join(" ")
+                    : "";
 
   const sampleRows = data.rows.slice(0, 50);
+  const reconstructionStatsPayload =
+    data.preset === "missing_reconstruction" ? missingReconstructionStatsBlock(data.rows) : "";
   const pngList =
     chartArtifacts.length > 0
       ? chartArtifacts.map((a) => `${a.label}: ${a.url}`).join(", ")
@@ -177,6 +242,7 @@ export async function runAnalyticsSubAgent(params: {
       `Datovy zdroj: ${data.source} (dataset: ${data.preset})`,
       dataScopeNote,
       `Pocet radek: ${data.rows.length}`,
+      ...(reconstructionStatsPayload ? [reconstructionStatsPayload] : []),
       chartSummary,
       "Ukazka radku (JSON):",
       JSON.stringify(sampleRows, null, 2),
@@ -219,14 +285,21 @@ export async function runAnalyticsSubAgent(params: {
               ...(derivedCharts.length > 0 ? { charts: derivedCharts } : {}),
               ...(hideChartUi ? { hideChart: true as const } : {})
             }
-          : {
-              kind: "clients_filtered" as const,
-              source: data.source,
-              title: tableTitle,
-              rows: data.rows,
-              ...(derivedCharts.length > 0 ? { charts: derivedCharts } : {}),
-              ...(hideChartUi ? { hideChart: true as const } : {})
-            };
+          : data.preset === "missing_reconstruction"
+            ? {
+                kind: "missing_reconstruction" as const,
+                source: data.source,
+                title: tableTitle,
+                rows: data.rows
+              }
+            : {
+                kind: "clients_filtered" as const,
+                source: data.source,
+                title: tableTitle,
+                rows: data.rows,
+                ...(derivedCharts.length > 0 ? { charts: derivedCharts } : {}),
+                ...(hideChartUi ? { hideChart: true as const } : {})
+              };
 
   return {
     answer_text: reply.answer_text,

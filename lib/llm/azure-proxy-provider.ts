@@ -43,13 +43,28 @@ function createAzureOpenAIClient(env: AppEnv): OpenAI {
   });
 }
 
+/**
+ * Některé proxy / modely vrací `content` jako pole textových částí místo jednoho řetězce.
+ */
+function normalizeMessageContentToString(content: unknown): string {
+  if (content == null) return "";
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const pieces: string[] = [];
+  for (const part of content) {
+    if (part == null || typeof part !== "object") continue;
+    const o = part as Record<string, unknown>;
+    if (typeof o.text === "string") pieces.push(o.text);
+    else if (typeof o.refusal === "string") pieces.push(o.refusal);
+  }
+  return pieces.join("");
+}
+
 function extractCompletionText(completion: ChatCompletion): string {
   const choice = completion.choices[0];
   const message = choice?.message;
-  const content = message?.content;
-  if (typeof content === "string" && content.trim()) {
-    return content.trim();
-  }
+  const fromContent = normalizeMessageContentToString(message?.content).trim();
+  if (fromContent) return fromContent;
   const refusal = message?.refusal;
   if (typeof refusal === "string" && refusal.trim()) {
     return refusal.trim();
@@ -93,6 +108,12 @@ export async function generateWithAzureProxy(params: {
 
       const text = extractCompletionText(completion);
       if (!text) {
+        const fr = completion.choices[0]?.finish_reason ?? null;
+        logger.warn("azure_proxy_empty_content", {
+          runId: params.runId,
+          finishReason: fr,
+          choiceCount: completion.choices?.length ?? 0
+        });
         throw new Error("OpenAI chat completion did not include message content.");
       }
 
@@ -181,16 +202,33 @@ export async function streamWithAzureProxy(params: {
   });
 
   let full = "";
+  let lastFinishReason: string | null = null;
   for await (const part of stream) {
-    const delta = part.choices[0]?.delta?.content;
-    if (typeof delta === "string" && delta.length > 0) {
-      full += delta;
-      params.onTextDelta(delta);
+    const choice = part.choices[0];
+    if (choice?.finish_reason) lastFinishReason = choice.finish_reason;
+    const delta = choice?.delta;
+    const rawContent = delta?.content;
+    const contentPiece =
+      typeof rawContent === "string"
+        ? rawContent
+        : normalizeMessageContentToString(rawContent);
+    if (contentPiece.length > 0) {
+      full += contentPiece;
+      params.onTextDelta(contentPiece);
+    }
+    const refusalDelta = delta?.refusal;
+    if (typeof refusalDelta === "string" && refusalDelta.length > 0) {
+      full += refusalDelta;
+      params.onTextDelta(refusalDelta);
     }
   }
 
   const text = full.trim();
   if (!text) {
+    logger.warn("azure_proxy_stream_empty", {
+      runId: params.runId,
+      finishReason: lastFinishReason
+    });
     throw new Error("Streamed completion did not include message content.");
   }
 

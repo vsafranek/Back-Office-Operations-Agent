@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { DATASET_IDS } from "@/lib/agent/tools/data-pull-plan";
 import { ClientFiltersSchema } from "@/lib/agent/tools/clients-table-query";
-import { loadUserDataBrowserPresetPlan } from "@/lib/data/load-user-browser-preset-plan";
+import {
+  loadUserBrowserPresetColumnFilters,
+  loadUserDataBrowserPresetPlan
+} from "@/lib/data/load-user-browser-preset-plan";
 import { runDataPullPlanDirect } from "@/lib/agent/tools/sql-tool";
 import { requireAuthenticatedUser } from "@/lib/auth/server-auth";
 
@@ -58,7 +61,11 @@ export async function POST(request: Request) {
         };
 
     const result = await runDataPullPlanDirect(planInput, b.limit);
-    return Response.json(result);
+    const column_filters = savedId ? await loadUserBrowserPresetColumnFilters(user.id, savedId) : null;
+    return Response.json({
+      ...result,
+      column_filters: column_filters && Object.keys(column_filters).length > 0 ? column_filters : null
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     const status =

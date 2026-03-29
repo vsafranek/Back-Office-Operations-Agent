@@ -129,6 +129,14 @@ export type AgentDataPanel =
       rowsTruncationNote?: string;
     }
   | {
+      /** Výstup RPC fn_missing_reconstruction_data — jen tabulka v UI (bez odvozených grafů). */
+      kind: "missing_reconstruction";
+      source: string;
+      title: string;
+      rows: Record<string, unknown>[];
+      rowsTruncationNote?: string;
+    }
+  | {
       kind: "market_listings";
       title: string;
       /**

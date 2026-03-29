@@ -25,7 +25,8 @@ function rowCountForPanel(panel: AgentDataPanel): number {
     panel.kind === "clients_q1" ||
     panel.kind === "leads_sales_6m" ||
     panel.kind === "clients_filtered" ||
-    panel.kind === "deal_sales_detail"
+    panel.kind === "deal_sales_detail" ||
+    panel.kind === "missing_reconstruction"
   ) {
     return panel.rows.length;
   }
@@ -38,7 +39,8 @@ function truncateRowsInPanel(panel: AgentDataPanel, maxRows: number, fullRowCoun
     panel.kind === "clients_q1" ||
     panel.kind === "leads_sales_6m" ||
     panel.kind === "clients_filtered" ||
-    panel.kind === "deal_sales_detail"
+    panel.kind === "deal_sales_detail" ||
+    panel.kind === "missing_reconstruction"
   ) {
     if (panel.rows.length <= maxRows) return panel;
     const note = `Zobrazeno prvních ${maxRows} z ${fullRowCount} řádků; úplná data jsou v Excel / CSV.`;
@@ -117,6 +119,7 @@ const TABLE_OR_CHART_PANEL_KINDS = new Set<AgentDataPanel["kind"]>([
   "leads_sales_6m",
   "clients_filtered",
   "deal_sales_detail",
+  "missing_reconstruction",
   "market_listings"
 ]);
 

@@ -98,6 +98,7 @@ const TABLE_OR_CHART_KINDS = new Set<AgentDataPanelModel["kind"]>([
   "leads_sales_6m",
   "clients_filtered",
   "deal_sales_detail",
+  "missing_reconstruction",
   "market_listings"
 ]);
 
@@ -258,6 +259,9 @@ export function ConfigurableAgentPanel({
   const [phaseLog, setPhaseLog] = useState<string[]>([]);
   const [orchestratorStreamText, setOrchestratorStreamText] = useState("");
   const [assistantStreamText, setAssistantStreamText] = useState("");
+  /** Poslední známý text ze streamu (pro zachycení po flush při chybě). */
+  const assistantStreamRef = useRef("");
+  const [failedStreamAssistantText, setFailedStreamAssistantText] = useState<string | null>(null);
   const [optimisticUserContent, setOptimisticUserContent] = useState<string | null>(null);
   const [viewingSlotChatSel, setViewingSlotChatSel] = useState<ViewingSlotChatSelection>({ mode: "none" });
   /** Délka ručního výběru z volna (kalendář v chatu), krok 15 min. */
@@ -349,6 +353,8 @@ export function ConfigurableAgentPanel({
     setPhaseLog([]);
     setOrchestratorStreamText("");
     setAssistantStreamText("");
+    assistantStreamRef.current = "";
+    setFailedStreamAssistantText(null);
     setOptimisticUserContent(null);
 
     if (!question.trim()) {
@@ -368,18 +374,26 @@ export function ConfigurableAgentPanel({
           setOrchestratorStreamText((prev) => prev + chunk);
         },
         onAnswerDelta: (chunk) => {
-          setAssistantStreamText((prev) => prev + chunk);
+          setAssistantStreamText((prev) => {
+            const next = prev + chunk;
+            assistantStreamRef.current = next;
+            return next;
+          });
         }
       });
       setPhaseLog([]);
       setOrchestratorStreamText("");
       setAssistantStreamText("");
+      assistantStreamRef.current = "";
       setResult(payload);
       onRunComplete?.(payload);
     } catch (e) {
       setPhaseLog([]);
       setOrchestratorStreamText("");
+      const partial = assistantStreamRef.current.trim();
+      setFailedStreamAssistantText(partial.length > 0 ? assistantStreamRef.current : null);
       setAssistantStreamText("");
+      assistantStreamRef.current = "";
       setError(e instanceof Error ? e.message : "Neznámá chyba");
     } finally {
       setLoading(false);
@@ -482,6 +496,20 @@ export function ConfigurableAgentPanel({
                     content: assistantStreamText,
                     created_at: new Date().toISOString(),
                     metadata: { agentId, streaming: true }
+                  }}
+                  getAccessToken={getAccessToken}
+                  agentLabelById={agentLabelById}
+                />
+              ) : null}
+
+              {!loading && error && failedStreamAssistantText ? (
+                <ChatMessageBubble
+                  message={{
+                    id: "__failed-stream-assistant__",
+                    role: "assistant",
+                    content: failedStreamAssistantText,
+                    created_at: new Date().toISOString(),
+                    metadata: { agentId, streamIncomplete: true }
                   }}
                   getAccessToken={getAccessToken}
                   agentLabelById={agentLabelById}
@@ -655,7 +683,19 @@ export function ConfigurableAgentPanel({
 
       {error ? (
         <Alert color="red" title="Chyba" style={{ flexShrink: 0 }}>
-          {error}
+          {failedStreamAssistantText ? (
+            <Stack gap="xs">
+              <Text size="sm">
+                Odpověď se nepodařilo dokončit — výše v konverzaci je text, který se stihl načíst během streamu. Zkuste
+                dotaz zopakovat nebo ho mírně upřesnit.
+              </Text>
+              <Text size="sm" c="dimmed" style={{ whiteSpace: "pre-wrap" }}>
+                {error}
+              </Text>
+            </Stack>
+          ) : (
+            error
+          )}
         </Alert>
       ) : null}
 

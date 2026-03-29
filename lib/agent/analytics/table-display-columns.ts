@@ -2,6 +2,8 @@
  * Výběr sloupců jen pro náhled v UI — exporty (CSV/Xlsx) vždy berou kompletní řádky z dat.
  */
 
+import { DATA_BROWSER_PRESETS } from "@/lib/data/data-browser-presets";
+
 /** Sloupce detailu obchodů (vw_deal_sales_detail) — pořadí náhledu v UI. */
 const DEAL_SALES_COLUMN_ORDER = [
   "sold_at",
@@ -91,13 +93,33 @@ export type AnalyticsTablePanelKind =
   | "clients_q1"
   | "leads_sales_6m"
   | "clients_filtered"
-  | "deal_sales_detail";
+  | "deal_sales_detail"
+  | "missing_reconstruction";
 
 export function getAnalyticsTableDisplayKeys(
   panelKind: AnalyticsTablePanelKind,
   rows: Record<string, unknown>[]
 ): string[] {
   if (rows.length === 0) return [];
+
+  if (panelKind === "missing_reconstruction") {
+    const preset = DATA_BROWSER_PRESETS.missing_reconstruction;
+    const hidden = new Set(preset.hiddenColumns);
+    const keysFromRow = Object.keys(rows[0]!);
+    const ordered: string[] = [];
+    for (const c of preset.displayColumnOrder) {
+      if (!keysFromRow.includes(c) || hidden.has(c)) continue;
+      if (!columnHasAnyValue(rows, c)) continue;
+      ordered.push(c);
+    }
+    for (const c of [...keysFromRow].sort()) {
+      if (hidden.has(c) || ordered.includes(c)) continue;
+      if (!columnHasAnyValue(rows, c)) continue;
+      ordered.push(c);
+    }
+    if (ordered.length > 0) return ordered;
+    return preset.displayColumnOrder.filter((c) => keysFromRow.includes(c) && !hidden.has(c));
+  }
 
   if (panelKind === "leads_sales_6m") {
     const prefer = ["month", "leads_count", "sold_count"] as const;
