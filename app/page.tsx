@@ -11,11 +11,14 @@ import {
   Group,
   List,
   SimpleGrid,
+  Skeleton,
   Stack,
   Text,
   ThemeIcon,
   Title
 } from "@mantine/core";
+import { useEffect, useMemo, useState } from "react";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 import {
   IconArrowRight,
   IconBrandAzure,
@@ -88,6 +91,22 @@ const quickLinks = [
 ] as const;
 
 export default function HomePage() {
+  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
+  const [authReady, setAuthReady] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
+
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data }) => {
+      setSignedIn(Boolean(data.session));
+      setAuthReady(true);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSignedIn(Boolean(session));
+      setAuthReady(true);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, [supabase]);
+
   return (
     <Box component="main" style={{ overflowX: "hidden" }}>
       <Container size="lg" py={{ base: "md", sm: "xl" }} pb={56}>
@@ -176,37 +195,69 @@ export default function HomePage() {
                 <List.Item>Úložiště artefaktů s prohlížečem souborů</List.Item>
               </List>
 
-              <Group gap="sm" wrap="wrap" pt="xs">
-                <Button
-                  component={Link}
-                  href="/auth/login"
-                  size="md"
-                  radius="xl"
-                  rightSection={<IconArrowRight size={18} stroke={1.75} />}
-                >
-                  Přihlásit se
-                </Button>
-                <Button component={Link} href="/auth/register" variant="light" color="indigo" size="md" radius="xl">
-                  Vytvořit účet
-                </Button>
-                <Button component={Link} href="/dashboard" variant="default" size="md" radius="xl">
-                  Dashboard
-                </Button>
-              </Group>
+              <Stack gap="sm" pt="xs">
+                {!authReady ? (
+                  <Group gap="sm" wrap="wrap">
+                    <Skeleton height={42} width={140} radius="xl" />
+                    <Skeleton height={42} width={130} radius="xl" />
+                    <Skeleton height={42} width={120} radius="xl" />
+                  </Group>
+                ) : signedIn ? (
+                  <>
+                    <Text size="sm" c="indigo.7" fw={600}>
+                      Jste přihlášeni — pokračujte do aplikace.
+                    </Text>
+                    <Group gap="sm" wrap="wrap">
+                      <Button
+                        component={Link}
+                        href="/dashboard"
+                        size="md"
+                        radius="xl"
+                        rightSection={<IconArrowRight size={18} stroke={1.75} />}
+                      >
+                        Přejít na dashboard
+                      </Button>
+                      <Button component={Link} href="/settings" variant="light" color="indigo" size="md" radius="xl">
+                        Nastavení
+                      </Button>
+                    </Group>
+                  </>
+                ) : (
+                  <Group gap="sm" wrap="wrap">
+                    <Button
+                      component={Link}
+                      href="/auth/login"
+                      size="md"
+                      radius="xl"
+                      rightSection={<IconArrowRight size={18} stroke={1.75} />}
+                    >
+                      Přihlásit se
+                    </Button>
+                    <Button component={Link} href="/auth/register" variant="light" color="indigo" size="md" radius="xl">
+                      Vytvořit účet
+                    </Button>
+                    <Button component={Link} href="/dashboard" variant="default" size="md" radius="xl">
+                      Dashboard
+                    </Button>
+                  </Group>
+                )}
 
-              <Group gap="md" wrap="wrap" c="dimmed">
-                <Group gap={6} wrap="nowrap">
-                  <IconBrandGoogle size={18} stroke={1.5} />
-                  <Text size="xs">Google</Text>
-                </Group>
-                <Group gap={6} wrap="nowrap">
-                  <IconBrandAzure size={18} stroke={1.5} />
-                  <Text size="xs">Microsoft 365</Text>
-                </Group>
-                <Text size="xs" visibleFrom="sm">
-                  · Přihlášení i napojení služeb
-                </Text>
-              </Group>
+                {authReady && !signedIn ? (
+                  <Group gap="md" wrap="wrap" c="dimmed">
+                    <Group gap={6} wrap="nowrap">
+                      <IconBrandGoogle size={18} stroke={1.5} />
+                      <Text size="xs">Google</Text>
+                    </Group>
+                    <Group gap={6} wrap="nowrap">
+                      <IconBrandAzure size={18} stroke={1.5} />
+                      <Text size="xs">Microsoft 365</Text>
+                    </Group>
+                    <Text size="xs" visibleFrom="sm">
+                      · Přihlášení i napojení služeb
+                    </Text>
+                  </Group>
+                ) : null}
+              </Stack>
             </Stack>
           </Box>
 

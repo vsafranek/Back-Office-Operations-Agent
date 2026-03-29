@@ -66,6 +66,7 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [mobileOpened, { toggle, close }] = useDisclosure(false);
   const isAuth = pathname.startsWith("/auth");
+  const isPublicLegal = pathname === "/privacy" || pathname === "/terms";
 
   async function logout() {
     await supabase.auth.signOut();
@@ -77,6 +78,19 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
     return (
       <Box mih="100vh" bg="gray.0">
         <Box maw={440} mx="auto" py="xl" px="md">
+          {children}
+        </Box>
+      </Box>
+    );
+  }
+
+  if (isPublicLegal) {
+    return (
+      <Box mih="100vh" bg="gray.0">
+        <Box maw={800} mx="auto" py="xl" px="md">
+          <Anchor component={Link} href="/" size="sm" c="dimmed" mb="lg" display="inline-block">
+            ← Zpět na úvod
+          </Anchor>
           {children}
         </Box>
       </Box>
