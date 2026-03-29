@@ -8,10 +8,12 @@ import {
   Card,
   Checkbox,
   Code,
+  Container,
   Divider,
   Group,
   Select,
   Stack,
+  Tabs,
   Text,
   Textarea,
   TextInput,
@@ -19,15 +21,13 @@ import {
 } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
-type FormState = {
+type IntegrationState = {
   calendar_provider: "google" | "microsoft";
   calendar_account_email: string;
-  calendar_id: string;
-  mail_provider: "gmail" | "outlook";
   mail_from_email: string;
   has_google_tokens: boolean;
   has_microsoft_tokens: boolean;
@@ -47,11 +47,9 @@ type ScheduledTaskRow = {
   updated_at: string;
 };
 
-const initialState: FormState = {
+const initialIntegrationState: IntegrationState = {
   calendar_provider: "google",
   calendar_account_email: "",
-  calendar_id: "primary",
-  mail_provider: "gmail",
   mail_from_email: "",
   has_google_tokens: false,
   has_microsoft_tokens: false
@@ -72,8 +70,7 @@ async function fetchOAuthUrl(path: string, bearer: string): Promise<string> {
 export default function SettingsPage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const router = useRouter();
-  const [form, setForm] = useState<FormState>(initialState);
-  const [loading, setLoading] = useState(false);
+  const [integration, setIntegration] = useState<IntegrationState>(initialIntegrationState);
   const [connecting, setConnecting] = useState<"google" | "microsoft" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<"google" | "microsoft" | null>(null);
@@ -95,6 +92,26 @@ export default function SettingsPage() {
     agent_id: "basic" as "basic" | "thinking-orchestrator"
   });
 
+  const loadIntegrations = useCallback(async () => {
+    const sessionResult = await supabase.auth.getSession();
+    const accessToken = sessionResult.data.session?.access_token;
+    if (!accessToken) return;
+    const integrationsRes = await fetch("/api/settings/integrations", {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!integrationsRes.ok) return;
+    const data = await integrationsRes.json();
+    if (data) {
+      setIntegration({
+        calendar_provider: data.calendar_provider === "microsoft" ? "microsoft" : "google",
+        calendar_account_email: data.calendar_account_email ?? "",
+        mail_from_email: data.mail_from_email ?? "",
+        has_google_tokens: Boolean(data.has_google_tokens),
+        has_microsoft_tokens: Boolean(data.has_microsoft_tokens)
+      });
+    }
+  }, [supabase.auth]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -103,12 +120,13 @@ export default function SettingsPage() {
     const reason = params.get("reason");
     if (oauth === "ok" && provider) {
       setMessage(`Účet ${provider === "google" ? "Google" : "Microsoft 365"} byl připojen.`);
+      void loadIntegrations();
       router.replace("/settings", { scroll: false });
     } else if (oauth === "error") {
       setMessage(`Propojení selhalo${reason ? `: ${decodeURIComponent(reason)}` : ""}.`);
       router.replace("/settings", { scroll: false });
     }
-  }, [router]);
+  }, [router, loadIntegrations]);
 
   useEffect(() => {
     void (async () => {
@@ -124,66 +142,18 @@ export default function SettingsPage() {
         headers: { Authorization: `Bearer ${accessToken}` }
       }).catch(() => {});
 
-      const [integrationsRes, tasksRes] = await Promise.all([
-        fetch("/api/settings/integrations", {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        }),
-        fetch("/api/settings/scheduled-tasks", {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        })
-      ]);
+      await loadIntegrations();
 
-      if (integrationsRes.ok) {
-        const data = await integrationsRes.json();
-        if (data) {
-          setForm({
-            calendar_provider: data.calendar_provider === "microsoft" ? "microsoft" : "google",
-            calendar_account_email: data.calendar_account_email ?? "",
-            calendar_id: data.calendar_id ?? "primary",
-            mail_provider: data.mail_provider === "outlook" ? "outlook" : "gmail",
-            mail_from_email: data.mail_from_email ?? "",
-            has_google_tokens: Boolean(data.has_google_tokens),
-            has_microsoft_tokens: Boolean(data.has_microsoft_tokens)
-          });
-        }
-      }
+      const tasksRes = await fetch("/api/settings/scheduled-tasks", {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
 
       if (tasksRes.ok) {
         const payload = (await tasksRes.json()) as { tasks?: ScheduledTaskRow[] };
         setScheduledTasks(payload.tasks ?? []);
       }
     })();
-  }, [router, supabase.auth]);
-
-  async function saveSettings(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLoading(true);
-    setMessage(null);
-    const sessionResult = await supabase.auth.getSession();
-    const accessToken = sessionResult.data.session?.access_token;
-    if (!accessToken) {
-      router.push("/auth/login");
-      return;
-    }
-
-    const response = await fetch("/api/settings/integrations", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`
-      },
-      body: JSON.stringify({
-        calendar_provider: form.calendar_provider,
-        calendar_account_email: form.calendar_account_email,
-        calendar_id: form.calendar_id,
-        mail_provider: form.mail_provider,
-        mail_from_email: form.mail_from_email
-      })
-    });
-    const payload = await response.json();
-    setLoading(false);
-    setMessage(response.ok ? "Nastavení uloženo." : payload.error ?? "Uložení selhalo.");
-  }
+  }, [router, supabase.auth, loadIntegrations]);
 
   async function startGoogleConnect() {
     setConnecting("google");
@@ -241,11 +211,7 @@ export default function SettingsPage() {
       setMessage(payload.error ?? "Odpojení selhalo.");
       return;
     }
-    if (provider === "google") {
-      setForm((f) => ({ ...f, has_google_tokens: false }));
-    } else {
-      setForm((f) => ({ ...f, has_microsoft_tokens: false }));
-    }
+    await loadIntegrations();
     setMessage(provider === "google" ? "Google účet odpojen." : "Microsoft 365 odpojeno.");
   }
 
@@ -397,133 +363,137 @@ select cron.schedule(
 );`;
 
   return (
-    <Stack gap="xl" maw={800}>
-      <div>
-        <Title order={1}>Nastavení integrací</Title>
-        <Text c="dimmed" mt="xs">
-          Přihlášení do aplikace je nezávislé na poště a kalendáři. Kalendář a e-mail používáte až po připojení účtu níže
-          (jako v n8n).
-        </Text>
-        <Anchor component={Link} href="/dashboard" size="sm" mt="sm" display="inline-block">
-          Zpět na dashboard
-        </Anchor>
-      </div>
-
-      {message ? (
-        <Alert color="blue" title="Stav">
-          {message}
-        </Alert>
-      ) : null}
-
-      <Card withBorder padding="lg" radius="md">
-        <Title order={3} mb="md">
-          Připojené účty
-        </Title>
-        <Stack gap="md">
-          <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
-            <Text size="sm">
-              Google (kalendář + Gmail):{" "}
-              <Text span fw={700}>
-                {form.has_google_tokens ? "připojeno" : "nepřipojeno"}
+    <Container size="xl" py={{ base: "lg", md: "xl" }} px={{ base: "sm", sm: "md", lg: "xl" }}>
+      <Stack gap="xl">
+        <Stack gap="sm">
+          <Group justify="space-between" align="flex-start" wrap="wrap" gap="md">
+            <div>
+              <Title order={1} size="h2">
+                Nastavení
+              </Title>
+              <Text c="dimmed" maw={640} mt="xs" size="sm" lh={1.6}>
+                Přihlášení do aplikace je nezávislé na poště a kalendáři. Kalendář a e-mail používáte po připojení účtu v
+                záložce Integrace.
               </Text>
-            </Text>
-            <Group gap="xs">
-              <Button size="sm" onClick={() => void startGoogleConnect()} disabled={connecting !== null}>
-                {connecting === "google" ? "Přesměrovávám…" : "Připojit Google"}
-              </Button>
-              <Button
-                size="sm"
-                variant="light"
-                color="red"
-                onClick={() => void disconnect("google")}
-                disabled={disconnecting !== null || !form.has_google_tokens}
-              >
-                {disconnecting === "google" ? "Odpojuji…" : "Odpojit Google"}
-              </Button>
-            </Group>
-          </Group>
-          <Divider />
-          <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
-            <Text size="sm">
-              Microsoft 365 (Outlook + kalendář):{" "}
-              <Text span fw={700}>
-                {form.has_microsoft_tokens ? "připojeno" : "nepřipojeno"}
-              </Text>
-            </Text>
-            <Group gap="xs">
-              <Button size="sm" onClick={() => void startMicrosoftConnect()} disabled={connecting !== null}>
-                {connecting === "microsoft" ? "Přesměrovávám…" : "Připojit Microsoft 365"}
-              </Button>
-              <Button
-                size="sm"
-                variant="light"
-                color="red"
-                onClick={() => void disconnect("microsoft")}
-                disabled={disconnecting !== null || !form.has_microsoft_tokens}
-              >
-                {disconnecting === "microsoft" ? "Odpojuji…" : "Odpojit Microsoft"}
-              </Button>
-            </Group>
+            </div>
+            <Anchor component={Link} href="/dashboard" size="sm" fw={500}>
+              ← Zpět na dashboard
+            </Anchor>
           </Group>
         </Stack>
-      </Card>
 
-      <Card withBorder padding="lg" radius="md">
-        <Title order={3} mb="xs">
-          Který účet použít
-        </Title>
-        <Text size="sm" c="dimmed" mb="md">
-          Vyberte poskytovatele pro nástroje agenta. Musíte mít připojené tokeny pro danou volbu.
-        </Text>
-        <form onSubmit={saveSettings}>
-          <Stack gap="md">
-          <Select
-            label="Kalendář (free/busy)"
-            value={form.calendar_provider}
-            onChange={(v) =>
-              setForm({ ...form, calendar_provider: (v as "google" | "microsoft") ?? "google" })
+        <Tabs
+          defaultValue="integrace"
+          keepMounted={false}
+          variant="outline"
+          radius="md"
+          styles={{
+            list: {
+              flexWrap: "wrap",
+              gap: 4
+            },
+            panel: {
+              paddingTop: "var(--mantine-spacing-md)"
             }
-            data={[
-              { value: "google", label: "Google Calendar" },
-              { value: "microsoft", label: "Microsoft (Outlook kalendář)" }
-            ]}
-          />
-          <TextInput
-            label="Účet kalendáře (e-mail / SMTP adresa)"
-            type="email"
-            value={form.calendar_account_email}
-            onChange={(e) => setForm({ ...form, calendar_account_email: e.currentTarget.value })}
-            placeholder="např. jmeno@firma.cz"
-          />
-          <TextInput
-            label="Calendar ID (Google: často primary)"
-            value={form.calendar_id}
-            onChange={(e) => setForm({ ...form, calendar_id: e.currentTarget.value })}
-          />
-          <Select
-            label="Pošta (draft / odeslání / inbox)"
-            value={form.mail_provider}
-            onChange={(v) => setForm({ ...form, mail_provider: (v as "gmail" | "outlook") ?? "gmail" })}
-            data={[
-              { value: "gmail", label: "Gmail" },
-              { value: "outlook", label: "Outlook (Microsoft 365)" }
-            ]}
-          />
-          <TextInput
-            label="Odesílatel (zobrazovaný / výchozí mailbox)"
-            type="email"
-            value={form.mail_from_email}
-            onChange={(e) => setForm({ ...form, mail_from_email: e.currentTarget.value })}
-            placeholder="Volitelné"
-          />
-          <Button type="submit" loading={loading}>
-            {loading ? "Ukládám…" : "Uložit volby"}
-          </Button>
-          </Stack>
-        </form>
-      </Card>
+          }}
+        >
+          <Tabs.List grow>
+            <Tabs.Tab value="integrace">Integrace</Tabs.Tab>
+            <Tabs.Tab value="automatizace">Naplánované úlohy</Tabs.Tab>
+            <Tabs.Tab value="ucet">Účet a bezpečnost</Tabs.Tab>
+          </Tabs.List>
 
-      <Card withBorder padding="lg" radius="md" bg="violet.0">
+          <Tabs.Panel value="integrace">
+            <Stack gap="lg">
+              {message ? (
+                <Alert color="blue" title="Stav" variant="light">
+                  {message}
+                </Alert>
+              ) : null}
+
+              <Alert color="gray" variant="light" title="Jak to funguje">
+                <Text size="sm">
+                  Stačí kliknout na <strong>Připojit</strong> a dokončit přihlášení u Google nebo Microsoftu. Údaje o účtu (e-mail,
+                  výchozí kalendář) si aplikace doplní sama. U obou poskytovatelů můžete mít účty připojené najednou — pro nástroje
+                  agenta (kalendář a pošta) se použije ten, u kterého jste naposledy dokončili připojení; po odpojení jednoho z nich
+                  se automaticky přepne na druhý, pokud je k dispozici.
+                </Text>
+              </Alert>
+
+              <Card withBorder padding="xl" radius="md" shadow="xs">
+                <Title order={3} mb="md">
+                  Připojené účty
+                </Title>
+                <Stack gap="md">
+                  <Alert variant="light" color="indigo" title="Aktivní pro agenta">
+                    <Text size="sm">
+                      {integration.calendar_provider === "microsoft"
+                        ? "Microsoft 365 — Outlook a kalendář"
+                        : "Google — Gmail a Kalendář"}
+                      {(integration.calendar_account_email || integration.mail_from_email) && (
+                        <>
+                          {" "}
+                          <Text span c="dimmed">
+                            (
+                            {integration.calendar_account_email || integration.mail_from_email})
+                          </Text>
+                        </>
+                      )}
+                    </Text>
+                  </Alert>
+
+                  <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
+                    <Text size="sm" maw={520}>
+                      Google (kalendář + Gmail):{" "}
+                      <Text span fw={700}>
+                        {integration.has_google_tokens ? "připojeno" : "nepřipojeno"}
+                      </Text>
+                    </Text>
+                    <Group gap="xs">
+                      <Button size="sm" onClick={() => void startGoogleConnect()} disabled={connecting !== null}>
+                        {connecting === "google" ? "Přesměrovávám…" : "Připojit Google"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="light"
+                        color="red"
+                        onClick={() => void disconnect("google")}
+                        disabled={disconnecting !== null || !integration.has_google_tokens}
+                      >
+                        {disconnecting === "google" ? "Odpojuji…" : "Odpojit Google"}
+                      </Button>
+                    </Group>
+                  </Group>
+                  <Divider />
+                  <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm">
+                    <Text size="sm" maw={520}>
+                      Microsoft 365 (Outlook + kalendář):{" "}
+                      <Text span fw={700}>
+                        {integration.has_microsoft_tokens ? "připojeno" : "nepřipojeno"}
+                      </Text>
+                    </Text>
+                    <Group gap="xs">
+                      <Button size="sm" onClick={() => void startMicrosoftConnect()} disabled={connecting !== null}>
+                        {connecting === "microsoft" ? "Přesměrovávám…" : "Připojit Microsoft 365"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="light"
+                        color="red"
+                        onClick={() => void disconnect("microsoft")}
+                        disabled={disconnecting !== null || !integration.has_microsoft_tokens}
+                      >
+                        {disconnecting === "microsoft" ? "Odpojuji…" : "Odpojit Microsoft"}
+                      </Button>
+                    </Group>
+                  </Group>
+                </Stack>
+              </Card>
+            </Stack>
+          </Tabs.Panel>
+
+          <Tabs.Panel value="automatizace">
+            <Card withBorder padding="xl" radius="md" shadow="xs" bg="violet.0">
         <Title order={3} c="violet.9" mb="xs">
           Naplánované úlohy agenta (cron)
         </Title>
@@ -548,7 +518,7 @@ select cron.schedule(
         ) : (
           <Stack gap="md" mb="lg">
             {scheduledTasks.map((t) => (
-              <Card key={t.id} withBorder padding="sm" radius="sm" bg="white">
+              <Card key={t.id} withBorder padding="sm" radius="sm">
                 <Text size="sm" fw={600}>
                   {t.title}
                 </Text>
@@ -575,10 +545,7 @@ select cron.schedule(
         <Title order={4} mb="sm">
           Nová úloha
         </Title>
-        <form
-          onSubmit={(e) => void saveScheduledTask(e)}
-          style={{ maxWidth: 640 }}
-        >
+        <form onSubmit={(e) => void saveScheduledTask(e)}>
           <Stack gap="md">
           <TextInput
             label="Název"
@@ -646,9 +613,11 @@ select cron.schedule(
             </Accordion.Panel>
           </Accordion.Item>
         </Accordion>
-      </Card>
+            </Card>
+          </Tabs.Panel>
 
-      <Card withBorder padding="lg" radius="md">
+          <Tabs.Panel value="ucet">
+            <Card withBorder padding="xl" radius="md" shadow="xs">
         <Title order={3} mb="xs">
           Heslo pro přihlášení e-mailem
         </Title>
@@ -660,7 +629,7 @@ select cron.schedule(
           .
         </Text>
         <form onSubmit={handleSetPassword}>
-          <Stack gap="md" maw={400}>
+          <Stack gap="md" maw={480}>
             <TextInput
               type="password"
               value={passNew}
@@ -687,7 +656,10 @@ select cron.schedule(
             {passMessage}
           </Text>
         ) : null}
-      </Card>
-    </Stack>
+            </Card>
+          </Tabs.Panel>
+        </Tabs>
+      </Stack>
+    </Container>
   );
 }
