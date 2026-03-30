@@ -20,6 +20,13 @@ type Props = {
    * Bez interaktivního výběru: označí volná pole, kde by délka schůzky kolidovala s busy (náhled „nelze začít“).
    */
   previewDurationCollisions?: boolean;
+  navigateEarlierLabel?: string;
+  navigateLaterLabel?: string;
+  onNavigateEarlier?: () => void;
+  onNavigateLater?: () => void;
+  canNavigateEarlier?: boolean;
+  canNavigateLater?: boolean;
+  pageLabelOverride?: string;
 };
 
 const VIEW_START_MIN = 8 * 60;
@@ -159,7 +166,14 @@ export function CalendarPreviewStrip({
   onSlotPick,
   selectedSlot = null,
   selectedSource = null,
-  previewDurationCollisions = false
+  previewDurationCollisions = false,
+  navigateEarlierLabel = "← Dříve",
+  navigateLaterLabel = "Později →",
+  onNavigateEarlier,
+  onNavigateLater,
+  canNavigateEarlier,
+  canNavigateLater,
+  pageLabelOverride
 }: Props) {
   const interactive = typeof onSlotPick === "function";
   const showDurationRules = interactive || previewDurationCollisions;
@@ -289,6 +303,7 @@ export function CalendarPreviewStrip({
     return <p style={{ fontSize: 13, color: "#64748b" }}>Nelze vykreslit náhled kalendáře (neplatné rozmezí).</p>;
   }
 
+  const externalPaging = typeof onNavigateEarlier === "function" && typeof onNavigateLater === "function";
   const pager =
     allDays.length > DAYS_PER_PAGE ? (
       <div
@@ -304,38 +319,45 @@ export function CalendarPreviewStrip({
       >
         <button
           type="button"
-          disabled={safePageStart <= 0}
-          onClick={() => setPageStart((p) => Math.max(0, p - DAYS_PER_PAGE))}
+          disabled={externalPaging ? canNavigateEarlier === false : safePageStart <= 0}
+          onClick={() =>
+            externalPaging ? onNavigateEarlier() : setPageStart((p) => Math.max(0, p - DAYS_PER_PAGE))
+          }
           style={{
             padding: "4px 10px",
             borderRadius: 6,
             border: "1px solid #cbd5e1",
-            background: safePageStart <= 0 ? "#f1f5f9" : "#fff",
-            cursor: safePageStart <= 0 ? "default" : "pointer",
+            background: (externalPaging ? canNavigateEarlier === false : safePageStart <= 0) ? "#f1f5f9" : "#fff",
+            cursor: (externalPaging ? canNavigateEarlier === false : safePageStart <= 0) ? "default" : "pointer",
             fontSize: 12
           }}
         >
-          ← Dříve
+          {navigateEarlierLabel}
         </button>
         <span>
-          {days[0]?.toLocaleDateString("cs-CZ", { day: "numeric", month: "short" })} –{" "}
-          {days[days.length - 1]?.toLocaleDateString("cs-CZ", { day: "numeric", month: "short", year: "numeric" })} ·{" "}
-          celkem {allDays.length} dní
+          {pageLabelOverride ??
+            `${days[0]?.toLocaleDateString("cs-CZ", { day: "numeric", month: "short" })} – ${days[days.length - 1]?.toLocaleDateString("cs-CZ", {
+              day: "numeric",
+              month: "short",
+              year: "numeric"
+            })} · celkem ${allDays.length} dní`}
         </span>
         <button
           type="button"
-          disabled={safePageStart >= pageMaxStart}
-          onClick={() => setPageStart((p) => Math.min(pageMaxStart, p + DAYS_PER_PAGE))}
+          disabled={externalPaging ? canNavigateLater === false : safePageStart >= pageMaxStart}
+          onClick={() =>
+            externalPaging ? onNavigateLater() : setPageStart((p) => Math.min(pageMaxStart, p + DAYS_PER_PAGE))
+          }
           style={{
             padding: "4px 10px",
             borderRadius: 6,
             border: "1px solid #cbd5e1",
-            background: safePageStart >= pageMaxStart ? "#f1f5f9" : "#fff",
-            cursor: safePageStart >= pageMaxStart ? "default" : "pointer",
+            background: (externalPaging ? canNavigateLater === false : safePageStart >= pageMaxStart) ? "#f1f5f9" : "#fff",
+            cursor: (externalPaging ? canNavigateLater === false : safePageStart >= pageMaxStart) ? "default" : "pointer",
             fontSize: 12
           }}
         >
-          Později →
+          {navigateLaterLabel}
         </button>
       </div>
     ) : null;

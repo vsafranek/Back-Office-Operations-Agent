@@ -116,6 +116,14 @@ export type MicrosoftCalendarEventRow = {
   htmlLink?: string;
 };
 
+export type MicrosoftCalendarCreateInput = {
+  title: string;
+  start: string;
+  end: string;
+  description?: string;
+  location?: string;
+};
+
 /**
  * Seznam událostí v rozmezí (Outlook / Microsoft 365).
  */
@@ -147,4 +155,56 @@ export async function listMicrosoftCalendarEvents(params: {
       htmlLink: e.webLink
     }))
     .filter((e) => e.id && e.start);
+}
+
+/**
+ * Vytvoří novou událost v primárním Outlook kalendáři.
+ */
+export async function createMicrosoftCalendarEvent(params: {
+  userId: string;
+  input: MicrosoftCalendarCreateInput;
+}): Promise<MicrosoftCalendarEventRow> {
+  const accessToken = await getMicrosoftAccessTokenForUser({ userId: params.userId });
+  const payload = {
+    subject: params.input.title.trim(),
+    body: params.input.description?.trim()
+      ? {
+          contentType: "Text" as const,
+          content: params.input.description.trim()
+        }
+      : undefined,
+    start: {
+      dateTime: params.input.start,
+      timeZone: "UTC"
+    },
+    end: {
+      dateTime: params.input.end,
+      timeZone: "UTC"
+    },
+    location: params.input.location?.trim() ? { displayName: params.input.location.trim() } : undefined
+  };
+
+  type Row = {
+    id?: string;
+    subject?: string;
+    start?: { dateTime?: string; date?: string };
+    end?: { dateTime?: string; date?: string };
+    webLink?: string;
+  };
+  const created = await graphFetchJson<Row>(accessToken, "/me/events", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+
+  if (!created.id || !(created.start?.dateTime || created.start?.date) || !(created.end?.dateTime || created.end?.date)) {
+    throw new Error("Microsoft kalendář vrátil neúplná data nového eventu.");
+  }
+
+  return {
+    id: created.id,
+    summary: created.subject ?? params.input.title.trim() ?? "(Bez názvu)",
+    start: created.start.dateTime ?? created.start.date ?? "",
+    end: created.end.dateTime ?? created.end.date ?? "",
+    htmlLink: created.webLink
+  };
 }

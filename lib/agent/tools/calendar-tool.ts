@@ -2,6 +2,7 @@ import { google } from "googleapis";
 import { getGoogleAuthForUser } from "@/lib/integrations/google-user-auth";
 import {
   browseMicrosoftCalendarAvailability,
+  createMicrosoftCalendarEvent,
   listMicrosoftCalendarEvents
 } from "@/lib/integrations/microsoft-graph-calendar";
 import { fetchUserIntegrationSettings } from "@/lib/integrations/user-integration-settings";
@@ -215,6 +216,71 @@ export async function listUserCalendarEvents(params: {
     }));
 
   return { events, provider: "google" };
+}
+
+export type CalendarCreateEventInput = {
+  title: string;
+  start: string;
+  end: string;
+  description?: string;
+  location?: string;
+};
+
+/**
+ * Vytvoří událost v kalendáři uživatele dle aktivní integrace (Google / Microsoft).
+ */
+export async function createUserCalendarEvent(params: {
+  userId: string;
+  input: CalendarCreateEventInput;
+}): Promise<{ event: CalendarEventListItem; provider: "google" | "microsoft" }> {
+  const settings = await fetchUserIntegrationSettings(params.userId);
+  const calendarProvider = settings?.calendar_provider ?? "google";
+
+  if (calendarProvider === "microsoft") {
+    const event = await createMicrosoftCalendarEvent({
+      userId: params.userId,
+      input: params.input
+    });
+    return { event, provider: "microsoft" };
+  }
+
+  const { auth, calendarId } = await getGoogleAuthForUser({
+    userId: params.userId,
+    scopes: ["https://www.googleapis.com/auth/calendar"]
+  });
+  const calendar = google.calendar({ version: "v3", auth });
+  const created = await calendar.events.insert({
+    calendarId,
+    requestBody: {
+      summary: params.input.title.trim(),
+      description: params.input.description?.trim() || undefined,
+      location: params.input.location?.trim() || undefined,
+      start: {
+        dateTime: params.input.start
+      },
+      end: {
+        dateTime: params.input.end
+      }
+    }
+  });
+
+  const id = created.data.id;
+  const start = created.data.start?.dateTime ?? created.data.start?.date;
+  const end = created.data.end?.dateTime ?? created.data.end?.date;
+  if (!id || !start || !end) {
+    throw new Error("Google kalendář vrátil neúplná data nového eventu.");
+  }
+
+  return {
+    provider: "google",
+    event: {
+      id,
+      summary: created.data.summary ?? params.input.title.trim() ?? "(Bez názvu)",
+      start,
+      end,
+      htmlLink: created.data.htmlLink ?? undefined
+    }
+  };
 }
 
 export async function suggestViewingSlots(params: {

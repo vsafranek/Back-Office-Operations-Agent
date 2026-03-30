@@ -34,7 +34,7 @@ import {
 } from "@mantine/core";
 import Link from "next/link";
 import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
-import { useDebouncedValue, useDisclosure } from "@mantine/hooks";
+import { useDebouncedValue } from "@mantine/hooks";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarPreviewStrip } from "@/components/agent/CalendarPreviewStrip";
 import { FormattedAssistantContent } from "@/components/agent/FormattedAssistantContent";
@@ -159,7 +159,8 @@ export function MailToolPanel(props: {
     onSelectViewingEmailRun,
     onViewingEmailBodyChange
   } = props;
-  const [composeExpanded, { toggle: toggleCompose }] = useDisclosure(false);
+  const [mailTab, setMailTab] = useState<string | null>("manual");
+  const mailAgentTabAutoOpenRunRef = useRef<string | null>(null);
   const [messages, setMessages] = useState<GmailRow[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -392,6 +393,17 @@ export function MailToolPanel(props: {
         ? viewingEmailRuns[0]?.preview
         : undefined;
 
+  useEffect(() => {
+    const runId = lastAgentAnswer?.runId ?? null;
+    if (viewingDraft && runId && mailAgentTabAutoOpenRunRef.current !== runId) {
+      mailAgentTabAutoOpenRunRef.current = runId;
+      setMailTab("chatbot");
+    }
+    if (!viewingDraft) {
+      mailAgentTabAutoOpenRunRef.current = null;
+    }
+  }, [lastAgentAnswer?.runId, viewingDraft]);
+
   return (
     <Stack gap="sm">
       <Text size="sm" c="dimmed">
@@ -401,198 +413,214 @@ export function MailToolPanel(props: {
         </Anchor>
       </Text>
 
-      {showMailAnswerNav ? (
-        <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
-          <Tooltip label="Starší návrh e-mailu (dříve v konverzaci)">
-            <ActionIcon
-              variant="default"
-              size="sm"
-              aria-label="Starší návrh e-mailu"
-              disabled={!companionRunNavCanGoOlder(mailNavCursor)}
-              onClick={() => companionRunNavGoOlder(viewingEmailRuns, mailNavCursor, onSelectViewingEmailRun!)}
-            >
-              <IconChevronLeft size={18} stroke={1.5} />
-            </ActionIcon>
-          </Tooltip>
-          <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
-            <Text size="xs" ta="center" fw={600} lineClamp={1}>
-              Návrh {mailDisplaySlot ?? "—"} / {mailAnswerCount}
-            </Text>
-            {mailPreviewText ? (
-              <Text size="xs" c="dimmed" ta="center" lineClamp={2} style={{ wordBreak: "break-word" }}>
-                {mailPreviewText}
+      <Tabs value={mailTab} onChange={setMailTab} variant="outline" radius="sm">
+        <Tabs.List grow>
+          <Tabs.Tab value="manual">Napsat</Tabs.Tab>
+          <Tabs.Tab value="chatbot">Z běhu agenta</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel value="chatbot" pt="sm">
+          <Stack gap="sm">
+            {showMailAnswerNav ? (
+              <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
+                <Tooltip label="Starší návrh e-mailu (dříve v konverzaci)">
+                  <ActionIcon
+                    variant="default"
+                    size="sm"
+                    aria-label="Starší návrh e-mailu"
+                    disabled={!companionRunNavCanGoOlder(mailNavCursor)}
+                    onClick={() => companionRunNavGoOlder(viewingEmailRuns, mailNavCursor, onSelectViewingEmailRun!)}
+                  >
+                    <IconChevronLeft size={18} stroke={1.5} />
+                  </ActionIcon>
+                </Tooltip>
+                <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+                  <Text size="xs" ta="center" fw={600} lineClamp={1}>
+                    Návrh {mailDisplaySlot ?? "—"} / {mailAnswerCount}
+                  </Text>
+                  {mailPreviewText ? (
+                    <Text size="xs" c="dimmed" ta="center" lineClamp={2} style={{ wordBreak: "break-word" }}>
+                      {mailPreviewText}
+                    </Text>
+                  ) : null}
+                </Stack>
+                <Tooltip label="Novější návrh e-mailu">
+                  <ActionIcon
+                    variant="default"
+                    size="sm"
+                    aria-label="Novější návrh e-mailu"
+                    disabled={!companionRunNavCanGoNewer(mailNavCursor, mailAnswerCount)}
+                    onClick={() => companionRunNavGoNewer(viewingEmailRuns, mailNavCursor, onSelectViewingEmailRun!)}
+                  >
+                    <IconChevronRight size={18} stroke={1.5} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            ) : null}
+
+            {viewingDraft ? (
+              <>
+                <Divider label="Návrh z agenta (prohlídka)" labelPosition="center" />
+                <ViewingEmailDraftPanel
+                  key={`${conversationId ?? "no-conv"}:${lastAgentAnswer?.runId ?? focusRunId ?? "run"}`}
+                  senderDisplayName={viewingDraft.senderDisplayName}
+                  propertySummary={viewingDraft.propertySummary}
+                  draft={viewingDraft.draft}
+                  relatedLeadIds={viewingDraft.relatedLeadIds}
+                  recipientCandidates={viewingDraft.recipientCandidates}
+                  getAccessToken={getAccessToken}
+                  conversationId={conversationId}
+                  agentRunId={lastAgentAnswer?.runId ?? focusRunId}
+                  onBodyChange={onViewingEmailBodyChange}
+                />
+              </>
+            ) : showMailAnswerNav ? (
+              <Text size="xs" c="dimmed">
+                Aktivní běh nemá návrh e-mailu v tomto panelu — šipkami přejděte na jiný návrh z konverzace.
+              </Text>
+            ) : (
+              <Text size="sm" c="dimmed">
+                Zatím tu není návrh e-mailu z běhu agenta. Po dotazu na prohlídku nebo e-mail se zobrazí zde.
+              </Text>
+            )}
+          </Stack>
+        </Tabs.Panel>
+        <Tabs.Panel value="manual" pt="sm">
+          <Stack gap="sm">
+            <Divider label="Nová zpráva" labelPosition="center" />
+            <TextInput label="Komu" size="xs" value={composeTo} onChange={(e) => setComposeTo(e.currentTarget.value)} />
+            <TextInput label="Předmět" size="xs" value={composeSubject} onChange={(e) => setComposeSubject(e.currentTarget.value)} />
+            <Textarea label="Tělo zprávy" size="xs" minRows={6} value={composeBody} onChange={(e) => setComposeBody(e.currentTarget.value)} />
+            {composeFormDirty && composeDraftSaved ? (
+              <Text size="xs" c="orange">
+                Text se liší od uloženého draftu — před odesláním z uloženého konceptu znovu uložte.
               </Text>
             ) : null}
+            {composeSent ? (
+              <Text size="xs" c="green">
+                Odesláno
+                {composeSent.messageId ? ` (reference ${composeSent.messageId.slice(0, 10)}…)` : ""}.
+              </Text>
+            ) : null}
+            <Checkbox
+              label={`Potvrzuji odeslání příjemci ${composeTo.trim() || "—"}`}
+              checked={composeConfirmSend}
+              disabled={composeBusy || composeSendBusy}
+              onChange={(e) => setComposeConfirmSend(e.currentTarget.checked)}
+            />
+            <Group gap="xs">
+              <Button size="xs" loading={composeBusy} onClick={() => void composeSaveDraft()} disabled={composeSendBusy || Boolean(composeSent)}>
+                Uložit draft
+              </Button>
+              <Button
+                size="xs"
+                variant="light"
+                color="orange"
+                loading={composeSendBusy}
+                onClick={() => void composeSendDirect()}
+                disabled={
+                  composeBusy || !composeConfirmSend || !composeEmailOk || !composeSubject.trim() || !composeBody.trim() || Boolean(composeSent)
+                }
+              >
+                Odeslat rovnou
+              </Button>
+            </Group>
+            {composeDraftSaved && !composeSent ? (
+              <Button
+                size="xs"
+                variant="outline"
+                color="orange"
+                loading={composeSendBusy}
+                disabled={
+                  composeBusy ||
+                  !composeDraftSaved.draftId ||
+                  !composeConfirmSend ||
+                  composeFormDirty ||
+                  !composeEmailOk
+                }
+                onClick={() => void composeSendFromDraft()}
+              >
+                Odeslat z uloženého draftu
+              </Button>
+            ) : null}
+
+            <Group wrap="nowrap" gap="xs">
+              <TextInput
+                placeholder="Gmail hledání (q)…"
+                value={q}
+                onChange={(e) => setQ(e.currentTarget.value)}
+                style={{ flex: 1 }}
+                size="xs"
+              />
+              <Button size="xs" variant="light" onClick={() => void loadList()} loading={loading}>
+                Načíst
+              </Button>
+            </Group>
+            {err ? (
+              <Text size="sm" c="red">
+                {err}
+              </Text>
+            ) : null}
+            {loading && messages == null ? <Text size="sm">Načítám…</Text> : null}
+            <ScrollArea.Autosize mah={220} type="auto">
+              <Stack gap={6}>
+                {(messages ?? []).map((m) => (
+                  <UnstyledButton
+                    key={m.id}
+                    type="button"
+                    onClick={() => void openMessage(m.id)}
+                    style={{
+                      textAlign: "left",
+                      padding: 8,
+                      borderRadius: 8,
+                      border: "1px solid var(--mantine-color-default-border)"
+                    }}
+                  >
+                    <Text size="xs" fw={600} lineClamp={1}>
+                      {m.subject || "(Bez předmětu)"}
+                    </Text>
+                    <Text size="xs" c="dimmed" lineClamp={1}>
+                      {m.from}
+                    </Text>
+                    <Text size="xs" c="dimmed" lineClamp={2}>
+                      {m.snippet}
+                    </Text>
+                  </UnstyledButton>
+                ))}
+              </Stack>
+            </ScrollArea.Autosize>
+
+            <Divider label={conversationId ? "Odchozí v této konverzaci" : "Odchozí z aplikace"} labelPosition="center" />
+            <Text size="xs" c="dimmed">
+              Drafty i odeslané zprávy se ukládají do databáze (komu, předmět, konverzace, běh agenta) pro audit a přehled
+              kontaktů.
+            </Text>
+            <ScrollArea.Autosize mah={180} type="auto">
+              <Stack gap={6}>
+                {(outbound ?? []).map((o) => (
+                  <div key={o.id} style={{ padding: 8, borderRadius: 8, background: "var(--mantine-color-gray-0)" }}>
+                    <Text size="xs" fw={600} lineClamp={1}>
+                      {o.subject}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      → {o.to_email} · {o.action} · {new Date(o.created_at).toLocaleString("cs-CZ")}
+                    </Text>
+                    {o.conversation_id ? (
+                      <Button
+                        size="compact-xs"
+                        variant="light"
+                        mt={4}
+                        onClick={() => onNavigateConversation(o.conversation_id!, o.agent_run_id)}
+                      >
+                        Otevřít konverzaci
+                      </Button>
+                    ) : null}
+                  </div>
+                ))}
+              </Stack>
+            </ScrollArea.Autosize>
           </Stack>
-          <Tooltip label="Novější návrh e-mailu">
-            <ActionIcon
-              variant="default"
-              size="sm"
-              aria-label="Novější návrh e-mailu"
-              disabled={!companionRunNavCanGoNewer(mailNavCursor, mailAnswerCount)}
-              onClick={() => companionRunNavGoNewer(viewingEmailRuns, mailNavCursor, onSelectViewingEmailRun!)}
-            >
-              <IconChevronRight size={18} stroke={1.5} />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      ) : null}
-
-      {viewingDraft ? (
-        <>
-          <Divider label="Návrh z agenta (prohlídka)" labelPosition="center" />
-          <ViewingEmailDraftPanel
-            key={`${conversationId ?? "no-conv"}:${lastAgentAnswer?.runId ?? focusRunId ?? "run"}`}
-            senderDisplayName={viewingDraft.senderDisplayName}
-            propertySummary={viewingDraft.propertySummary}
-            draft={viewingDraft.draft}
-            relatedLeadIds={viewingDraft.relatedLeadIds}
-            recipientCandidates={viewingDraft.recipientCandidates}
-            getAccessToken={getAccessToken}
-            conversationId={conversationId}
-            agentRunId={lastAgentAnswer?.runId ?? focusRunId}
-            onBodyChange={onViewingEmailBodyChange}
-          />
-        </>
-      ) : showMailAnswerNav ? (
-        <Text size="xs" c="dimmed">
-          Aktivní běh nemá návrh e-mailu v tomto panelu — šipkami přejděte na jiný návrh z konverzace.
-        </Text>
-      ) : null}
-
-      <Button size="xs" variant="default" onClick={toggleCompose}>
-        {composeExpanded ? "Skrýt nový e-mail" : "Nový e-mail"}
-      </Button>
-      <Collapse in={composeExpanded}>
-        <Stack gap="xs" pt="xs">
-          <Divider label="Nová zpráva" labelPosition="center" />
-          <TextInput label="Komu" size="xs" value={composeTo} onChange={(e) => setComposeTo(e.currentTarget.value)} />
-          <TextInput label="Předmět" size="xs" value={composeSubject} onChange={(e) => setComposeSubject(e.currentTarget.value)} />
-          <Textarea label="Tělo zprávy" size="xs" minRows={6} value={composeBody} onChange={(e) => setComposeBody(e.currentTarget.value)} />
-          {composeFormDirty && composeDraftSaved ? (
-            <Text size="xs" c="orange">
-              Text se liší od uloženého draftu — před odesláním z uloženého konceptu znovu uložte.
-            </Text>
-          ) : null}
-          {composeSent ? (
-            <Text size="xs" c="green">
-              Odesláno
-              {composeSent.messageId ? ` (reference ${composeSent.messageId.slice(0, 10)}…)` : ""}.
-            </Text>
-          ) : null}
-          <Checkbox
-            label={`Potvrzuji odeslání příjemci ${composeTo.trim() || "—"}`}
-            checked={composeConfirmSend}
-            disabled={composeBusy || composeSendBusy}
-            onChange={(e) => setComposeConfirmSend(e.currentTarget.checked)}
-          />
-          <Group gap="xs">
-            <Button size="xs" loading={composeBusy} onClick={() => void composeSaveDraft()} disabled={composeSendBusy || Boolean(composeSent)}>
-              Uložit draft
-            </Button>
-            <Button
-              size="xs"
-              variant="light"
-              color="orange"
-              loading={composeSendBusy}
-              onClick={() => void composeSendDirect()}
-              disabled={
-                composeBusy || !composeConfirmSend || !composeEmailOk || !composeSubject.trim() || !composeBody.trim() || Boolean(composeSent)
-              }
-            >
-              Odeslat rovnou
-            </Button>
-          </Group>
-          {composeDraftSaved && !composeSent ? (
-            <Button
-              size="xs"
-              variant="outline"
-              color="orange"
-              loading={composeSendBusy}
-              disabled={
-                composeBusy ||
-                !composeDraftSaved.draftId ||
-                !composeConfirmSend ||
-                composeFormDirty ||
-                !composeEmailOk
-              }
-              onClick={() => void composeSendFromDraft()}
-            >
-              Odeslat z uloženého draftu
-            </Button>
-          ) : null}
-        </Stack>
-      </Collapse>
-
-      <Group wrap="nowrap" gap="xs">
-        <TextInput placeholder="Gmail hledání (q)…" value={q} onChange={(e) => setQ(e.currentTarget.value)} style={{ flex: 1 }} size="xs" />
-        <Button size="xs" variant="light" onClick={() => void loadList()} loading={loading}>
-          Načíst
-        </Button>
-      </Group>
-      {err ? (
-        <Text size="sm" c="red">
-          {err}
-        </Text>
-      ) : null}
-      {loading && messages == null ? <Text size="sm">Načítám…</Text> : null}
-      <ScrollArea.Autosize mah={220} type="auto">
-        <Stack gap={6}>
-          {(messages ?? []).map((m) => (
-            <UnstyledButton
-              key={m.id}
-              type="button"
-              onClick={() => void openMessage(m.id)}
-              style={{
-                textAlign: "left",
-                padding: 8,
-                borderRadius: 8,
-                border: "1px solid var(--mantine-color-default-border)"
-              }}
-            >
-              <Text size="xs" fw={600} lineClamp={1}>
-                {m.subject || "(Bez předmětu)"}
-              </Text>
-              <Text size="xs" c="dimmed" lineClamp={1}>
-                {m.from}
-              </Text>
-              <Text size="xs" c="dimmed" lineClamp={2}>
-                {m.snippet}
-              </Text>
-            </UnstyledButton>
-          ))}
-        </Stack>
-      </ScrollArea.Autosize>
-
-      <Divider label={conversationId ? "Odchozí v této konverzaci" : "Odchozí z aplikace"} labelPosition="center" />
-      <Text size="xs" c="dimmed">
-        Drafty i odeslané zprávy se ukládají do databáze (komu, předmět, konverzace, běh agenta) pro audit a přehled
-        kontaktů.
-      </Text>
-      <ScrollArea.Autosize mah={180} type="auto">
-        <Stack gap={6}>
-          {(outbound ?? []).map((o) => (
-            <div key={o.id} style={{ padding: 8, borderRadius: 8, background: "var(--mantine-color-gray-0)" }}>
-              <Text size="xs" fw={600} lineClamp={1}>
-                {o.subject}
-              </Text>
-              <Text size="xs" c="dimmed">
-                → {o.to_email} · {o.action} · {new Date(o.created_at).toLocaleString("cs-CZ")}
-              </Text>
-              {o.conversation_id ? (
-                <Button
-                  size="compact-xs"
-                  variant="light"
-                  mt={4}
-                  onClick={() => onNavigateConversation(o.conversation_id!, o.agent_run_id)}
-                >
-                  Otevřít konverzaci
-                </Button>
-              ) : null}
-            </div>
-          ))}
-        </Stack>
-      </ScrollArea.Autosize>
+        </Tabs.Panel>
+      </Tabs>
 
       <Modal opened={detail != null} onClose={() => setDetail(null)} title={detail?.subject ?? "Zpráva"} size="lg">
         {detail ? (
@@ -634,9 +662,18 @@ export function CalendarToolPanel({
   const [provider, setProvider] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [calendarTab, setCalendarTab] = useState<string | null>("manual");
+  const calendarAgentTabAutoOpenRunRef = useRef<string | null>(null);
   const [personalMeetDurationMin, setPersonalMeetDurationMin] = useState(60);
   const [viewingSlotSel, setViewingSlotSel] = useState<CompanionViewingSlotSel>({ mode: "none" });
   const [viewingMeetDurationMin, setViewingMeetDurationMin] = useState(60);
+  const [newEventTitle, setNewEventTitle] = useState("");
+  const [newEventLocation, setNewEventLocation] = useState("");
+  const [newEventDescription, setNewEventDescription] = useState("");
+  const [newEventStart, setNewEventStart] = useState("");
+  const [newEventEnd, setNewEventEnd] = useState("");
+  const [newEventBusy, setNewEventBusy] = useState(false);
+  const [newEventOk, setNewEventOk] = useState<string | null>(null);
 
   const viewingEmailPanel = useMemo(() => findViewingEmailDataPanel(lastAgentAnswer), [lastAgentAnswer]);
   const viewingPreviewRange = useMemo(
@@ -755,6 +792,74 @@ export function CalendarToolPanel({
     void load();
   }, [load]);
 
+  useEffect(() => {
+    const runId = lastAgentAnswer?.runId ?? null;
+    if (viewingEmailPanel && runId && calendarAgentTabAutoOpenRunRef.current !== runId) {
+      calendarAgentTabAutoOpenRunRef.current = runId;
+      setCalendarTab("agent_runs");
+    }
+    if (!viewingEmailPanel) {
+      calendarAgentTabAutoOpenRunRef.current = null;
+    }
+  }, [lastAgentAnswer?.runId, viewingEmailPanel]);
+
+  async function createOwnEvent() {
+    setErr(null);
+    setNewEventOk(null);
+    if (!newEventTitle.trim()) {
+      setErr("Vyplňte název události.");
+      return;
+    }
+    const startDate = new Date(newEventStart);
+    const endDate = new Date(newEventEnd);
+    if (!newEventStart || !newEventEnd || Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      setErr("Vyplňte platný začátek a konec události.");
+      return;
+    }
+    const startIso = startDate.toISOString();
+    const endIso = endDate.toISOString();
+    if (new Date(endIso).getTime() <= new Date(startIso).getTime()) {
+      setErr("Konec události musí být po začátku.");
+      return;
+    }
+    const token = await getAccessToken();
+    if (!token) {
+      setErr("Nejste přihlášeni.");
+      return;
+    }
+    setNewEventBusy(true);
+    try {
+      const res = await fetch("/api/google/calendar/events", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          title: newEventTitle.trim(),
+          start: startIso,
+          end: endIso,
+          location: newEventLocation.trim() || undefined,
+          description: newEventDescription.trim() || undefined
+        })
+      });
+      const data = (await res.json()) as { error?: string; provider?: string };
+      if (!res.ok) {
+        setErr(data.error ?? "Událost se nepodařilo vytvořit.");
+        return;
+      }
+      setNewEventOk(`Událost byla vytvořena (${data.provider ?? provider ?? "calendar"}).`);
+      setNewEventTitle("");
+      setNewEventLocation("");
+      setNewEventDescription("");
+      setNewEventStart("");
+      setNewEventEnd("");
+      await load();
+    } finally {
+      setNewEventBusy(false);
+    }
+  }
+
   const eventBusy = useMemo(
     () => events.map((e) => ({ start: e.start, end: e.end })).filter((b) => b.start && b.end),
     [events]
@@ -789,111 +894,91 @@ export function CalendarToolPanel({
           Nastavení
         </Anchor>
       </Text>
-      <Group justify="space-between">
-        <Button size="xs" variant="default" onClick={() => setWeekOffset((w) => w - 1)}>
-          ← Týden
-        </Button>
-        <Text size="sm" fw={600}>
-          {range.label}
-        </Text>
-        <Button size="xs" variant="default" onClick={() => setWeekOffset((w) => w + 1)}>
-          Týden →
-        </Button>
-      </Group>
-      {provider ? (
-        <Text size="xs" c="dimmed">
-          Zdroj: {provider}
-        </Text>
-      ) : null}
-      {err ? (
-        <Text size="sm" c="red">
-          {err}
-        </Text>
-      ) : null}
-
-      {showCalendarAnswerNav ? (
-        <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
-          <Tooltip label="Starší návrh e-mailu (dříve v konverzaci)">
-            <ActionIcon
-              variant="default"
-              size="sm"
-              aria-label="Starší návrh e-mailu"
-              disabled={!companionRunNavCanGoOlder(calendarNavCursor)}
-              onClick={() => companionRunNavGoOlder(viewingEmailRuns, calendarNavCursor, onSelectViewingEmailRun!)}
-            >
-              <IconChevronLeft size={18} stroke={1.5} />
-            </ActionIcon>
-          </Tooltip>
-          <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
-            <Text size="xs" ta="center" fw={600} lineClamp={1}>
-              Kalendář · návrh {calendarDisplaySlot ?? "—"} / {calendarAnswerCount}
+      <Tabs value={calendarTab} onChange={setCalendarTab} variant="outline" radius="sm">
+        <Tabs.List grow>
+          <Tabs.Tab value="manual">Vlastní</Tabs.Tab>
+          <Tabs.Tab value="agent_runs">Z běhu agenta</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel value="manual" pt="sm">
+          <Stack gap="sm">
+            <Text size="sm" fw={600}>
+              {range.label}
             </Text>
-            {calendarPreviewText ? (
-              <Text size="xs" c="dimmed" ta="center" lineClamp={2} style={{ wordBreak: "break-word" }}>
-                {calendarPreviewText}
+            {provider ? (
+              <Text size="xs" c="dimmed">
+                Zdroj: {provider}
               </Text>
             ) : null}
-          </Stack>
-          <Tooltip label="Novější návrh e-mailu">
-            <ActionIcon
-              variant="default"
-              size="sm"
-              aria-label="Novější návrh e-mailu"
-              disabled={!companionRunNavCanGoNewer(calendarNavCursor, calendarAnswerCount)}
-              onClick={() => companionRunNavGoNewer(viewingEmailRuns, calendarNavCursor, onSelectViewingEmailRun!)}
+            {err ? (
+              <Text size="sm" c="red">
+                {err}
+              </Text>
+            ) : null}
+
+            <Paper withBorder p="xs" radius="sm">
+              <Stack gap="xs">
+                <Text size="xs" fw={600}>
+                  Přidat vlastní událost
+                </Text>
+                {newEventOk ? (
+                  <Text size="xs" c="green">
+                    {newEventOk}
+                  </Text>
+                ) : null}
+                <TextInput
+                  label="Název"
+                  size="xs"
+                  value={newEventTitle}
+                  onChange={(e) => setNewEventTitle(e.currentTarget.value)}
+                />
+                <TextInput
+                  label="Místo (volitelně)"
+                  size="xs"
+                  value={newEventLocation}
+                  onChange={(e) => setNewEventLocation(e.currentTarget.value)}
+                />
+                <Group grow>
+                  <TextInput
+                    label="Začátek"
+                    type="datetime-local"
+                    size="xs"
+                    value={newEventStart}
+                    onChange={(e) => setNewEventStart(e.currentTarget.value)}
+                  />
+                  <TextInput
+                    label="Konec"
+                    type="datetime-local"
+                    size="xs"
+                    value={newEventEnd}
+                    onChange={(e) => setNewEventEnd(e.currentTarget.value)}
+                  />
+                </Group>
+                <Textarea
+                  label="Poznámka (volitelně)"
+                  size="xs"
+                  minRows={2}
+                  value={newEventDescription}
+                  onChange={(e) => setNewEventDescription(e.currentTarget.value)}
+                />
+                <Group justify="space-between">
+                  <Button size="xs" variant="light" onClick={() => void load()} loading={loading}>
+                    Obnovit události
+                  </Button>
+                  <Button size="xs" onClick={() => void createOwnEvent()} loading={newEventBusy}>
+                    Vytvořit event
+                  </Button>
+                </Group>
+              </Stack>
+            </Paper>
+
+            <div
+              style={{
+                border: "1px solid var(--mantine-color-default-border)",
+                borderRadius: 8,
+                padding: 10,
+                background: "var(--mantine-color-body)"
+              }}
             >
-              <IconChevronRight size={18} stroke={1.5} />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      ) : null}
-
-      {showCalendarAnswerNav && !viewingEmailPanel ? (
-        <Text size="xs" c="dimmed">
-          Aktivní běh nemá návrh e-mailu v tomto panelu — šipkami přejděte na jiný dotaz s prohlídkou.
-        </Text>
-      ) : null}
-
-      {loading && !err ? (
-        <div
-          style={{
-            border: "1px solid var(--mantine-color-default-border)",
-            borderRadius: 8,
-            padding: 10,
-            background: "var(--mantine-color-body)"
-          }}
-          aria-busy="true"
-          aria-label="Načítání kalendáře"
-        >
-          <Skeleton height={13} width="55%" mb={10} />
-          <Skeleton height={12} width="88%" mb={14} />
-          <Group justify="space-between" mb="xs" wrap="nowrap" gap="sm">
-            <Skeleton height={14} width={120} />
-            <Skeleton height={32} width={140} radius="sm" />
-          </Group>
-          <Skeleton height={220} radius="sm" />
-        </div>
-      ) : !err ? (
-        <div
-          style={{
-            border: "1px solid var(--mantine-color-default-border)",
-            borderRadius: 8,
-            padding: 10,
-            background: "var(--mantine-color-body)"
-          }}
-        >
-          {viewingPreviewRange && viewingEmailPanel ? (
-            <>
-              <Text size="xs" fw={600} mb={4}>
-                Termín prohlídky v tomto dotazu
-              </Text>
-              <Text size="xs" c="dimmed" mb={8}>
-                Zvýraznění odpovídá řádku „Termín prohlídky“ v těle mailu (záložka Maily). Zeleně = návrh agenta (A),
-                klik respektuje délku schůzky.
-              </Text>
-            </>
-          ) : (
-            <>
               <Text size="xs" fw={600} mb={8}>
                 Váš kalendář — přehled 8:00–18:00 (krok 30 min)
               </Text>
@@ -901,100 +986,236 @@ export function CalendarToolPanel({
                 Šedě jsou naplánované úseky. Pruhovaná volná pole: při zvolené délce schůzky by začátek kolidoval s
                 obsazením (jen náhled, bez výběru slotu).
               </Text>
-            </>
-          )}
-          <Group justify="space-between" align="center" wrap="wrap" gap="sm" mb="xs">
-            <Text size="xs" fw={600}>
-              {viewingPreviewRange && viewingEmailPanel ? "Délka schůzky (pro klik na volno)" : "Délka schůzky (náhled kolizí)"}
-            </Text>
-            <Group gap={6} wrap="nowrap">
-              <ActionIcon
-                type="button"
-                variant="default"
-                size="sm"
-                aria-label="Zkrátit o 15 minut"
-                disabled={stripDurationMin <= VIEWING_MEET_DURATION_MIN_MIN}
-                onClick={() => setStripDurationMin((m) => clampViewingMeetDurationMinutes(m - 15))}
-              >
-                <span style={{ fontSize: 16, fontWeight: 600, lineHeight: 1 }}>−</span>
-              </ActionIcon>
-              <Text size="sm" w={76} ta="center" fw={600}>
-                {stripDurationMin} min
+              <CalendarPreviewStrip
+                busy={eventBusy}
+                proposedSlots={[]}
+                rangeStart={range.timeMin}
+                rangeEnd={range.timeMax}
+                durationMs={60 * 60 * 1000}
+                selectedSlot={null}
+                selectedSource={null}
+                previewDurationCollisions
+                onNavigateEarlier={() => setWeekOffset((w) => w - 1)}
+                onNavigateLater={() => setWeekOffset((w) => w + 1)}
+                canNavigateEarlier
+                canNavigateLater
+                pageLabelOverride={`${range.label} · týdenní pohled`}
+              />
+            </div>
+
+            <ScrollArea.Autosize mah={400} type="auto">
+              <Stack gap={6}>
+                {loading && !err ? (
+                  <>
+                    {Array.from({ length: 5 }, (_, i) => (
+                      <Skeleton key={i} height={76} radius={8} />
+                    ))}
+                  </>
+                ) : (
+                  events.map((e) => (
+                    <div key={e.id} style={{ padding: 8, borderRadius: 8, border: "1px solid var(--mantine-color-default-border)" }}>
+                      <Text size="sm" fw={600}>
+                        {e.summary}
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        {new Date(e.start).toLocaleString("cs-CZ")} – {new Date(e.end).toLocaleString("cs-CZ")}
+                      </Text>
+                      {e.htmlLink ? (
+                        <Anchor href={e.htmlLink} target="_blank" rel="noreferrer" size="xs">
+                          Otevřít v kalendáři
+                        </Anchor>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+                {!loading && events.length === 0 ? <Text size="sm" c="dimmed">Žádné události v tomto týdnu.</Text> : null}
+              </Stack>
+            </ScrollArea.Autosize>
+          </Stack>
+        </Tabs.Panel>
+        <Tabs.Panel value="agent_runs" pt="sm">
+          <Stack gap="sm">
+            <Group justify="space-between">
+              <Button size="xs" variant="default" onClick={() => setWeekOffset((w) => w - 1)}>
+                ← Týden
+              </Button>
+              <Text size="sm" fw={600}>
+                {range.label}
               </Text>
-              <ActionIcon
-                type="button"
-                variant="default"
-                size="sm"
-                aria-label="Prodloužit o 15 minut"
-                disabled={stripDurationMin >= VIEWING_MEET_DURATION_MAX_MIN}
-                onClick={() => setStripDurationMin((m) => clampViewingMeetDurationMinutes(m + 15))}
-              >
-                <span style={{ fontSize: 16, fontWeight: 600, lineHeight: 1 }}>+</span>
-              </ActionIcon>
+              <Button size="xs" variant="default" onClick={() => setWeekOffset((w) => w + 1)}>
+                Týden →
+              </Button>
             </Group>
-          </Group>
-          <CalendarPreviewStrip
-            busy={viewingPreviewRange ? stripBusy : eventBusy}
-            proposedSlots={viewingEmailPanel?.slots ?? []}
-            rangeStart={stripRange.rangeStart}
-            rangeEnd={stripRange.rangeEnd}
-            durationMs={stripDurationMin * 60 * 1000}
-            selectedSlot={viewingEmailPanel ? selectedSlotForViewing : null}
-            selectedSource={viewingEmailPanel ? calendarSelectedSource : null}
-            previewDurationCollisions={!viewingEmailPanel}
-            onSlotPick={
-              viewingCalendarInteractive
-                ? (start, end) => {
-                    setViewingSlotSel({ mode: "slot", start, end });
-                    applyCompanionBodySlot({ start, end });
+            {provider ? (
+              <Text size="xs" c="dimmed">
+                Zdroj: {provider}
+              </Text>
+            ) : null}
+            {err ? (
+              <Text size="sm" c="red">
+                {err}
+              </Text>
+            ) : null}
+
+            {showCalendarAnswerNav ? (
+              <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
+                <Tooltip label="Starší návrh e-mailu (dříve v konverzaci)">
+                  <ActionIcon
+                    variant="default"
+                    size="sm"
+                    aria-label="Starší návrh e-mailu"
+                    disabled={!companionRunNavCanGoOlder(calendarNavCursor)}
+                    onClick={() => companionRunNavGoOlder(viewingEmailRuns, calendarNavCursor, onSelectViewingEmailRun!)}
+                  >
+                    <IconChevronLeft size={18} stroke={1.5} />
+                  </ActionIcon>
+                </Tooltip>
+                <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+                  <Text size="xs" ta="center" fw={600} lineClamp={1}>
+                    Kalendář · návrh {calendarDisplaySlot ?? "—"} / {calendarAnswerCount}
+                  </Text>
+                  {calendarPreviewText ? (
+                    <Text size="xs" c="dimmed" ta="center" lineClamp={2} style={{ wordBreak: "break-word" }}>
+                      {calendarPreviewText}
+                    </Text>
+                  ) : null}
+                </Stack>
+                <Tooltip label="Novější návrh e-mailu">
+                  <ActionIcon
+                    variant="default"
+                    size="sm"
+                    aria-label="Novější návrh e-mailu"
+                    disabled={!companionRunNavCanGoNewer(calendarNavCursor, calendarAnswerCount)}
+                    onClick={() => companionRunNavGoNewer(viewingEmailRuns, calendarNavCursor, onSelectViewingEmailRun!)}
+                  >
+                    <IconChevronRight size={18} stroke={1.5} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            ) : null}
+
+            {showCalendarAnswerNav && !viewingEmailPanel ? (
+              <Text size="xs" c="dimmed">
+                Aktivní běh nemá návrh e-mailu v tomto panelu — šipkami přejděte na jiný dotaz s prohlídkou.
+              </Text>
+            ) : null}
+
+            {loading && !err ? (
+              <div
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                  borderRadius: 8,
+                  padding: 10,
+                  background: "var(--mantine-color-body)"
+                }}
+                aria-busy="true"
+                aria-label="Načítání kalendáře"
+              >
+                <Skeleton height={13} width="55%" mb={10} />
+                <Skeleton height={12} width="88%" mb={14} />
+                <Group justify="space-between" mb="xs" wrap="nowrap" gap="sm">
+                  <Skeleton height={14} width={120} />
+                  <Skeleton height={32} width={140} radius="sm" />
+                </Group>
+                <Skeleton height={220} radius="sm" />
+              </div>
+            ) : !err ? (
+              <div
+                style={{
+                  border: "1px solid var(--mantine-color-default-border)",
+                  borderRadius: 8,
+                  padding: 10,
+                  background: "var(--mantine-color-body)"
+                }}
+              >
+                {viewingPreviewRange && viewingEmailPanel ? (
+                  <>
+                    <Text size="xs" fw={600} mb={4}>
+                      Termín prohlídky v tomto dotazu
+                    </Text>
+                    <Text size="xs" c="dimmed" mb={8}>
+                      Zvýraznění odpovídá řádku „Termín prohlídky“ v těle mailu (záložka Maily). Zeleně = návrh agenta (A),
+                      klik respektuje délku schůzky.
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <Text size="xs" fw={600} mb={8}>
+                      Váš kalendář — přehled 8:00–18:00 (krok 30 min)
+                    </Text>
+                    <Text size="xs" c="dimmed" mb={8}>
+                      Šedě jsou naplánované úseky. Pruhovaná volná pole: při zvolené délce schůzky by začátek kolidoval s
+                      obsazením (jen náhled, bez výběru slotu).
+                    </Text>
+                  </>
+                )}
+                <Group justify="space-between" align="center" wrap="wrap" gap="sm" mb="xs">
+                  <Text size="xs" fw={600}>
+                    {viewingPreviewRange && viewingEmailPanel ? "Délka schůzky (pro klik na volno)" : "Délka schůzky (náhled kolizí)"}
+                  </Text>
+                  <Group gap={6} wrap="nowrap">
+                    <ActionIcon
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      aria-label="Zkrátit o 15 minut"
+                      disabled={stripDurationMin <= VIEWING_MEET_DURATION_MIN_MIN}
+                      onClick={() => setStripDurationMin((m) => clampViewingMeetDurationMinutes(m - 15))}
+                    >
+                      <span style={{ fontSize: 16, fontWeight: 600, lineHeight: 1 }}>−</span>
+                    </ActionIcon>
+                    <Text size="sm" w={76} ta="center" fw={600}>
+                      {stripDurationMin} min
+                    </Text>
+                    <ActionIcon
+                      type="button"
+                      variant="default"
+                      size="sm"
+                      aria-label="Prodloužit o 15 minut"
+                      disabled={stripDurationMin >= VIEWING_MEET_DURATION_MAX_MIN}
+                      onClick={() => setStripDurationMin((m) => clampViewingMeetDurationMinutes(m + 15))}
+                    >
+                      <span style={{ fontSize: 16, fontWeight: 600, lineHeight: 1 }}>+</span>
+                    </ActionIcon>
+                  </Group>
+                </Group>
+                <CalendarPreviewStrip
+                  busy={viewingPreviewRange ? stripBusy : eventBusy}
+                  proposedSlots={viewingEmailPanel?.slots ?? []}
+                  rangeStart={stripRange.rangeStart}
+                  rangeEnd={stripRange.rangeEnd}
+                  durationMs={stripDurationMin * 60 * 1000}
+                  selectedSlot={viewingEmailPanel ? selectedSlotForViewing : null}
+                  selectedSource={viewingEmailPanel ? calendarSelectedSource : null}
+                  previewDurationCollisions={!viewingEmailPanel}
+                  onSlotPick={
+                    viewingCalendarInteractive
+                      ? (start, end) => {
+                          setViewingSlotSel({ mode: "slot", start, end });
+                          applyCompanionBodySlot({ start, end });
+                        }
+                      : undefined
                   }
-                : undefined
-            }
-          />
-          {viewingCalendarInteractive ? (
-            <Button
-              type="button"
-              variant="default"
-              size="xs"
-              mt="sm"
-              onClick={() => {
-                setViewingSlotSel({ mode: "none" });
-                applyCompanionBodySlot(null);
-              }}
-            >
-              Odebrat řádek „Termín prohlídky“ z těla
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-      <ScrollArea.Autosize mah={400} type="auto">
-        <Stack gap={6}>
-          {loading && !err ? (
-            <>
-              {Array.from({ length: 5 }, (_, i) => (
-                <Skeleton key={i} height={76} radius={8} />
-              ))}
-            </>
-          ) : (
-            events.map((e) => (
-              <div key={e.id} style={{ padding: 8, borderRadius: 8, border: "1px solid var(--mantine-color-default-border)" }}>
-                <Text size="sm" fw={600}>
-                  {e.summary}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  {new Date(e.start).toLocaleString("cs-CZ")} – {new Date(e.end).toLocaleString("cs-CZ")}
-                </Text>
-                {e.htmlLink ? (
-                  <Anchor href={e.htmlLink} target="_blank" rel="noreferrer" size="xs">
-                    Otevřít v kalendáři
-                  </Anchor>
+                />
+                {viewingCalendarInteractive ? (
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="xs"
+                    mt="sm"
+                    onClick={() => {
+                      setViewingSlotSel({ mode: "none" });
+                      applyCompanionBodySlot(null);
+                    }}
+                  >
+                    Odebrat řádek „Termín prohlídky“ z těla
+                  </Button>
                 ) : null}
               </div>
-            ))
-          )}
-          {!loading && events.length === 0 ? <Text size="sm" c="dimmed">Žádné události v tomto týdnu.</Text> : null}
-        </Stack>
-      </ScrollArea.Autosize>
+            ) : null}
+          </Stack>
+        </Tabs.Panel>
+      </Tabs>
     </Stack>
   );
 }
