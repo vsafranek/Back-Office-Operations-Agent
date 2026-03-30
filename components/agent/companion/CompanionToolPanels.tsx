@@ -38,6 +38,11 @@ import { useDebouncedValue, useDisclosure } from "@mantine/hooks";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarPreviewStrip } from "@/components/agent/CalendarPreviewStrip";
 import { FormattedAssistantContent } from "@/components/agent/FormattedAssistantContent";
+import {
+  ScheduledTaskRunModalContent,
+  ScheduledTaskRunResultCard,
+  type ScheduledTaskNotificationRow
+} from "@/components/agent/ScheduledTaskRunResultCard";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
 import { ScheduledTaskConfirmationPanel } from "@/components/agent/ScheduledTaskConfirmationPanel";
 import { ViewingEmailDraftPanel } from "@/components/agent/ViewingEmailDraftPanel";
@@ -1667,18 +1672,7 @@ export function MarketSidebarPanel({
   );
 }
 
-export type ScheduledTaskNotificationRow = {
-  id: string;
-  task_id: string;
-  task_title: string;
-  task_cron: string;
-  agent_run_id: string | null;
-  status: "ok" | "error";
-  summary: string;
-  detail: string | null;
-  read_at: string | null;
-  created_at: string;
-};
+export type { ScheduledTaskNotificationRow };
 
 /** Přehled běhů naplánovaných úloh (cron) a označení přečtení. */
 export function ScheduledTasksNotificationsPanel({
@@ -1704,7 +1698,8 @@ export function ScheduledTasksNotificationsPanel({
     taskTitle: string;
     createdAt: string;
     status: "ok" | "error";
-    body: string;
+    summary: string;
+    detail: string | null;
   } | null>(null);
 
   async function load() {
@@ -1780,13 +1775,6 @@ export function ScheduledTasksNotificationsPanel({
     return [...m.entries()];
   }, [items]);
 
-  function cronNotificationFullBody(n: ScheduledTaskNotificationRow): string {
-    if (n.status === "ok") {
-      return (n.detail?.trim() || n.summary || "Úloha doběhla.").trim();
-    }
-    return [n.summary, n.detail ?? ""].filter((s) => s.trim()).join("\n\n").trim() || "—";
-  }
-
   const pendingBlock =
     pendingTaskDraft != null ? (
       <Stack gap="xs">
@@ -1821,7 +1809,9 @@ export function ScheduledTasksNotificationsPanel({
     <Stack gap="sm">
       {pendingBlock}
       <Text size="sm" c="dimmed">
-        Po každém běhu naplánované úlohy (volání cron endpointu) se zde objeví záznam. Úlohy spravujete v Nastavení.
+        Po každém běhu naplánované úlohy (volání cron endpointu) se zde objeví záznam —{" "}
+        <strong>shrnutí (notifikace)</strong> je zvlášť od <strong>plné odpovědi agenta</strong>, pokud je text delší než
+        stručný náhled. Úlohy spravujete v Nastavení.
       </Text>
       <Group justify="space-between" wrap="nowrap">
         <Button size="compact-xs" variant="light" onClick={() => void load()}>
@@ -1883,73 +1873,20 @@ export function ScheduledTasksNotificationsPanel({
               <Accordion.Panel>
                 <Stack gap="sm">
                   {rows.map((n) => (
-                    <Paper key={n.id} withBorder p="sm" radius="md">
-                      <Group justify="space-between" wrap="nowrap" gap={6} mb={6}>
-                        <Group gap={6} wrap="nowrap">
-                          <Badge size="xs" color={n.status === "ok" ? "teal" : "red"}>
-                            {n.status}
-                          </Badge>
-                          {!n.read_at ? (
-                            <Badge size="xs" variant="outline" color="orange">
-                              Nepřečtené
-                            </Badge>
-                          ) : null}
-                        </Group>
-                        <Group gap={6} wrap="nowrap">
-                          <Button
-                            size="compact-xs"
-                            variant="light"
-                            onClick={() =>
-                              setCronMessageModal({
-                                taskTitle: n.task_title || "Naplánovaná úloha",
-                                createdAt: n.created_at,
-                                status: n.status,
-                                body: cronNotificationFullBody(n)
-                              })
-                            }
-                          >
-                            Celá zpráva
-                          </Button>
-                          {!n.read_at ? (
-                            <Button
-                              size="compact-xs"
-                              variant="subtle"
-                              onClick={() => void markReadId(n.id)}
-                            >
-                              Přečíst
-                            </Button>
-                          ) : null}
-                          <Text size="xs" c="dimmed">
-                            {new Date(n.created_at).toLocaleString("cs-CZ")}
-                          </Text>
-                        </Group>
-                      </Group>
-                      {n.status === "ok" ? (
-                        <ScrollArea.Autosize mah={360} mih={80} type="auto" offsetScrollbars>
-                          <Box py={4}>
-                            <FormattedAssistantContent
-                              content={(n.detail?.trim() || n.summary || "Úloha doběhla.").trim()}
-                            />
-                          </Box>
-                        </ScrollArea.Autosize>
-                      ) : (
-                        <>
-                          <Text size="xs" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                            {n.summary}
-                          </Text>
-                          {n.detail ? (
-                            <Text size="xs" c="dimmed" mt={4} style={{ whiteSpace: "pre-wrap" }}>
-                              {n.detail}
-                            </Text>
-                          ) : null}
-                        </>
-                      )}
-                      {n.agent_run_id ? (
-                        <Text size="xs" c="dimmed" mt={4}>
-                          run_id: <Code>{n.agent_run_id}</Code>
-                        </Text>
-                      ) : null}
-                    </Paper>
+                    <ScheduledTaskRunResultCard
+                      key={n.id}
+                      notification={n}
+                      onOpenFullMessage={() =>
+                        setCronMessageModal({
+                          taskTitle: n.task_title || "Naplánovaná úloha",
+                          createdAt: n.created_at,
+                          status: n.status,
+                          summary: n.summary,
+                          detail: n.detail
+                        })
+                      }
+                      onMarkRead={!n.read_at ? () => void markReadId(n.id) : undefined}
+                    />
                   ))}
                 </Stack>
               </Accordion.Panel>
@@ -1964,7 +1901,7 @@ export function ScheduledTasksNotificationsPanel({
           cronMessageModal ? (
             <Stack gap={2}>
               <Text fw={600} size="sm">
-                {cronMessageModal.status === "ok" ? "Odpověď agenta" : "Chyba běhu úlohy"}
+                {cronMessageModal.status === "ok" ? "Výsledek naplánované úlohy" : "Chyba běhu úlohy"}
               </Text>
               <Text size="xs" c="dimmed" lineClamp={2}>
                 {cronMessageModal.taskTitle} · {new Date(cronMessageModal.createdAt).toLocaleString("cs-CZ")}
@@ -1976,19 +1913,11 @@ export function ScheduledTasksNotificationsPanel({
         radius="md"
       >
         {cronMessageModal ? (
-          cronMessageModal.status === "ok" ? (
-            <ScrollArea h="75vh" type="auto" offsetScrollbars>
-              <Box pr="sm" pb="md">
-                <FormattedAssistantContent content={cronMessageModal.body} />
-              </Box>
-            </ScrollArea>
-          ) : (
-            <ScrollArea h="75vh" type="auto" offsetScrollbars>
-              <Text size="sm" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                {cronMessageModal.body}
-              </Text>
-            </ScrollArea>
-          )
+          <ScheduledTaskRunModalContent
+            status={cronMessageModal.status}
+            summary={cronMessageModal.summary}
+            detail={cronMessageModal.detail}
+          />
         ) : null}
       </Modal>
     </Stack>

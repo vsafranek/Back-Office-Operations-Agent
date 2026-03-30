@@ -32,7 +32,11 @@ export default function RootLayout({
       <head>
         <ColorSchemeScript defaultColorScheme="light" />
       </head>
-      <body className={`${fontSans.variable} ${fontDisplay.variable}`} style={{ margin: 0 }}>
+      <body
+        className={`${fontSans.variable} ${fontDisplay.variable}`}
+        style={{ margin: 0 }}
+        suppressHydrationWarning
+      >
         <Providers>
           <AppChrome>{children}</AppChrome>
         </Providers>
