@@ -11,6 +11,10 @@ const SUMMARY_LISTING_THRESHOLD = 12;
 const MAX_DETAIL_ITEMS = 25;
 const EXISTING_IDS_BATCH = 200;
 
+function listingExternalKey(l: MarketListing): string {
+  return (l.external_id ?? "").trim();
+}
+
 function listingToCard(l: MarketListing) {
   return {
     external_id: l.external_id,
@@ -24,12 +28,13 @@ function listingToCard(l: MarketListing) {
 }
 
 async function selectExistingListingIdsForUser(userId: string, externalIds: string[]): Promise<Set<string>> {
-  if (externalIds.length === 0) return new Set<string>();
+  const normalized = [...new Set(externalIds.map((id) => id.trim()).filter(Boolean))];
+  if (normalized.length === 0) return new Set<string>();
   try {
     const supabase = getSupabaseAdminClient();
     const existing = new Set<string>();
-    for (let i = 0; i < externalIds.length; i += EXISTING_IDS_BATCH) {
-      const chunk = externalIds.slice(i, i + EXISTING_IDS_BATCH);
+    for (let i = 0; i < normalized.length; i += EXISTING_IDS_BATCH) {
+      const chunk = normalized.slice(i, i + EXISTING_IDS_BATCH);
       const { data, error } = await supabase
         .from("user_market_listing_finds")
         .select("external_id")
@@ -37,9 +42,8 @@ async function selectExistingListingIdsForUser(userId: string, externalIds: stri
         .in("external_id", chunk);
       if (error) throw error;
       for (const row of data ?? []) {
-        if (typeof row.external_id === "string" && row.external_id.trim().length > 0) {
-          existing.add(row.external_id);
-        }
+        const id = typeof row.external_id === "string" ? row.external_id.trim() : "";
+        if (id) existing.add(id);
       }
     }
     return existing;
@@ -64,15 +68,22 @@ export async function runMarketListingsChatSubAgent(params: {
   const listings = await fetchMarketListings(toolInput);
   const existingIds = await selectExistingListingIdsForUser(
     params.ctx.userId,
-    listings.map((l) => l.external_id).filter(Boolean)
+    listings.map((l) => listingExternalKey(l)).filter(Boolean)
   );
-  const newListings = listings.filter((l) => !existingIds.has(l.external_id));
+  const newListings = listings.filter((l) => {
+    const k = listingExternalKey(l);
+    return Boolean(k) && !existingIds.has(k);
+  });
 
-  void recordUserMarketListingFinds({
-    userId: params.ctx.userId,
-    agentRunId: params.ctx.runId ?? null,
-    listings
-  }).catch(() => {});
+  /** Karty v panelu: nové vůči DB; pokud je vše už v historii, stejně ukaž staženou sadu (cron / monitoring). */
+  const panelListings =
+    newListings.length > 0 ? newListings : listings.length > 0 ? listings : [];
+  const panelTitle =
+    newListings.length > 0
+      ? `Nové nabídky (${newListings.length})`
+      : listings.length > 0
+        ? `Stažené nabídky (${listings.length}, žádné nové vůči historii)`
+        : "Nové nabídky (0)";
 
   const citations = Array.from(new Set(listings.map((l) => l.url).filter(Boolean)));
 
@@ -90,8 +101,8 @@ export async function runMarketListingsChatSubAgent(params: {
             `Dotaz uživatele: ${params.question}`,
             "Parametry vyhledávání (fetchParams):",
             JSON.stringify(toolInput, null, 2),
-            `Načteno ${listings.length} nabídek, ale po porovnání s DB nejsou žádné nové inzeráty.`,
-            "Úkol: odpověz česky stručně (2-4 věty), že nebyly nalezeny nové nabídky, a doporuč upřesnit filtry (lokalita, cena, dispozice)."
+            `Načteno ${listings.length} nabídek; žádné nové vůči databázi uživatele (všechny už jsou v historii nálezů). V panelu se přesto zobrazí tato stažená sada.`,
+            "Úkol: odpověz česky stručně (2–4 věty), že oproti minulým nálezům nepřibyly nové inzeráty, uveď počet stažených, a krátce doporuč upřesnit filtry pokud má už užší monitoring."
           ].join("\n\n")
         : newListings.length > SUMMARY_LISTING_THRESHOLD
         ? [
@@ -117,19 +128,28 @@ export async function runMarketListingsChatSubAgent(params: {
             JSON.stringify(newListings.slice(0, MAX_DETAIL_ITEMS), null, 2)
           ].join("\n\n");
 
-  const reply = await generateUserFacingReply({
-    runId: params.ctx.runId,
-    maxTokens: listings.length > SUMMARY_LISTING_THRESHOLD ? 900 : 1600,
-    trace: params.ctx.trace
-      ? {
-          recorder: params.ctx.trace,
-          parentId: params.ctx.traceParentId ?? null,
-          name: "llm.subagent.market-listings.reply"
-        }
-      : undefined,
-    onAnswerDelta: params.onAnswerDelta,
-    userContent
-  });
+  let reply: Awaited<ReturnType<typeof generateUserFacingReply>>;
+  try {
+    reply = await generateUserFacingReply({
+      runId: params.ctx.runId,
+      maxTokens: listings.length > SUMMARY_LISTING_THRESHOLD ? 900 : 1600,
+      trace: params.ctx.trace
+        ? {
+            recorder: params.ctx.trace,
+            parentId: params.ctx.traceParentId ?? null,
+            name: "llm.subagent.market-listings.reply"
+          }
+        : undefined,
+      onAnswerDelta: params.onAnswerDelta,
+      userContent
+    });
+  } finally {
+    await recordUserMarketListingFinds({
+      userId: params.ctx.userId,
+      agentRunId: params.ctx.runId ?? null,
+      listings
+    }).catch(() => {});
+  }
 
   return {
     answer_text: reply.answer_text,
@@ -139,11 +159,8 @@ export async function runMarketListingsChatSubAgent(params: {
     next_actions: reply.next_actions,
     dataPanel: {
       kind: "market_listings",
-      title:
-        newListings.length > 0
-          ? `Nové nabídky (${newListings.length})`
-          : `Nové nabídky (0)`,
-      listings: newListings.map(listingToCard)
+      title: panelTitle,
+      listings: panelListings.map(listingToCard)
     }
   };
 }

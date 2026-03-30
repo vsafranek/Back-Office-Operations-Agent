@@ -18,6 +18,10 @@ vi.mock("@/lib/agent/tools/market-listings-tool", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/market-listings/record-user-market-listing-finds", () => ({
+  recordUserMarketListingFinds: vi.fn().mockResolvedValue(undefined)
+}));
+
 vi.mock("@/lib/supabase/server-client", () => ({
   getSupabaseAdminClient: vi.fn(() => ({
     from: vi.fn(() => ({
@@ -32,6 +36,8 @@ vi.mock("@/lib/supabase/server-client", () => ({
 
 import { generateUserFacingReply } from "@/lib/agent/llm/user-facing-reply";
 import { fetchMarketListings } from "@/lib/agent/tools/market-listings-tool";
+import { recordUserMarketListingFinds } from "@/lib/market-listings/record-user-market-listing-finds";
+import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 import { runMarketListingsChatSubAgent } from "@/lib/agent/subagents/market-listings-chat-subagent";
 
 const mockListing = {
@@ -77,5 +83,39 @@ describe("runMarketListingsChatSubAgent", () => {
       expect(answer.dataPanel.listings[0]?.external_id).toBe("sreality:x");
     }
     expect(answer.generated_artifacts).toEqual([]);
+    expect(recordUserMarketListingFinds).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "u1", listings: [mockListing] })
+    );
+  });
+
+  it("když jsou všechny nabídky už v DB, panel přesto zobrazí staženou sadu", async () => {
+    vi.mocked(getSupabaseAdminClient).mockImplementationOnce(() =>
+      ({
+        from: vi.fn(() => ({
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              in: vi.fn(async () => ({
+                data: [{ external_id: "sreality:x" }],
+                error: null
+              }))
+            }))
+          }))
+        }))
+      }) as never
+    );
+
+    const run = vi.fn();
+    const toolRunner = { run } as unknown as ToolRunner;
+    const ctx: AgentToolContext = { runId: "r2", userId: "u1" };
+    const answer = await runMarketListingsChatSubAgent({
+      toolRunner,
+      ctx,
+      question: "Nabídky v Praze první stránka"
+    });
+
+    if (answer.dataPanel?.kind === "market_listings") {
+      expect(answer.dataPanel.listings).toHaveLength(1);
+      expect(answer.dataPanel.title).toContain("žádné nové");
+    }
   });
 });
