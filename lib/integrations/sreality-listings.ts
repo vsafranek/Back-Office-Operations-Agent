@@ -107,8 +107,9 @@ function mapEstateToListing(estate: SrealityEstate, observedAt: string): MarketL
   const loc = (estate.locality ?? "").trim();
   if (!name || !loc) return null;
   const priceRaw = estate.price_czk?.value_raw;
+  const priceCzk = typeof priceRaw === "number" && priceRaw > 1 ? Math.round(priceRaw) : null;
   const priceNote =
-    typeof priceRaw === "number" && priceRaw > 1 ? ` · ${Math.round(priceRaw).toLocaleString("cs-CZ")} Kč` : "";
+    priceCzk != null ? ` · ${priceCzk.toLocaleString("cs-CZ")} Kč` : "";
   const title = `${name}${priceNote}`;
   const url = pickAbsoluteDetailUrl(estate, hash);
 
@@ -124,6 +125,7 @@ function mapEstateToListing(estate: SrealityEstate, observedAt: string): MarketL
     source: "sreality",
     url,
     created_at: observedAt,
+    ...(priceCzk != null ? { price_czk: priceCzk } : {}),
     ...(image_url ? { image_url } : {})
   };
 }

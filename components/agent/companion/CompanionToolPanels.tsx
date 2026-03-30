@@ -6,6 +6,7 @@ import {
   Anchor,
   Autocomplete,
   Badge,
+  Box,
   Button,
   Checkbox,
   Code,
@@ -16,6 +17,7 @@ import {
   MultiSelect,
   Paper,
   NumberInput,
+  Pagination,
   Collapse,
   ScrollArea,
   SegmentedControl,
@@ -35,6 +37,7 @@ import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { useDebouncedValue, useDisclosure } from "@mantine/hooks";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarPreviewStrip } from "@/components/agent/CalendarPreviewStrip";
+import { FormattedAssistantContent } from "@/components/agent/FormattedAssistantContent";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
 import { ScheduledTaskConfirmationPanel } from "@/components/agent/ScheduledTaskConfirmationPanel";
 import { ViewingEmailDraftPanel } from "@/components/agent/ViewingEmailDraftPanel";
@@ -55,6 +58,7 @@ import {
   VIEWING_MEET_DURATION_MIN_MIN,
   viewingSlotDurationMs
 } from "@/lib/agent/viewing-email-calendar-ui";
+import { marketListingsPanelsFromAnswer } from "@/lib/agent/market-listings-answer-helpers";
 import { findViewingEmailDataPanel } from "@/lib/agent/viewing-email-answer-helpers";
 import {
   applyViewingConfirmedSlotToBody,
@@ -82,8 +86,7 @@ const VIZ_SIDEBAR_KINDS = new Set<AgentDataPanelModel["kind"]>([
   "leads_sales_6m",
   "clients_filtered",
   "deal_sales_detail",
-  "missing_reconstruction",
-  "market_listings"
+  "missing_reconstruction"
 ]);
 
 type GmailRow = {
@@ -991,25 +994,62 @@ export function CalendarToolPanel({
   );
 }
 
+/** Maximální šířka jedné karty inzerátu v mřížce (px). */
+const SAVED_MARKET_CARD_MAX_WIDTH_PX = 252;
+
 function SavedMarketFindsPanel({ getAccessToken }: { getAccessToken: () => Promise<string | null> }) {
-  const [items, setItems] = useState<
-    {
-      id: string;
-      external_id: string;
-      title: string;
-      location: string;
-      source: string;
-      url: string;
-      image_url: string | null;
-      agent_run_id: string | null;
-      first_seen_at: string;
-      last_seen_at: string;
-    }[]
-  >([]);
+  type FindRow = {
+    id: string;
+    external_id: string;
+    title: string;
+    location: string;
+    source: string;
+    url: string;
+    image_url: string | null;
+    price_czk: number | null;
+    agent_run_id: string | null;
+    first_seen_at: string;
+    last_seen_at: string;
+  };
+
+  const [items, setItems] = useState<FindRow[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+  const pageSize = 12;
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  async function load() {
+  const [draftLocation, setDraftLocation] = useState("");
+  const [draftSource, setDraftSource] = useState<string>("");
+  const [draftPriceMin, setDraftPriceMin] = useState("");
+  const [draftPriceMax, setDraftPriceMax] = useState("");
+  const [appliedLocation, setAppliedLocation] = useState("");
+  const [appliedSource, setAppliedSource] = useState<string>("");
+  const [appliedPriceMin, setAppliedPriceMin] = useState("");
+  const [appliedPriceMax, setAppliedPriceMax] = useState("");
+
+  function resetFilters() {
+    setDraftLocation("");
+    setDraftSource("");
+    setDraftPriceMin("");
+    setDraftPriceMax("");
+    setAppliedLocation("");
+    setAppliedSource("");
+    setAppliedPriceMin("");
+    setAppliedPriceMax("");
+    setPage(1);
+  }
+
+  function applyFilters() {
+    setAppliedLocation(draftLocation.trim());
+    setAppliedSource(draftSource);
+    setAppliedPriceMin(draftPriceMin.trim());
+    setAppliedPriceMax(draftPriceMax.trim());
+    setPage(1);
+  }
+
+  async function load(targetPage: number) {
     setErr(null);
     setLoading(true);
     const token = await getAccessToken();
@@ -1018,31 +1058,56 @@ function SavedMarketFindsPanel({ getAccessToken }: { getAccessToken: () => Promi
       setLoading(false);
       return;
     }
-    const res = await fetch("/api/settings/market-listing-finds?limit=150", {
+    const p = new URLSearchParams({ page: String(targetPage), limit: String(pageSize) });
+    if (appliedLocation) p.set("location", appliedLocation);
+    if (appliedSource === "sreality" || appliedSource === "bezrealitky") p.set("source", appliedSource);
+    if (appliedPriceMin) p.set("price_min", appliedPriceMin);
+    if (appliedPriceMax) p.set("price_max", appliedPriceMax);
+    const res = await fetch(`/api/settings/market-listing-finds?${p.toString()}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
-    const payload = (await res.json()) as { finds?: typeof items; error?: string };
+    const payload = (await res.json()) as {
+      finds?: FindRow[];
+      total?: number;
+      page?: number;
+      totalPages?: number;
+      error?: string;
+    };
     if (!res.ok) {
       setErr(payload.error ?? `HTTP ${res.status}`);
       setItems([]);
+      setTotal(0);
+      setTotalPages(0);
       setLoading(false);
       return;
     }
     setItems(payload.finds ?? []);
+    setTotal(typeof payload.total === "number" ? payload.total : 0);
+    setTotalPages(typeof payload.totalPages === "number" ? payload.totalPages : 0);
+    setPage(typeof payload.page === "number" ? payload.page : targetPage);
     setLoading(false);
   }
 
   useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial load + „Obnovit“
-  }, []);
+    void load(page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- filtry přes applied*; getAccessToken z dashboardu
+  }, [page, appliedLocation, appliedSource, appliedPriceMin, appliedPriceMax]);
 
-  if (loading) {
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = total === 0 ? 0 : Math.min(page * pageSize, total);
+  const remainingAfterPage = total === 0 ? 0 : Math.max(0, total - rangeEnd);
+  const canPrev = page > 1 && !loading;
+  const canNext = totalPages > 1 && page < totalPages && !loading;
+
+  if (loading && items.length === 0 && !err) {
     return (
       <Stack gap="sm">
         <Skeleton h={18} />
-        <Skeleton h={120} />
-        <Skeleton h={120} />
+        <Group gap="xs" wrap="wrap">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} h={280} style={{ flex: "1 1 200px", maxWidth: SAVED_MARKET_CARD_MAX_WIDTH_PX }} radius="md" />
+          ))}
+        </Group>
       </Stack>
     );
   }
@@ -1053,37 +1118,120 @@ function SavedMarketFindsPanel({ getAccessToken }: { getAccessToken: () => Promi
         <Text size="sm" c="red">
           {err}
         </Text>
-        <Button size="xs" variant="light" onClick={() => void load()}>
+        <Button size="xs" variant="light" onClick={() => void load(page)}>
           Zkusit znovu
         </Button>
       </Stack>
     );
   }
 
-  if (items.length === 0) {
+  if (total === 0) {
     return (
       <Text size="sm" c="dimmed">
-        Zatím žádné uložené nálezy. Objeví se po hledání v záložce Prohledat, po odpovědi agenta na dotaz na nabídky nebo po
+        Zatím žádné uložené nálezy (0). Objeví se po hledání v záložce Prohledat, po odpovědi agenta na dotaz na nabídky nebo po
         běhu naplánované úlohy s nabídkami.
       </Text>
     );
   }
 
+  const filtersActive =
+    Boolean(appliedLocation) ||
+    (appliedSource === "sreality" || appliedSource === "bezrealitky") ||
+    Boolean(appliedPriceMin || appliedPriceMax);
+
   return (
     <Stack gap="sm">
-      <Group justify="space-between" wrap="nowrap" gap="xs">
-        <Text size="xs" c="dimmed" style={{ flex: 1 }}>
-          Řazeno podle posledního výskytu. U každé nabídky je zdroj portálu, odkaz a čas prvního / posledního zachycení.
-        </Text>
-        <Button size="compact-xs" variant="light" onClick={() => void load()}>
+      <Group justify="space-between" wrap="wrap" gap="xs" align="flex-start">
+        <Stack gap={4} style={{ flex: 1, minWidth: 200 }}>
+          <Text size="sm" fw={600}>
+            Uloženo celkem: {total}
+            {filtersActive ? (
+              <Text span size="xs" c="dimmed" fw={400} ml={6}>
+                (podle filtru)
+              </Text>
+            ) : null}
+          </Text>
+          <Text size="xs" c="dimmed">
+            Zobrazeno {rangeStart}–{rangeEnd} z {total}. Řazeno podle posledního výskytu; pod kartou je čas prvního a posledního
+            uložení.
+          </Text>
+        </Stack>
+        <Button size="compact-xs" variant="light" onClick={() => void load(page)} loading={loading}>
           Obnovit
         </Button>
       </Group>
-      <ScrollArea.Autosize mah={560} type="auto">
-        <Stack gap="md">
+
+      <Paper withBorder p="xs" radius="sm">
+        <Stack gap="xs">
+          <Text size="xs" fw={600}>
+            Filtry
+          </Text>
+          <Text size="xs" c="dimmed">
+            Cena: zobrazí jen záznamy s uloženou cenou (nově uložené po aktualizaci DB). Lokalita hledá část textu v poli lokace.
+          </Text>
+          <Group grow align="flex-end" wrap="wrap" gap="xs">
+            <TextInput
+              label="Lokalita"
+              placeholder="např. Holešovice"
+              size="xs"
+              value={draftLocation}
+              onChange={(e) => setDraftLocation(e.currentTarget.value)}
+            />
+            <Select
+              label="Realitka"
+              placeholder="Všechny"
+              size="xs"
+              clearable
+              data={[
+                { value: "sreality", label: "Sreality" },
+                { value: "bezrealitky", label: "Bezrealitky" }
+              ]}
+              value={draftSource || null}
+              onChange={(v) => setDraftSource(v ?? "")}
+            />
+            <TextInput
+              label="Cena od (Kč)"
+              placeholder="např. 3000000"
+              size="xs"
+              inputMode="numeric"
+              value={draftPriceMin}
+              onChange={(e) => setDraftPriceMin(e.currentTarget.value.replace(/\D/g, ""))}
+            />
+            <TextInput
+              label="Cena do (Kč)"
+              placeholder="např. 8000000"
+              size="xs"
+              inputMode="numeric"
+              value={draftPriceMax}
+              onChange={(e) => setDraftPriceMax(e.currentTarget.value.replace(/\D/g, ""))}
+            />
+          </Group>
+          <Group gap="xs">
+            <Button size="compact-xs" onClick={applyFilters}>
+              Použít filtry
+            </Button>
+            <Button size="compact-xs" variant="default" onClick={resetFilters}>
+              Zrušit filtry
+            </Button>
+          </Group>
+        </Stack>
+      </Paper>
+
+      <ScrollArea.Autosize mah={560} type="auto" offsetScrollbars>
+        <Box
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, 160px), ${SAVED_MARKET_CARD_MAX_WIDTH_PX}px))`,
+            gap: "var(--mantine-spacing-md)",
+            justifyContent: "start",
+            alignItems: "start",
+            minWidth: 0
+          }}
+        >
           {items.map((row) => (
-            <div key={row.id}>
+            <Box key={row.id} maw={SAVED_MARKET_CARD_MAX_WIDTH_PX} w="100%" style={{ minWidth: 0 }}>
               <MarketListingCardView
+                maxWidthPx={SAVED_MARKET_CARD_MAX_WIDTH_PX}
                 card={{
                   external_id: row.external_id,
                   title: row.title,
@@ -1093,21 +1241,103 @@ function SavedMarketFindsPanel({ getAccessToken }: { getAccessToken: () => Promi
                   ...(row.image_url ? { image_url: row.image_url } : {})
                 }}
               />
-              <Text size="xs" c="dimmed" mt={6} pl={4}>
+              <Text size="xs" fw={600} mt={4} c="dark.7">
+                {row.price_czk != null
+                  ? `${row.price_czk.toLocaleString("cs-CZ")} Kč`
+                  : "Cena v uloženém nálezu není"}
+              </Text>
+              <Text size="xs" c="dimmed" mt={6} lineClamp={3}>
                 Poprvé: {new Date(row.first_seen_at).toLocaleString("cs-CZ")} · Naposledy:{" "}
                 {new Date(row.last_seen_at).toLocaleString("cs-CZ")}
                 {row.agent_run_id ? ` · běh ${row.agent_run_id.slice(0, 8)}…` : ""}
               </Text>
-            </div>
+            </Box>
           ))}
-        </Stack>
+        </Box>
       </ScrollArea.Autosize>
+
+      {totalPages > 1 ? (
+        <Stack
+          gap="sm"
+          pt="sm"
+          mt={4}
+          style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}
+        >
+          <Group justify="space-between" wrap="wrap" gap="xs" align="center">
+            <Button
+              size="compact-xs"
+              variant="default"
+              disabled={!canPrev}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              ← Předchozí
+            </Button>
+            <Text size="xs" c="dimmed" ta="center" maw={200} style={{ flex: "1 1 auto" }}>
+              Stránka {page} z {totalPages} · zobrazeno {rangeStart}–{rangeEnd}
+            </Text>
+            <Button
+              size="compact-xs"
+              variant="default"
+              disabled={!canNext}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Další →
+            </Button>
+          </Group>
+
+          {canNext ? (
+            <Button
+              fullWidth
+              size="xs"
+              variant="light"
+              loading={loading}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Načíst další
+              {remainingAfterPage > 0 ? ` (zbývá cca ${remainingAfterPage})` : ""}
+            </Button>
+          ) : null}
+
+          <Group justify="center">
+            <Pagination
+              value={page}
+              onChange={setPage}
+              total={totalPages}
+              size="sm"
+              siblings={1}
+              boundaries={1}
+              disabled={loading}
+              aria-label="Stránkování uložených nabídek"
+            />
+          </Group>
+        </Stack>
+      ) : (
+        <Text size="xs" c="dimmed" pt="xs" ta="center">
+          Všechny uložené položky jsou na této stránce ({total}).
+        </Text>
+      )}
     </Stack>
   );
 }
 
-export function MarketSidebarPanel({ getAccessToken }: { getAccessToken: () => Promise<string | null> }) {
+export type MarketSidebarPanelProps = {
+  getAccessToken: () => Promise<string | null>;
+  lastAgentAnswer?: AgentAnswer | null;
+  /** Běhy s panelem nabídek — navigace stejná jako u tabulek (stejné `runId` v konverzaci). */
+  marketListingsAnswerRuns?: VizAnswerRunOption[];
+  assistantRunIdsInOrder?: string[];
+  onSelectMarketListingsRun?: (runId: string) => void;
+};
+
+export function MarketSidebarPanel({
+  getAccessToken,
+  lastAgentAnswer = null,
+  marketListingsAnswerRuns = [],
+  assistantRunIdsInOrder = [],
+  onSelectMarketListingsRun
+}: MarketSidebarPanelProps) {
   const [marketTab, setMarketTab] = useState<string | null>("search");
+  const marketAgentTabAutoOpenRunRef = useRef<string | null>(null);
   const [location, setLocation] = useState("Praha");
   const [sources, setSources] = useState<string[]>(["sreality", "bezrealitky"]);
   const [perPage, setPerPage] = useState(24);
@@ -1129,6 +1359,82 @@ export function MarketSidebarPanel({ getAccessToken }: { getAccessToken: () => P
     () => srealityCategorySubSelectData(srealityCategoryMain === "domy" ? 2 : 1),
     [srealityCategoryMain]
   );
+
+  const marketPanels = marketListingsPanelsFromAnswer(lastAgentAnswer);
+  const activeRunIdForMarket = lastAgentAnswer?.runId ?? null;
+  const marketAnswerCount = marketListingsAnswerRuns.length;
+  const marketNavCursor = companionRunNavCursor(
+    marketListingsAnswerRuns,
+    activeRunIdForMarket,
+    assistantRunIdsInOrder
+  );
+  const showMarketAnswerNav = marketAnswerCount > 1 && onSelectMarketListingsRun != null;
+  const marketDisplaySlot = companionRunNavDisplayedSlotNumber(marketNavCursor, marketAnswerCount);
+  const marketAnswerPreviewText =
+    marketNavCursor >= 0
+      ? marketListingsAnswerRuns[marketNavCursor]?.preview
+      : marketAnswerCount > 0
+        ? marketListingsAnswerRuns[0]?.preview
+        : undefined;
+
+  const goOlderMarketAnswer = () => {
+    if (!onSelectMarketListingsRun) return;
+    companionRunNavGoOlder(marketListingsAnswerRuns, marketNavCursor, onSelectMarketListingsRun);
+  };
+  const goNewerMarketAnswer = () => {
+    if (!onSelectMarketListingsRun) return;
+    companionRunNavGoNewer(marketListingsAnswerRuns, marketNavCursor, onSelectMarketListingsRun);
+  };
+
+  const marketAnswerNavRow =
+    showMarketAnswerNav ? (
+      <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
+        <Tooltip label="Starší odpověď s nabídkami (dříve v konverzaci)">
+          <ActionIcon
+            variant="default"
+            size="sm"
+            aria-label="Starší odpověď s nabídkami"
+            disabled={!companionRunNavCanGoOlder(marketNavCursor)}
+            onClick={goOlderMarketAnswer}
+          >
+            <IconChevronLeft size={18} stroke={1.5} />
+          </ActionIcon>
+        </Tooltip>
+        <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+          <Text size="xs" ta="center" fw={600} lineClamp={1}>
+            Běh {marketDisplaySlot ?? "—"} / {marketAnswerCount}
+          </Text>
+          {marketAnswerPreviewText ? (
+            <Text size="xs" c="dimmed" ta="center" lineClamp={2} style={{ wordBreak: "break-word" }}>
+              {marketAnswerPreviewText}
+            </Text>
+          ) : null}
+        </Stack>
+        <Tooltip label="Novější odpověď s nabídkami">
+          <ActionIcon
+            variant="default"
+            size="sm"
+            aria-label="Novější odpověď s nabídkami"
+            disabled={!companionRunNavCanGoNewer(marketNavCursor, marketAnswerCount)}
+            onClick={goNewerMarketAnswer}
+          >
+            <IconChevronRight size={18} stroke={1.5} />
+          </ActionIcon>
+        </Tooltip>
+      </Group>
+    ) : null;
+
+  useEffect(() => {
+    const panels = marketListingsPanelsFromAnswer(lastAgentAnswer);
+    const runId = lastAgentAnswer?.runId ?? null;
+    if (panels.length > 0 && runId && marketAgentTabAutoOpenRunRef.current !== runId) {
+      marketAgentTabAutoOpenRunRef.current = runId;
+      setMarketTab("agent_runs");
+    }
+    if (panels.length === 0) {
+      marketAgentTabAutoOpenRunRef.current = null;
+    }
+  }, [lastAgentAnswer]);
 
   useEffect(() => {
     setSrealityCategorySubId(null);
@@ -1192,7 +1498,36 @@ export function MarketSidebarPanel({ getAccessToken }: { getAccessToken: () => P
         <Tabs.List grow>
           <Tabs.Tab value="search">Prohledat</Tabs.Tab>
           <Tabs.Tab value="saved">Uložené nálezy</Tabs.Tab>
+          <Tabs.Tab value="agent_runs">Z běhu agenta</Tabs.Tab>
         </Tabs.List>
+        <Tabs.Panel value="agent_runs" pt="sm">
+          <Stack gap="sm">
+            {showMarketAnswerNav ? <Stack gap={6}>{marketAnswerNavRow}</Stack> : null}
+            {!lastAgentAnswer ? (
+              <Text size="sm" c="dimmed">
+                {marketAnswerCount > 0
+                  ? "Šipkami zvolte odpověď s nabídkami z předešlého běhu agenta v této konverzaci."
+                  : "Po dokončení dotazu na nabídky zde uvidíte karty nemovitostí podle jednotlivých běhů agenta."}
+              </Text>
+            ) : marketPanels.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                {marketAnswerCount > 0
+                  ? "U aktuálně zvoleného běhu nejsou v odpovědi uložené nabídky — vyberte jiný běh šipkami výše."
+                  : "V tomto běhu agent nevrátil panel nabídek."}
+              </Text>
+            ) : (
+              marketPanels.map((panel, i) => (
+                <MarketListingsDataPanelSection
+                  key={`${lastAgentAnswer.runId ?? "run"}-ml-${i}`}
+                  title={panel.title}
+                  fetchParams={panel.fetchParams}
+                  initialListings={panel.listings}
+                  getAccessToken={getAccessToken}
+                />
+              ))
+            )}
+          </Stack>
+        </Tabs.Panel>
         <Tabs.Panel value="saved" pt="sm">
           <SavedMarketFindsPanel getAccessToken={getAccessToken} />
         </Tabs.Panel>
@@ -1362,6 +1697,15 @@ export function ScheduledTasksNotificationsPanel({
   const [items, setItems] = useState<ScheduledTaskNotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  /** Počet řádků v `user_scheduled_agent_tasks` — ověření, že úloha z Nastavení je v DB. */
+  const [savedTaskCount, setSavedTaskCount] = useState<number | null>(null);
+  /** Celý text odpovědi / chyby z cron běhu (modal — bez ořezu výšky panelu). */
+  const [cronMessageModal, setCronMessageModal] = useState<{
+    taskTitle: string;
+    createdAt: string;
+    status: "ok" | "error";
+    body: string;
+  } | null>(null);
 
   async function load() {
     setErr(null);
@@ -1371,16 +1715,27 @@ export function ScheduledTasksNotificationsPanel({
       setLoading(false);
       return;
     }
-    const res = await fetch("/api/settings/scheduled-task-notifications?limit=80", {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    const payload = (await res.json()) as {
+    const [notifRes, tasksRes] = await Promise.all([
+      fetch("/api/settings/scheduled-task-notifications?limit=80", {
+        headers: { Authorization: `Bearer ${token}` }
+      }),
+      fetch("/api/settings/scheduled-tasks", { headers: { Authorization: `Bearer ${token}` } })
+    ]);
+
+    if (tasksRes.ok) {
+      const tasksPayload = (await tasksRes.json()) as { tasks?: unknown[] };
+      setSavedTaskCount(Array.isArray(tasksPayload.tasks) ? tasksPayload.tasks.length : 0);
+    } else {
+      setSavedTaskCount(null);
+    }
+
+    const payload = (await notifRes.json()) as {
       error?: string;
       notifications?: ScheduledTaskNotificationRow[];
       unread_count?: number;
     };
-    if (!res.ok) {
-      setErr(payload.error ?? `HTTP ${res.status}`);
+    if (!notifRes.ok) {
+      setErr(payload.error ?? `HTTP ${notifRes.status}`);
       setLoading(false);
       return;
     }
@@ -1424,6 +1779,13 @@ export function ScheduledTasksNotificationsPanel({
     }
     return [...m.entries()];
   }, [items]);
+
+  function cronNotificationFullBody(n: ScheduledTaskNotificationRow): string {
+    if (n.status === "ok") {
+      return (n.detail?.trim() || n.summary || "Úloha doběhla.").trim();
+    }
+    return [n.summary, n.detail ?? ""].filter((s) => s.trim()).join("\n\n").trim() || "—";
+  }
 
   const pendingBlock =
     pendingTaskDraft != null ? (
@@ -1475,9 +1837,35 @@ export function ScheduledTasksNotificationsPanel({
         </Text>
       ) : null}
       {items.length === 0 ? (
-        <Text size="sm" c="dimmed">
-          Zatím žádné záznamy — po prvním tiknutí cronu se objeví výsledek běhu.
-        </Text>
+        <Stack gap="xs">
+          {savedTaskCount != null && savedTaskCount > 0 ? (
+            <>
+              <Text size="sm" c="dimmed">
+                Úlohy máte uložené v databázi ({savedTaskCount} v účtu). Ověříte je v{" "}
+                <Anchor component={Link} href="/settings" size="sm" fw={500} target="_blank">
+                  Nastavení → Naplánované úlohy
+                </Anchor>{" "}
+                (pole „Poslední běh“ se doplní po úspěšném běhu).
+              </Text>
+              <Text size="sm" c="dimmed">
+                Tento panel zobrazuje jen <strong>dokončené běhy</strong> (zápis do historie po volání cron endpointu na
+                serveru). Dokud se úloha reálně nespustí, zde nic nebude.
+              </Text>
+            </>
+          ) : savedTaskCount === 0 ? (
+            <Text size="sm" c="dimmed">
+              Žádná uložená naplánovaná úloha. Vytvořte ji v{" "}
+              <Anchor component={Link} href="/settings" size="sm" fw={500} target="_blank">
+                Nastavení → Naplánované úlohy
+              </Anchor>
+              .
+            </Text>
+          ) : (
+            <Text size="sm" c="dimmed">
+              Zatím žádné záznamy z běhu — po prvním spuštění cron endpointu se zde objeví výsledek.
+            </Text>
+          )}
+        </Stack>
       ) : (
         <Accordion variant="separated" multiple>
           {grouped.map(([title, rows]) => (
@@ -1508,6 +1896,20 @@ export function ScheduledTasksNotificationsPanel({
                           ) : null}
                         </Group>
                         <Group gap={6} wrap="nowrap">
+                          <Button
+                            size="compact-xs"
+                            variant="light"
+                            onClick={() =>
+                              setCronMessageModal({
+                                taskTitle: n.task_title || "Naplánovaná úloha",
+                                createdAt: n.created_at,
+                                status: n.status,
+                                body: cronNotificationFullBody(n)
+                              })
+                            }
+                          >
+                            Celá zpráva
+                          </Button>
                           {!n.read_at ? (
                             <Button
                               size="compact-xs"
@@ -1522,14 +1924,26 @@ export function ScheduledTasksNotificationsPanel({
                           </Text>
                         </Group>
                       </Group>
-                      <Text size="xs" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                        {n.summary}
-                      </Text>
-                      {n.detail ? (
-                        <Text size="xs" c="dimmed" mt={4} style={{ whiteSpace: "pre-wrap" }}>
-                          {n.detail}
-                        </Text>
-                      ) : null}
+                      {n.status === "ok" ? (
+                        <ScrollArea.Autosize mah={360} mih={80} type="auto" offsetScrollbars>
+                          <Box py={4}>
+                            <FormattedAssistantContent
+                              content={(n.detail?.trim() || n.summary || "Úloha doběhla.").trim()}
+                            />
+                          </Box>
+                        </ScrollArea.Autosize>
+                      ) : (
+                        <>
+                          <Text size="xs" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                            {n.summary}
+                          </Text>
+                          {n.detail ? (
+                            <Text size="xs" c="dimmed" mt={4} style={{ whiteSpace: "pre-wrap" }}>
+                              {n.detail}
+                            </Text>
+                          ) : null}
+                        </>
+                      )}
                       {n.agent_run_id ? (
                         <Text size="xs" c="dimmed" mt={4}>
                           run_id: <Code>{n.agent_run_id}</Code>
@@ -1543,6 +1957,40 @@ export function ScheduledTasksNotificationsPanel({
           ))}
         </Accordion>
       )}
+      <Modal
+        opened={cronMessageModal != null}
+        onClose={() => setCronMessageModal(null)}
+        title={
+          cronMessageModal ? (
+            <Stack gap={2}>
+              <Text fw={600} size="sm">
+                {cronMessageModal.status === "ok" ? "Odpověď agenta" : "Chyba běhu úlohy"}
+              </Text>
+              <Text size="xs" c="dimmed" lineClamp={2}>
+                {cronMessageModal.taskTitle} · {new Date(cronMessageModal.createdAt).toLocaleString("cs-CZ")}
+              </Text>
+            </Stack>
+          ) : null
+        }
+        size="xl"
+        radius="md"
+      >
+        {cronMessageModal ? (
+          cronMessageModal.status === "ok" ? (
+            <ScrollArea h="75vh" type="auto" offsetScrollbars>
+              <Box pr="sm" pb="md">
+                <FormattedAssistantContent content={cronMessageModal.body} />
+              </Box>
+            </ScrollArea>
+          ) : (
+            <ScrollArea h="75vh" type="auto" offsetScrollbars>
+              <Text size="sm" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                {cronMessageModal.body}
+              </Text>
+            </ScrollArea>
+          )
+        ) : null}
+      </Modal>
     </Stack>
   );
 }

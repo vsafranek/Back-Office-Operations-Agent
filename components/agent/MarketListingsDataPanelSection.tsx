@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import type { AgentMarketListingCard } from "@/lib/agent/types";
 import { MarketListingCardView } from "@/components/agent/MarketListingCardView";
 
+/** Horní mez šířky karty — užší sloupce = více karet vedle sebe v panelu chatu. */
+const CHAT_MARKET_LISTING_CARD_MAX_WIDTH_PX = 220;
+
 const panelChrome = {
   position: "sticky" as const,
   top: 12,
@@ -182,9 +185,27 @@ export function MarketListingsDataPanelSection({ title, fetchParams, initialList
         <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>Žádné záznamy k zobrazení.</p>
       ) : null}
       {listings.length > 0 ? (
-        <div style={{ display: "grid", gap: 14 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, 140px), ${CHAT_MARKET_LISTING_CARD_MAX_WIDTH_PX}px))`,
+            gap: 12,
+            justifyContent: "start",
+            alignItems: "start",
+            minWidth: 0
+          }}
+        >
           {listings.map((c) => (
-            <MarketListingCardView key={c.external_id} card={c} />
+            <div
+              key={c.external_id}
+              style={{
+                maxWidth: CHAT_MARKET_LISTING_CARD_MAX_WIDTH_PX,
+                width: "100%",
+                minWidth: 0
+              }}
+            >
+              <MarketListingCardView card={c} maxWidthPx={CHAT_MARKET_LISTING_CARD_MAX_WIDTH_PX} />
+            </div>
           ))}
         </div>
       ) : null}

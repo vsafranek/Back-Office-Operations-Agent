@@ -1,28 +1,79 @@
 import { logger } from "@/lib/observability/logger";
 import {
+  normCs,
   resolveCzMarketRegionFromKrajState,
   type ResolvedCzMarketRegion
 } from "@/lib/integrations/cz-market-regions";
+import { matchSrealityDistrictIdForCzPlace } from "@/lib/integrations/sreality-param-catalog";
 
 type NominatimAddress = {
   state?: string;
   city?: string;
   town?: string;
   village?: string;
+  municipality?: string;
 };
 
 type NominatimHit = { address?: NominatimAddress };
 
+export type CzMarketLocationResolution =
+  | { scope: "region"; region: ResolvedCzMarketRegion }
+  | {
+      scope: "locality";
+      region: ResolvedCzMarketRegion;
+      srealityLocalityDistrictId: number;
+      /** Zobrazený název místa a filtr u Bezrealitky (výskyt v title/location). */
+      listingLocationNeedle: string;
+    };
+
+function pickPlaceName(addr: NominatimAddress | undefined): string {
+  if (!addr) return "";
+  const parts = [addr.city, addr.town, addr.village, addr.municipality];
+  for (const p of parts) {
+    if (typeof p === "string" && p.trim()) return p.trim();
+  }
+  return "";
+}
+
+function levenshteinWithin(a: string, b: string, max: number): boolean {
+  if (Math.abs(a.length - b.length) > max) return false;
+  const m = a.length;
+  const n = b.length;
+  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0]!;
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cur = dp[j]!;
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[j] = Math.min(dp[j]! + 1, dp[j - 1]! + 1, prev + cost);
+      prev = cur;
+    }
+  }
+  return (dp[n] ?? 99) <= max;
+}
+
+/** Shoda uživatelského seedu s názvem z Nominatim (vč. pádů „Plzni“ ↔ „Plzeň“). */
+export function placeMatchesGeocodeSeed(seedRaw: string, placeNameRaw: string): boolean {
+  const a = normCs(seedRaw.trim());
+  const b = normCs(placeNameRaw.trim());
+  if (!a || !b) return false;
+  if (a === b || a.includes(b) || b.includes(a)) return true;
+  const prefixLen = Math.min(5, a.length, b.length);
+  if (prefixLen >= 4 && a.slice(0, prefixLen) === b.slice(0, prefixLen)) return true;
+  if (a.length <= 14 && b.length <= 14 && levenshteinWithin(a, b, 2)) return true;
+  return false;
+}
+
 /**
- * Podle názvu místa (obec/město) stáhne první výsledek v ČR a z pole address.state odvodí kraj.
- * Ušetří udržovat dlouhý seznam obcí — stačí mapovat ~14 krajů (viz resolveCzMarketRegionFromKrajState).
- * @see https://operations.osmfoundation.org/policies/nominatim/ — rozumný User-Agent a neagresivní frekvence.
+ * Nominatim (ČR): odvodí buď kraj, nebo užší město s `locality_district_id` + filtrem pro Bezrealitky.
+ * @see https://operations.osmfoundation.org/policies/nominatim/
  */
-export async function resolveCzMarketRegionFromNominatim(params: {
+export async function resolveCzMarketLocationFromNominatim(params: {
   q: string;
   userAgent: string;
   timeoutMs: number;
-}): Promise<ResolvedCzMarketRegion | null> {
+}): Promise<CzMarketLocationResolution | null> {
   const q = params.q.trim();
   if (!q) return null;
 
@@ -71,8 +122,42 @@ export async function resolveCzMarketRegionFromNominatim(params: {
 
   const hit = json[0] as NominatimHit;
   const state = hit.address?.state?.trim();
-  const resolved = resolveCzMarketRegionFromKrajState(state);
-  if (resolved) return resolved;
+  const region = resolveCzMarketRegionFromKrajState(state);
+  const placeName = pickPlaceName(hit.address);
+
+  if (region && placeName) {
+    const districtId = matchSrealityDistrictIdForCzPlace(normCs(placeName));
+    if (districtId != null && placeMatchesGeocodeSeed(q, placeName)) {
+      logger.info("market_listings_nominatim_locality_resolved", {
+        seed: q,
+        placeName,
+        districtId,
+        regionLabel: region.label
+      });
+      return {
+        scope: "locality",
+        region,
+        srealityLocalityDistrictId: districtId,
+        listingLocationNeedle: placeName
+      };
+    }
+  }
+
+  if (region) {
+    return { scope: "region", region };
+  }
 
   return null;
+}
+
+/**
+ * Jen odvod kraje (bez užšího okresu) — zpětná kompatibilita a jednoduché testy.
+ */
+export async function resolveCzMarketRegionFromNominatim(params: {
+  q: string;
+  userAgent: string;
+  timeoutMs: number;
+}): Promise<ResolvedCzMarketRegion | null> {
+  const loc = await resolveCzMarketLocationFromNominatim(params);
+  return loc?.region ?? null;
 }

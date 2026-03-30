@@ -25,6 +25,7 @@ import { CalendarPreviewStrip } from "@/components/agent/CalendarPreviewStrip";
 import { ChatMessageBubble, type ChatThreadMessage } from "@/components/agent/ChatMessageBubble";
 import type { AgentUiOption } from "@/lib/agent/config/types";
 import type { AgentAnswer, AgentDataPanel as AgentDataPanelModel } from "@/lib/agent/types";
+import { marketListingsPanelsFromAnswer } from "@/lib/agent/market-listings-answer-helpers";
 import { findViewingEmailDataPanel } from "@/lib/agent/viewing-email-answer-helpers";
 import {
   buildViewingEmailPreviewRange,
@@ -101,12 +102,15 @@ const TABLE_OR_CHART_KINDS = new Set<AgentDataPanelModel["kind"]>([
   "leads_sales_6m",
   "clients_filtered",
   "deal_sales_detail",
-  "missing_reconstruction",
-  "market_listings"
+  "missing_reconstruction"
 ]);
 
 function vizBundlesForDataSection(result: AgentAnswer) {
   return getPanelBundles(result).filter((b) => TABLE_OR_CHART_KINDS.has(b.dataPanel.kind));
+}
+
+function shouldShowMarketListingsChatHint(result: AgentAnswer): boolean {
+  return marketListingsPanelsFromAnswer(result).length > 0;
 }
 
 /** Sekce „Data a grafy“ — bez čistého e-mailového panelu (ten je v záložce Maily). */
@@ -520,7 +524,9 @@ export function ConfigurableAgentPanel({
               ) : null}
 
               {displayResult &&
-              ((viewingEmailPanel && onViewingEmailBodyChange) || shouldShowDataAndChartsSection(displayResult)) ? (
+              ((viewingEmailPanel && onViewingEmailBodyChange) ||
+                shouldShowDataAndChartsSection(displayResult) ||
+                shouldShowMarketListingsChatHint(displayResult)) ? (
                 <section
                   id={
                     displayResult.runId
@@ -529,7 +535,7 @@ export function ConfigurableAgentPanel({
                   }
                   data-conversation-id={conversationContext?.id ?? undefined}
                   data-run-id={displayResult.runId ?? undefined}
-                  aria-label="Doplňky posledního běhu (kalendář, tabulka, graf)"
+                  aria-label="Doplňky posledního běhu (kalendář, tabulka, graf, nabídky)"
                 >
                   <Stack gap="md" pt="md" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
                     {viewingEmailPanel && onViewingEmailBodyChange ? (
@@ -616,6 +622,19 @@ export function ConfigurableAgentPanel({
                             </Button>
                           </Paper>
                         ) : null}
+                      </Stack>
+                    ) : null}
+
+                    {shouldShowMarketListingsChatHint(displayResult) ? (
+                      <Stack gap="xs">
+                        <Title order={4} size="h5" fw={600}>
+                          Nabídky
+                        </Title>
+                        <Text size="xs" c="dimmed">
+                          Karty nemovitostí z tohoto běhu jsou v postranním panelu v záložce{" "}
+                          <strong>Nabídky</strong> → <strong>Z běhu agenta</strong> (včetně přepínače mezi běhy v
+                          konverzaci).
+                        </Text>
                       </Stack>
                     ) : null}
 

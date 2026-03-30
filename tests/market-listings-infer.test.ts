@@ -44,4 +44,11 @@ describe("inferMarketListingsInputFromQuestion", () => {
     expect(i.bezrealitkyRegionOsmIds).toBeUndefined();
     expect(i.srealityLocalityRegionId).toBeUndefined();
   });
+
+  it("Plzeň jako město neexpanduje na celý Plzeňský kraj (Nominatim + okres ve fetchMarketListings)", () => {
+    const i = inferMarketListingsInputFromQuestion("Byty na prodej v Plzni");
+    expect(i.regionGeocodeHint).toBe("Plzni");
+    expect(i.bezrealitkyRegionOsmIds).toBeUndefined();
+    expect(i.srealityLocalityRegionId).toBeUndefined();
+  });
 });

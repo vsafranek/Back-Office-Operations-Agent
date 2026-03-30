@@ -44,6 +44,7 @@ import {
 import type { AgentUiOption } from "@/lib/agent/config/types";
 import type { AgentAnswer } from "@/lib/agent/types";
 import { scheduledTaskConfirmationDraftFromAnswer } from "@/lib/agent/scheduled-task-answer-helpers";
+import { marketListingsPanelsFromAnswer } from "@/lib/agent/market-listings-answer-helpers";
 import { findViewingEmailDataPanel } from "@/lib/agent/viewing-email-answer-helpers";
 import {
   companionRunNavCanGoNewer,
@@ -85,6 +86,8 @@ export type ChatCompanionSidebarProps = {
   presentationAnswerRuns?: VizAnswerRunOption[];
   /** Odpovědi s návrhem e-mailu (prohlídka) — přepínač v Maily. */
   viewingEmailRuns?: VizAnswerRunOption[];
+  /** Odpovědi s panelem nabídek — přepínač v Nabídky → Z běhu agenta. */
+  marketListingsAnswerRuns?: VizAnswerRunOption[];
   /** Assistant runId v pořadí konverzace (nejstarší první) — šipky mezi maily a tabulkami. */
   assistantRunIdsInOrder?: string[];
   /** Všechny odpovědi asistenta s runId — šipky v Kontextu u stromu volání. */
@@ -114,6 +117,7 @@ export function ChatCompanionSidebar({
   vizAnswerRuns = [],
   presentationAnswerRuns = [],
   viewingEmailRuns = [],
+  marketListingsAnswerRuns = [],
   assistantRunIdsInOrder = [],
   assistantAnswerRuns = [],
   onSelectVizAnswerRun,
@@ -127,6 +131,7 @@ export function ChatCompanionSidebar({
   const [scheduledUnread, setScheduledUnread] = useState(0);
   const agent = agentOptions.find((a) => a.id === selectedAgentId);
   const mailAutoOpenRunRef = useRef<string | null>(null);
+  const marketAutoOpenRunRef = useRef<string | null>(null);
   const storageAutoOpenRunRef = useRef<string | null>(null);
   const scheduledDraftAutoOpenRunRef = useRef<string | null>(null);
 
@@ -161,6 +166,18 @@ export function ChatCompanionSidebar({
       );
     }
     if (!isViewing) mailAutoOpenRunRef.current = null;
+  }, [lastAgentAnswer]);
+
+  useEffect(() => {
+    const runId = lastAgentAnswer?.runId ?? null;
+    const hasMarket = marketListingsPanelsFromAnswer(lastAgentAnswer).length > 0;
+    if (hasMarket && runId && marketAutoOpenRunRef.current !== runId) {
+      marketAutoOpenRunRef.current = runId;
+      setActiveSection((prev) =>
+        prev === "calendar" || prev === "viz" || prev === "context" ? prev : "market"
+      );
+    }
+    if (!hasMarket) marketAutoOpenRunRef.current = null;
   }, [lastAgentAnswer]);
 
   useEffect(() => {
@@ -347,7 +364,15 @@ export function ChatCompanionSidebar({
           />
         );
       case "market":
-        return <MarketSidebarPanel getAccessToken={getAccessToken} />;
+        return (
+          <MarketSidebarPanel
+            getAccessToken={getAccessToken}
+            lastAgentAnswer={lastAgentAnswer}
+            marketListingsAnswerRuns={marketListingsAnswerRuns}
+            assistantRunIdsInOrder={assistantRunIdsInOrder}
+            onSelectMarketListingsRun={onSelectVizAnswerRun}
+          />
+        );
       case "scheduled":
         return (
           <ScheduledTasksNotificationsPanel

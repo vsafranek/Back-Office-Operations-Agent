@@ -32,7 +32,45 @@ export async function GET(request: Request) {
       throw new Error(error.message);
     }
 
-    return Response.json({ tasks: data ?? [] });
+    const tasks = data ?? [];
+    const taskIds = tasks.map((t) => t.id).filter(Boolean) as string[];
+    const runCountByTask: Record<string, number> = {};
+    const lastNotifByTask: Record<string, string> = {};
+
+    if (taskIds.length > 0) {
+      const { data: notifRows, error: notifErr } = await supabase
+        .from("scheduled_task_run_notifications")
+        .select("task_id, created_at")
+        .eq("user_id", user.id)
+        .in("task_id", taskIds);
+
+      if (notifErr) {
+        throw new Error(notifErr.message);
+      }
+
+      for (const row of notifRows ?? []) {
+        const tid = row.task_id as string;
+        runCountByTask[tid] = (runCountByTask[tid] ?? 0) + 1;
+        const created = row.created_at as string;
+        const prev = lastNotifByTask[tid];
+        if (!prev || created > prev) {
+          lastNotifByTask[tid] = created;
+        }
+      }
+    }
+
+    type TaskRow = (typeof tasks)[number] & { last_run_at?: string | null };
+    const enriched = (tasks as TaskRow[]).map((t) => {
+      const notifLast = lastNotifByTask[t.id] ?? null;
+      const tableLast = t.last_run_at ?? null;
+      return {
+        ...t,
+        run_count: runCountByTask[t.id] ?? 0,
+        last_event_at: notifLast ?? tableLast
+      };
+    });
+
+    return Response.json({ tasks: enriched });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 400 });
   }

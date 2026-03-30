@@ -6,6 +6,8 @@
  * Starší RSS repo slouží jako dokumentace ID — chování API může být časem rozšířeno.
  */
 
+import { normCs } from "@/lib/integrations/cz-market-regions";
+
 export const SREALITY_COUNTRY_CR = 112 as const;
 
 export type SrealityIdLabel = { id: number; label: string };
@@ -117,6 +119,34 @@ export const SREALITY_DISTRICTS_CR: SrealityIdLabel[] = [
   { id: 45, label: "Vsetín" },
   { id: 38, label: "Zlín" }
 ];
+
+/**
+ * Podle normalizovaného názvu obce/města z Nominatim najde `locality_district_id` v katalogu Sreality.
+ * „Praha“ vrací undefined (řeší se jako region); u dví dělení stejného jména (Brno, Plzeň) preferuje *-město.
+ */
+export function matchSrealityDistrictIdForCzPlace(placeNorm: string): number | undefined {
+  const p = normCs(placeNorm).trim();
+  if (!p || p === "praha") return undefined;
+
+  const matches = SREALITY_DISTRICTS_CR.filter((d) => {
+    const ln = normCs(d.label);
+    const base = ln.split("-")[0].trim();
+    return base === p || ln === p;
+  });
+  if (matches.length === 1) return matches[0]!.id;
+  if (matches.length > 1) {
+    const mest = matches.find((x) => /město/i.test(x.label));
+    if (mest) return mest.id;
+    return matches[0]!.id;
+  }
+
+  const hyphenMesto = SREALITY_DISTRICTS_CR.find(
+    (d) => normCs(d.label).startsWith(`${p}-`) && /město/i.test(d.label)
+  );
+  if (hyphenMesto) return hyphenMesto.id;
+
+  return undefined;
+}
 
 /** Dispozice / typ bytu (`category_main_cb=1`, parametr `category_sub_cb`). */
 export const SREALITY_CATEGORY_SUB_BYTY: SrealityIdLabel[] = [

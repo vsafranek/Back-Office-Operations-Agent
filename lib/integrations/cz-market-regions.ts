@@ -78,7 +78,15 @@ const REGION_ROWS: Array<{
     label: "Plzeňský kraj",
     bezrealitkyRegionOsmIds: ["R442466"],
     srealityLocalityRegionId: 2,
-    needles: ["plzeňský kraj", "plzensky kraj", "plzeň", "plzni", "rokycany", "klatovy"]
+    /* „Plzeň“ / „v Plzni“ neuvádějte — město řeší Nominatim + okres. Krajské tvary kvůli skloňování: */
+    needles: [
+      "plzeňský kraj",
+      "plzensky kraj",
+      "plzeňském kraji",
+      "plzeňského kraje",
+      "rokycany",
+      "klatovy"
+    ]
   },
   {
     label: "Karlovarský kraj",

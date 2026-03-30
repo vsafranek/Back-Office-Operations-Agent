@@ -1,12 +1,16 @@
 import { fetchBezrealitkyListings } from "@/lib/integrations/bezrealitky-listings";
 import { fetchSrealityListings } from "@/lib/integrations/sreality-listings";
 import { normCs } from "@/lib/integrations/cz-market-regions";
-import { resolveCzMarketRegionFromNominatim } from "@/lib/integrations/nominatim-cz-region";
+import { resolveCzMarketLocationFromNominatim } from "@/lib/integrations/nominatim-cz-region";
 import { getEnv } from "@/lib/config/env";
 import { logger } from "@/lib/observability/logger";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 import { z } from "zod";
-import { MarketListingSchema, type MarketListing } from "@/lib/agent/tools/market-listing-model";
+import {
+  MarketListingSchema,
+  filterMarketListingsWithPreviewImage,
+  type MarketListing
+} from "@/lib/agent/tools/market-listing-model";
 
 export { MarketListingSchema, type MarketListing } from "@/lib/agent/tools/market-listing-model";
 
@@ -43,7 +47,11 @@ export const FetchMarketListingsInputSchema = z.object({
   /**
    * Krátký úsek z dotazu (např. obec po „v …“) pro Nominatim — když není ručně nastavený kraj.
    */
-  regionGeocodeHint: z.string().max(80).optional()
+  regionGeocodeHint: z.string().max(80).optional(),
+  /**
+   * Po geokódování na město s okresem v Sreality: zúžení výsledků Bezrealitky (řetězec v title + location).
+   */
+  listingLocationNeedle: z.string().max(120).optional()
 });
 
 /** Uložené u cron úlohy — částečná shoda s fetch vstupem. */
@@ -64,6 +72,13 @@ export function mergeStoredMarketListingsParams(stored: unknown): z.infer<typeof
 }
 
 export type FetchMarketListingsInput = z.infer<typeof FetchMarketListingsInputSchema>;
+
+function filterListingsByLocationNeedle(listings: MarketListing[], needle: string | undefined): MarketListing[] {
+  const n = needle?.trim();
+  if (!n || n.length < 2) return listings;
+  const nn = normCs(n);
+  return listings.filter((r) => normCs(`${r.title} ${r.location}`).includes(nn));
+}
 
 export const FetchMarketListingsOutputSchema = z.array(MarketListingSchema);
 
@@ -108,16 +123,33 @@ async function maybeResolveRegionViaNominatim(
     env.MARKET_FETCH_USER_AGENT?.trim() ||
     "BackOfficeBot/1.0 (+market-listings; respectful Nominatim per OSMF policy)";
   const timeoutMs = Math.min(10_000, env.AGENT_QUERY_TIMEOUT_MS);
-  const resolved = await resolveCzMarketRegionFromNominatim({ q: seed, userAgent: ua, timeoutMs });
+  const resolved = await resolveCzMarketLocationFromNominatim({ q: seed, userAgent: ua, timeoutMs });
   if (!resolved) return input;
 
-  logger.info("market_listings_nominatim_region_resolved", { seed, regionLabel: resolved.label });
+  if (resolved.scope === "locality") {
+    logger.info("market_listings_nominatim_locality_applied", {
+      seed,
+      regionLabel: resolved.region.label,
+      listingLocationNeedle: resolved.listingLocationNeedle,
+      srealityLocalityDistrictId: resolved.srealityLocalityDistrictId
+    });
+    return {
+      ...input,
+      bezrealitkyRegionOsmIds: [...resolved.region.bezrealitkyRegionOsmIds],
+      bezrealitkyRegionLabel: resolved.region.label,
+      srealityLocalityRegionId: resolved.region.srealityLocalityRegionId,
+      srealityLocalityDistrictId: resolved.srealityLocalityDistrictId,
+      listingLocationNeedle: resolved.listingLocationNeedle
+    };
+  }
+
+  logger.info("market_listings_nominatim_region_resolved", { seed, regionLabel: resolved.region.label });
 
   return {
     ...input,
-    bezrealitkyRegionOsmIds: [...resolved.bezrealitkyRegionOsmIds],
-    bezrealitkyRegionLabel: resolved.label,
-    srealityLocalityRegionId: resolved.srealityLocalityRegionId
+    bezrealitkyRegionOsmIds: [...resolved.region.bezrealitkyRegionOsmIds],
+    bezrealitkyRegionLabel: resolved.region.label,
+    srealityLocalityRegionId: resolved.region.srealityLocalityRegionId
   };
 }
 
@@ -175,7 +207,8 @@ export async function fetchMarketListings(input: z.infer<typeof FetchMarketListi
     }
   }
 
-  return merged;
+  const scoped = filterListingsByLocationNeedle(merged, effective.listingLocationNeedle);
+  return filterMarketListingsWithPreviewImage(scoped);
 }
 
 export const UpsertMarketListingsInputSchema = z.object({
@@ -192,7 +225,7 @@ export async function upsertMarketListings(params: { listings: MarketListing[] }
   let upserted = 0;
   let failed = 0;
 
-  for (const listing of params.listings) {
+  for (const listing of filterMarketListingsWithPreviewImage(params.listings)) {
     const { error } = await supabase.from("market_listings").upsert(
       {
         external_id: listing.external_id,

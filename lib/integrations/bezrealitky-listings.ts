@@ -111,8 +111,8 @@ function mapAdvertRow(
     "Nabídka Bezrealitky";
 
   const price = row.price;
-  const pricePart =
-    typeof price === "number" && price > 0 ? ` · ${price.toLocaleString("cs-CZ")} Kč` : "";
+  const priceCzk = typeof price === "number" && price > 0 ? Math.round(price) : null;
+  const pricePart = priceCzk != null ? ` · ${priceCzk.toLocaleString("cs-CZ")} Kč` : "";
   const title = `${baseTitle}${pricePart}`;
 
   const addrRaw = row.address;
@@ -162,6 +162,7 @@ function mapAdvertRow(
     source: "bezrealitky",
     url,
     created_at: observedAt,
+    ...(priceCzk != null ? { price_czk: priceCzk } : {}),
     ...(imageUrl ? { image_url: imageUrl } : {})
   };
 }

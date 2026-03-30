@@ -7,10 +7,18 @@ function sourceBadgeColor(source: string): string {
   return "#64748b";
 }
 
-export function MarketListingCardView({ card }: { card: AgentMarketListingCard }) {
+export function MarketListingCardView({
+  card,
+  /** Omezí šířku karty (např. mřížka v postranním panelu). */
+  maxWidthPx
+}: {
+  card: AgentMarketListingCard;
+  maxWidthPx?: number;
+}) {
   return (
     <article
       style={{
+        ...(maxWidthPx != null && maxWidthPx > 0 ? { maxWidth: maxWidthPx, width: "100%" } : {}),
         border: "1px solid #e2e8f0",
         borderRadius: 10,
         overflow: "hidden",

@@ -150,14 +150,13 @@ export function assistantMetadataHasStorageLinkedArtifacts(metadata: Record<stri
   );
 }
 
-/** Panely, které patří do navigace „Tabulka / graf“ (ne e-mail ani potvrzení cron úlohy). */
+/** Panely, které patří do navigace „Tabulka / graf“ (ne nabídky, e-mail ani potvrzení cron úlohy). */
 const TABLE_OR_CHART_PANEL_KINDS = new Set<AgentDataPanel["kind"]>([
   "clients_q1",
   "leads_sales_6m",
   "clients_filtered",
   "deal_sales_detail",
-  "missing_reconstruction",
-  "market_listings"
+  "missing_reconstruction"
 ]);
 
 function bundlesFromSlice(slice: NonNullable<ReturnType<typeof agentAnswerSliceFromPersistPayload>>) {
@@ -173,6 +172,27 @@ export function agentPayloadHasTableOrChartPanel(raw: unknown): boolean {
   const slice = agentAnswerSliceFromPersistPayload(raw);
   if (!slice) return false;
   return bundlesFromSlice(slice).some((b) => TABLE_OR_CHART_PANEL_KINDS.has(b.dataPanel.kind));
+}
+
+/** True, pokud odpověď obsahuje panel s kartami nabídek (postranní panel Nabídky). */
+export function agentPayloadHasMarketListingsPanel(raw: unknown): boolean {
+  const slice = agentAnswerSliceFromPersistPayload(raw);
+  if (!slice) return false;
+  return bundlesFromSlice(slice).some((b) => b.dataPanel.kind === "market_listings");
+}
+
+/** Krátký popisek pro přepínač běhů s nabídkami. */
+export function marketListingsPreviewFromPayload(raw: unknown): string | null {
+  const slice = agentAnswerSliceFromPersistPayload(raw);
+  if (!slice) return null;
+  for (const b of bundlesFromSlice(slice)) {
+    if (b.dataPanel.kind === "market_listings") {
+      const t = b.dataPanel.title?.trim();
+      if (t && t.length > 0) return t.length > 64 ? `${t.slice(0, 61)}…` : t;
+      return "Nabídky z běhu agenta";
+    }
+  }
+  return null;
 }
 
 /** Návrh e-mailu (prohlídka) v persistovaném payloadu zprávy. */

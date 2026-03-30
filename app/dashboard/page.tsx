@@ -31,11 +31,13 @@ import { readAgentNdjsonStream } from "@/lib/agent/stream-client";
 import {
   AGENT_PANEL_PAYLOAD_KEY,
   agentAnswerSliceFromPersistPayload,
+  agentPayloadHasMarketListingsPanel,
   agentPayloadHasTableOrChartPanel,
   agentPayloadHasViewingEmailDraft,
   assistantMetadataHasArtifactUrls,
   assistantMetadataHasStorageLinkedArtifacts,
   generatedArtifactsFromAssistantMetadata,
+  marketListingsPreviewFromPayload,
   viewingEmailDraftPreviewFromPayload
 } from "@/lib/agent/conversation/agent-panel-persist";
 import type { AgentAnswer } from "@/lib/agent/types";
@@ -144,6 +146,22 @@ export default function DashboardPage() {
       const raw = meta[AGENT_PANEL_PAYLOAD_KEY];
       if (!agentPayloadHasViewingEmailDraft(raw)) continue;
       const label = viewingEmailDraftPreviewFromPayload(raw) ?? "Návrh e-mailu";
+      out.push({ runId, preview: label });
+    }
+    return out;
+  }, [messages]);
+
+  /** Odpovědi s panelem nabídek — záložka Nabídky → Z běhu agenta. */
+  const marketListingsAnswerRuns = useMemo(() => {
+    const assistants = messages.filter((m) => m.role === "assistant");
+    const out: { runId: string; preview: string }[] = [];
+    for (const m of assistants) {
+      const meta = m.metadata as Record<string, unknown>;
+      const runId = meta.runId;
+      if (typeof runId !== "string" || !runId.trim()) continue;
+      const raw = meta[AGENT_PANEL_PAYLOAD_KEY];
+      if (!agentPayloadHasMarketListingsPanel(raw)) continue;
+      const label = marketListingsPreviewFromPayload(raw) ?? "Nabídky";
       out.push({ runId, preview: label });
     }
     return out;
@@ -925,6 +943,7 @@ export default function DashboardPage() {
             vizAnswerRuns={vizAnswerRuns}
             presentationAnswerRuns={presentationAnswerRuns}
             viewingEmailRuns={viewingEmailRuns}
+            marketListingsAnswerRuns={marketListingsAnswerRuns}
             assistantRunIdsInOrder={assistantRunIdsInOrder}
             assistantAnswerRuns={assistantAnswerRuns}
             onSelectVizAnswerRun={setCompanionRunId}
