@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Badge, Button, Group, Paper, Stack, Text, Code } from "@mantine/core";
 import type { AuditRunAggregate } from "@/lib/types/audit-run-aggregate";
 
 type Props = {
@@ -61,75 +62,93 @@ export function AuditRunSummary({ runId, getAccessToken }: Props) {
   }
 
   if (loading) {
-    return <p style={{ margin: 0, fontSize: 12, color: "#64748b" }}>Načítám audit běhu…</p>;
+    return (
+      <Text size="sm" c="dimmed">
+        Načítám audit log běhu…
+      </Text>
+    );
   }
   if (error) {
     return (
-      <p style={{ margin: 0, fontSize: 12, color: "#b91c1c" }} role="alert">
+      <Text size="sm" c="red" role="alert">
         {error}
-      </p>
+      </Text>
     );
   }
   if (!data) return null;
 
   return (
-    <div
-      style={{
-        border: "1px solid #e2e8f0",
-        borderRadius: 8,
-        padding: 12,
-        background: "#f8fafc",
-        fontSize: 13
-      }}
-    >
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 8 }}>
-        <span style={{ fontWeight: 600 }}>Audit běhu (BOA-007)</span>
-        <button
-          type="button"
-          onClick={() => void downloadCsv()}
-          style={{
-            fontSize: 12,
-            padding: "4px 10px",
-            borderRadius: 6,
-            border: "1px solid #cbd5e1",
-            background: "#fff",
-            cursor: "pointer"
-          }}
-        >
-          Stáhnout CSV
-        </button>
-        <button
-          type="button"
-          onClick={() => void load()}
-          style={{
-            fontSize: 12,
-            padding: "4px 10px",
-            borderRadius: 6,
-            border: "1px solid #cbd5e1",
-            background: "#fff",
-            cursor: "pointer"
-          }}
-        >
-          Obnovit
-        </button>
-      </div>
-      <ul style={{ margin: 0, paddingLeft: 18, color: "#334155" }}>
-        <li>
-          Záznam agent run: {data.agentRun ? `intent ${data.agentRun.intent}` : "ještě neuložen nebo cizí run"}
-        </li>
-        <li>Události trace: {data.traceEventCount} (detail níže ve stromu kroků)</li>
-        <li>Odchozí e-maily vázané na run: {data.outboundEmails.length}</li>
-      </ul>
-      {data.outboundEmails.length > 0 ? (
-        <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12 }}>
-          {data.outboundEmails.map((o) => (
-            <li key={o.id}>
-              <strong>{o.action}</strong> → {o.to_email}
-              {o.leadIds.length > 0 ? ` · leady: ${o.leadIds.length}` : ""}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
+    <Stack gap="sm">
+      <Group justify="space-between" wrap="wrap">
+        <Text fw={700}>Audit log běhu</Text>
+        <Group gap="xs">
+          <Button size="compact-xs" variant="light" onClick={() => void load()}>
+            Obnovit
+          </Button>
+          <Button size="compact-xs" variant="default" onClick={() => void downloadCsv()}>
+            Stáhnout CSV
+          </Button>
+        </Group>
+      </Group>
+
+      <Paper withBorder p="sm" radius="sm">
+        <Stack gap={6}>
+          <Group gap="xs">
+            <Badge variant="light">run {runId.slice(0, 8)}…</Badge>
+            <Badge variant="light" color={data.agentRun ? "blue" : "gray"}>
+              {data.agentRun ? `intent: ${data.agentRun.intent}` : "agent run nenalezen"}
+            </Badge>
+          </Group>
+          {data.agentRun?.question ? (
+            <Text size="xs" c="dimmed" lineClamp={2}>
+              Dotaz: {data.agentRun.question}
+            </Text>
+          ) : null}
+          <Text size="xs" c="dimmed">
+            Trace eventy celkem: {data.traceEventCount} · Outbound e-maily: {data.outboundEmails.length}
+          </Text>
+        </Stack>
+      </Paper>
+
+      <Paper withBorder p="sm" radius="sm">
+        <Stack gap="xs">
+          <Text fw={600} size="sm">
+            Timeline (sample)
+          </Text>
+          {data.traceSample.length === 0 ? (
+            <Text size="xs" c="dimmed">
+              Pro tento běh není dostupný trace sample.
+            </Text>
+          ) : (
+            data.traceSample.map((e) => (
+              <Code key={e.id} block style={{ whiteSpace: "pre-wrap" }}>
+                [{new Date(e.created_at).toLocaleString("cs-CZ")}] {e.kind}/{e.name} · {e.status}
+                {e.duration_ms != null ? ` · ${e.duration_ms} ms` : ""}
+              </Code>
+            ))
+          )}
+        </Stack>
+      </Paper>
+
+      <Paper withBorder p="sm" radius="sm">
+        <Stack gap="xs">
+          <Text fw={600} size="sm">
+            Outbound e-maily
+          </Text>
+          {data.outboundEmails.length === 0 ? (
+            <Text size="xs" c="dimmed">
+              Žádné odchozí e-maily navázané na tento běh.
+            </Text>
+          ) : (
+            data.outboundEmails.map((o) => (
+              <Text key={o.id} size="xs">
+                {new Date(o.created_at).toLocaleString("cs-CZ")} · <strong>{o.action}</strong> → {o.to_email}
+                {o.leadIds.length > 0 ? ` · leady: ${o.leadIds.length}` : ""}
+              </Text>
+            ))
+          )}
+        </Stack>
+      </Paper>
+    </Stack>
   );
 }

@@ -66,9 +66,25 @@ export async function GET(request: Request) {
     }
 
     const rows = (data ?? []) as RawRow[];
+    const runIds = [...new Set(rows.map((r) => r.agent_run_id).filter((x): x is string => Boolean(x)))];
+    const runsById = new Map<string, { question: string | null; answer: string | null }>();
+    if (runIds.length > 0) {
+      const { data: runRows, error: runErr } = await supabase
+        .from("agent_runs")
+        .select("run_id, question, answer")
+        .in("run_id", runIds);
+      if (runErr) throw new Error(runErr.message);
+      for (const row of runRows ?? []) {
+        const r = row as { run_id?: string; question?: string | null; answer?: string | null };
+        if (r.run_id) {
+          runsById.set(r.run_id, { question: r.question ?? null, answer: r.answer ?? null });
+        }
+      }
+    }
 
     const notifications = rows.map((r) => {
       const task = taskFromEmbed(r.user_scheduled_agent_tasks);
+      const run = r.agent_run_id ? runsById.get(r.agent_run_id) : null;
       return {
       id: r.id,
       task_id: r.task_id,
@@ -80,7 +96,9 @@ export async function GET(request: Request) {
       detail: r.detail,
       panel_payload: r.panel_payload,
       read_at: r.read_at,
-      created_at: r.created_at
+      created_at: r.created_at,
+      agent_question: run?.question ?? null,
+      agent_answer: run?.answer ?? null
     };
     });
 

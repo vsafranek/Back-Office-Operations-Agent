@@ -47,6 +47,25 @@ function resolveOrNeedles(hint: string): string[] | null {
   return null;
 }
 
+/**
+ * Tokeny pro vyhledávání uložených nálezů v `location_context` (+ volitelně pravidla čtvrtí jako u live filtru).
+ * Spolu s ILIKE na title/location pokrývá různé formáty z portálů (lokalita v titulku, „Praha 7“, …).
+ */
+export function localityContextSearchTokens(hint: string): string[] {
+  const raw = hint.trim();
+  if (raw.length < 2) return [];
+  const out = new Set<string>();
+  const n = normCs(raw);
+  if (n.length >= 2) out.add(n);
+  const fromRules = resolveOrNeedles(raw);
+  if (fromRules) {
+    for (const x of fromRules) {
+      if (x.length >= 2) out.add(x);
+    }
+  }
+  return [...out];
+}
+
 function listingBlob(listing: MarketListing): string {
   return normCs(`${listing.location} ${listing.title}`);
 }

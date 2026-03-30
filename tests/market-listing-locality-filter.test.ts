@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   filterMarketListingsByLocalityHint,
+  localityContextSearchTokens,
   marketListingMatchesOrNeedles
 } from "@/lib/integrations/market-listing-locality-filter";
 import type { MarketListing } from "@/lib/agent/tools/market-listing-model";
@@ -45,5 +46,17 @@ describe("marketListingMatchesOrNeedles", () => {
   it("OR ježky", () => {
     const l = base({ location: "Praha 7", title: "Garsonka" });
     expect(marketListingMatchesOrNeedles(l, ["holesovice", "praha 7"])).toBe(true);
+  });
+});
+
+describe("localityContextSearchTokens", () => {
+  it("rozšíří Karlín o pravidlo čtvrtě", () => {
+    const t = localityContextSearchTokens("Karlín");
+    expect(t).toContain("karlin");
+    expect(t).toContain("praha 8");
+  });
+
+  it("Praha bez čtvrtě — jen normovaný text", () => {
+    expect(localityContextSearchTokens("Praha")).toEqual(["praha"]);
   });
 });

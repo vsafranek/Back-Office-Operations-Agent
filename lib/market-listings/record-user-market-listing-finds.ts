@@ -1,4 +1,5 @@
 import { filterMarketListingsWithPreviewImage, type MarketListing } from "@/lib/agent/tools/market-listing-model";
+import { normCs } from "@/lib/integrations/cz-market-regions";
 import { logger } from "@/lib/observability/logger";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 
@@ -42,6 +43,7 @@ export async function recordUserMarketListingFinds(params: {
       external_id: l.external_id.trim(),
       title: l.title,
       location: l.location,
+      location_context: normCs(`${l.title} ${l.location}`),
       source: l.source,
       url: l.url,
       image_url: l.image_url ?? null,
@@ -74,6 +76,8 @@ export type UserMarketListingFindRow = {
   external_id: string;
   title: string;
   location: string;
+  /** normCs(title + location) — uložené pro kontextové filtrování lokality */
+  location_context: string | null;
   source: string;
   url: string;
   image_url: string | null;

@@ -33,7 +33,7 @@ import {
   UnstyledButton
 } from "@mantine/core";
 import Link from "next/link";
-import { IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { useDebouncedValue } from "@mantine/hooks";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarPreviewStrip } from "@/components/agent/CalendarPreviewStrip";
@@ -1923,8 +1923,11 @@ export function ScheduledTasksNotificationsPanel({
     status: "ok" | "error";
     summary: string;
     detail: string | null;
+    agent_question?: string | null;
+    agent_answer?: string | null;
     panel_payload?: unknown | null;
   } | null>(null);
+  const [selectedRunByTask, setSelectedRunByTask] = useState<Record<string, string>>({});
 
   async function load() {
     setErr(null);
@@ -2095,25 +2098,76 @@ export function ScheduledTasksNotificationsPanel({
                 </Group>
               </Accordion.Control>
               <Accordion.Panel>
-                <Stack gap="sm">
-                  {rows.map((n) => (
-                    <ScheduledTaskRunResultCard
-                      key={n.id}
-                      notification={n}
-                      onOpenFullMessage={() =>
-                        setCronMessageModal({
-                          taskTitle: n.task_title || "Naplánovaná úloha",
-                          createdAt: n.created_at,
-                          status: n.status,
-                          summary: n.summary,
-                          detail: n.detail,
-                          panel_payload: n.panel_payload
-                        })
-                      }
-                      onMarkRead={!n.read_at ? () => void markReadId(n.id) : undefined}
-                      getAccessToken={getAccessToken}
-                    />
-                  ))}
+                <Stack gap="xs">
+                  <Text size="xs" fw={600} c="dimmed">
+                    Proběhlé běhy
+                  </Text>
+                  {rows.map((n, idx) => {
+                    const expandedId = selectedRunByTask[title] ?? null;
+                    const opened = expandedId === n.id;
+                    return (
+                      <Stack key={n.id} gap={6}>
+                        <Button
+                          size="compact-xs"
+                          variant={opened ? "light" : "default"}
+                          color={opened ? "blue" : "gray"}
+                          justify="space-between"
+                          rightSection={
+                            <IconChevronDown
+                              size={14}
+                              style={{
+                                transform: opened ? "rotate(180deg)" : "rotate(0deg)",
+                                transition: "transform 120ms ease"
+                              }}
+                            />
+                          }
+                          onClick={() => {
+                            const willOpen = !opened;
+                            setSelectedRunByTask((prev) => ({
+                              ...prev,
+                              [title]: prev[title] === n.id ? "" : n.id
+                            }));
+                            if (willOpen && !n.read_at) {
+                              void markReadId(n.id);
+                            }
+                          }}
+                        >
+                          <span style={{ marginRight: 8 }}>
+                            {idx + 1}. {new Date(n.created_at).toLocaleString("cs-CZ")}
+                          </span>
+                          <Group gap={10} wrap="nowrap" ml={4}>
+                            <Badge size="xs" color={n.status === "ok" ? "teal" : "red"}>
+                              {n.status}
+                            </Badge>
+                            {!opened && !n.read_at ? (
+                              <Badge size="xs" variant="outline" color="orange">
+                                Nepřečtené
+                              </Badge>
+                            ) : null}
+                          </Group>
+                        </Button>
+                        <Collapse in={opened}>
+                          <ScheduledTaskRunResultCard
+                            notification={n}
+                            onOpenFullMessage={() =>
+                              setCronMessageModal({
+                                taskTitle: n.task_title || "Naplánovaná úloha",
+                                createdAt: n.created_at,
+                                status: n.status,
+                                summary: n.summary,
+                                detail: n.detail,
+                                agent_question: n.agent_question,
+                                agent_answer: n.agent_answer,
+                                panel_payload: n.panel_payload
+                              })
+                            }
+                            onMarkRead={!n.read_at ? () => void markReadId(n.id) : undefined}
+                            getAccessToken={getAccessToken}
+                          />
+                        </Collapse>
+                      </Stack>
+                    );
+                  })}
                 </Stack>
               </Accordion.Panel>
             </Accordion.Item>
@@ -2143,6 +2197,8 @@ export function ScheduledTasksNotificationsPanel({
             status={cronMessageModal.status}
             summary={cronMessageModal.summary}
             detail={cronMessageModal.detail}
+            agentQuestion={cronMessageModal.agent_question}
+            agentAnswer={cronMessageModal.agent_answer}
             panelPayload={cronMessageModal.panel_payload}
             getAccessToken={getAccessToken}
           />

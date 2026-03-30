@@ -22,6 +22,7 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconClock,
+  IconHistory,
   IconHome,
   IconLayoutSidebarRightExpand,
   IconMail,
@@ -220,9 +221,9 @@ export function ChatCompanionSidebar({
       badgeCount: scheduledUnread > 0 ? scheduledUnread : undefined,
       icon: <IconClock size={20} stroke={1.5} />
     },
-    { id: "audit", label: "Audit", icon: <IconShieldCheck size={20} stroke={1.5} /> },
     { id: "storage", label: "Storage", icon: <IconFolder size={20} stroke={1.5} /> },
     { id: "context", label: "Kontext", icon: <IconLayoutSidebarRightExpand size={20} stroke={1.5} /> },
+    { id: "audit", label: "Audit log", icon: <IconHistory size={20} stroke={1.5} /> },
     { id: "help", label: "Nápověda", icon: <IconBook size={20} stroke={1.5} /> }
   ];
 
@@ -387,7 +388,7 @@ export function ChatCompanionSidebar({
           <AuditRunSummary runId={focusRunId} getAccessToken={getAccessToken} />
         ) : (
           <Text size="sm" c="dimmed">
-            Audit je k dispozici po dokončení běhu s přiřazeným run ID.
+            Audit log je k dispozici po dokončení běhu s přiřazeným run ID.
           </Text>
         );
       case "storage": {
@@ -478,30 +479,83 @@ export function ChatCompanionSidebar({
       case "help":
         return (
           <Stack gap="md">
+            <Text size="sm" fw={700}>
+              Nástroje — rychlá nápověda
+            </Text>
             <Text size="sm">
               <Text span fw={600}>
                 Integrace
               </Text>{" "}
-              — kalendář a poštu připojíte v <Text component="span" fw={500}>Nastavení</Text>. Bez tokenů nástroje v
-              tomto panelu nemusí fungovat.
+              — pošta a kalendář vyžadují přihlášení a tokeny. Nastavíte je v{" "}
+              <Text component="span" fw={500}>
+                Nastavení
+              </Text>
+              ; bez nich budou sekce Maily/Kalendář omezené.
             </Text>
             <Text size="sm">
               <Text span fw={600}>
-                Ikonová navigace
+                Maily
               </Text>{" "}
-              — vyberte sekci v pravém sloupci; obsah je vlevo od něj. Ikonky zůstávají viditelné i ve sbaleném
-              panelu. V sekci <Text span fw={600}>Kontext</Text> je strom volání pro zvolený běh (šipkami mezi
-              zprávami). Trace zůstává i v bublině asistenta ve vlákně. Audit vychází ze zvoleného běhu v konverzaci.
+              — ruční psaní (draft / odeslání) + režim „Z běhu agenta“ pro návrhy prohlídkových e-mailů. U více návrhů
+              použijte šipky; historie odchozích zpráv se váže na konverzaci a run.
             </Text>
             <Text size="sm">
               <Text span fw={600}>
-                Tabulka / graf a Maily
+                Kalendář
               </Text>{" "}
-              — u tabulek a grafů jde o odpovědi s datovým panelem; pořadí od nejstarší po nejnovější. Šipky mezi
-              odpověďmi (i mezi dílčími částmi jedné odpovědi) posunou středový chat k příslušné bublině. Stejný vzor
-              šipek je u více návrhů e-mailu v záložce <Text span fw={600}>Maily</Text>. Při aktivním e-mailovém běhu
-              můžete šipkami v Tabulka/graf přepnout zpět na starší tabulkovou odpověď. Prohlížeč si zapamatuje naposledy
-              zvolený běh v konverzaci (do obnovení záložky). Kalendář a výběr termínu zůstávají ve vláknu chatu.
+              — vlastní správa událostí + režim „Z běhu agenta“ pro výběr termínu prohlídky. Klikem na volný slot
+              aktualizujete termín v těle e-mailu (napojený na chat).
+            </Text>
+            <Text size="sm">
+              <Text span fw={600}>
+                Data
+              </Text>{" "}
+              — ruční datové preset dotazy nad interní DB. Hodí se pro ad-hoc kontrolu bez běhu celého chatu.
+            </Text>
+            <Text size="sm">
+              <Text span fw={600}>
+                Tabulka / graf
+              </Text>{" "}
+              — zobrazuje datové panely z odpovědí agenta. U více běhů nebo více částí jedné odpovědi použijte navigační
+              šipky.
+            </Text>
+            <Text size="sm">
+              <Text span fw={600}>
+                Nabídky
+              </Text>{" "}
+              — rychlé fetchování inzerátů (Sreality/Bezrealitky), uložené nálezy a výpis „Z běhu agenta“. Filtry a
+              parametry zde odpovídají agent toolu pro realitní listingy.
+            </Text>
+            <Text size="sm">
+              <Text span fw={600}>
+                Úlohy (cron)
+              </Text>{" "}
+              — potvrzení návrhu naplánované úlohy + historie běhů. Nejdřív úlohu uložíte, potom čekáte na skutečné
+              spuštění cronem (záznamy se objeví až po běhu).
+            </Text>
+            <Text size="sm">
+              <Text span fw={600}>
+                Storage
+              </Text>{" "}
+              — odkazy na soubory vygenerované v aktuální odpovědi (PPTX/PDF/CSV/XLSX) a přechod do plného prohlížeče
+              úložiště.
+            </Text>
+            <Text size="sm">
+              <Text span fw={600}>
+                Kontext
+              </Text>{" "}
+              — poslední uživatelský dotaz + strom volání agenta (trace) pro vybraný run. Hodí se při ladění, proč agent
+              zvolil konkrétní postup.
+            </Text>
+            <Text size="sm">
+              <Text span fw={600}>
+                Audit log
+              </Text>{" "}
+              — agregovaný přehled běhu: metadata runu, timeline sample eventů a outbound e-mailové akce; lze stáhnout i
+              CSV.
+            </Text>
+            <Text size="sm" c="dimmed">
+              Tip: šipky mezi běhy v jednotlivých sekcích synchronizují fokus na konkrétní odpověď v konverzaci.
             </Text>
           </Stack>
         );

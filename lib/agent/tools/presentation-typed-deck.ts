@@ -683,6 +683,19 @@ const CONTENT_BULLET_LINE_SPACING_PT = 30;
  * Odhad výšky bloku odrážek (PPTX) — záměrně horší případ (užší řádky, mezery odstavce),
  * aby poslední řádek nezasahoval pod tabulku/graf.
  */
+/** Jedna odrážka na řádek — odstraní nadbytečné prefixy, aby se v PPTX neopakovaly symboly. */
+function normalizeBulletLine(raw: string): string {
+  const oneLine = raw.replace(/\s+/g, " ").trim();
+  return oneLine.replace(/^[\s•\-\*·]+/, "").trim() || oneLine;
+}
+
+/** Minimální výška tabulky v in podle počtu řádků (14 pt, rezerva na wrapped buňky). */
+function estimateTableHeightInches(rowCount: number): number {
+  if (rowCount <= 0) return 0.4;
+  const perRowIn = 0.3;
+  return Math.min(4.6, perRowIn * rowCount + 0.12);
+}
+
 function estimateBulletBlockHeightInches(
   bullets: string[],
   textWidthInches: number,
@@ -809,19 +822,23 @@ export async function buildNativeTypedPptxBuffer(deckTitle: string, slides: Pres
         break;
       }
       case "content": {
-        let yNext = cardY + d.innerPadTop;
+        const contentTop = cardY + d.innerPadTop;
+        /** Spodní okraj obsahu uvnitř karty — nic z obsahu nesmí přesáhnout (jinak „ujede“ ze slidu). */
+        const contentBottom = cardY + cardH - 0.1;
+        const maxInnerH = Math.max(0.5, contentBottom - contentTop);
+
         const gap = 0.2;
         const hasBullets = spec.bullets.length > 0;
+        const tableRowsTotal = spec.table ? spec.table.rows.length + 1 : 0;
         const bulletBlockH = hasBullets
           ? Math.min(
               4.25,
               estimateBulletBlockHeightInches(spec.bullets, textW, CONTENT_BULLET_FONT_PT, CONTENT_BULLET_LINE_SPACING_PT)
             )
           : 0;
-        const tableBlockH = spec.table ? Math.min(2.15, 0.32 * (spec.table.rows.length + 1) + 0.35) : 0;
+        const tableBlockH = spec.table ? estimateTableHeightInches(tableRowsTotal) : 0;
         const chartBlockH = spec.chart ? 2.85 : 0;
 
-        const available = cardH - d.innerPadTop - 0.35;
         const gapAfterBullets = hasBullets && (spec.table || spec.chart) ? gap : 0;
         const gapTableChart = spec.table && spec.chart ? gap : 0;
 
@@ -840,38 +857,61 @@ export async function buildNativeTypedPptxBuffer(deckTitle: string, slides: Pres
           }
         }
 
-        if (hasBullets) {
-          const spaceBelowBullets = available - bh - gapAfterBullets;
-          let needBelow = (spec.table ? th : 0) + gapTableChart + (spec.chart ? ch : 0);
-          if (needBelow > spaceBelowBullets && needBelow > 0.01) {
-            const sc = Math.max(0.22, spaceBelowBullets / needBelow);
-            if (spec.table) th *= sc;
-            if (spec.chart) ch *= sc;
-          }
-          const minBelow =
-            (spec.table ? 0.45 : 0) + gapTableChart + (spec.chart ? 0.85 : 0);
-          if (bh + gapAfterBullets + minBelow > available) {
-            bh = Math.max(0.65, available - gapAfterBullets - minBelow);
-          }
-        } else {
-          const need = (spec.table ? th : 0) + gapTableChart + (spec.chart ? ch : 0);
-          if (need > available && need > 0.01) {
-            const sc = Math.max(0.22, available / Math.max(need, 0.01));
-            if (spec.table) th *= sc;
-            if (spec.chart) ch *= sc;
+        const totalGaps = gapAfterBullets + gapTableChart;
+        const stackH = (hasBullets ? bh : 0) + (spec.table ? th : 0) + (spec.chart ? ch : 0) + totalGaps;
+
+        if (stackH > maxInnerH && stackH > 0.01) {
+          const minBh = hasBullets ? 0.58 : 0;
+          const minTh = spec.table ? Math.max(0.42, 0.22 * tableRowsTotal) : 0;
+          const minCh = spec.chart ? Math.max(1.15, MIN_CHART_H_IN * 0.65) : 0;
+          const minSum = minBh + minTh + minCh + totalGaps;
+          let room = maxInnerH - totalGaps;
+          if (room <= 0.35) room = 0.35;
+
+          if (minSum <= room + 1e-6) {
+            let extra = room - minSum;
+            // Rozdělit zbývající prostor proporcionálně původním váhám.
+            const wB = hasBullets ? Math.max(0.2, bh - minBh) : 0;
+            const wT = spec.table ? Math.max(0.2, th - minTh) : 0;
+            const wC = spec.chart ? Math.max(0.2, ch - minCh) : 0;
+            const wSum = wB + wT + wC || 1;
+            bh = hasBullets ? minBh + extra * (wB / wSum) : 0;
+            th = spec.table ? minTh + extra * (wT / wSum) : 0;
+            ch = spec.chart ? minCh + extra * (wC / wSum) : 0;
+          } else {
+            let shrink = minSum - room;
+            if (hasBullets && bh > minBh) {
+              const t = Math.min(shrink, Math.max(0, bh - minBh));
+              bh -= t;
+              shrink -= t;
+            }
+            if (spec.table && th > minTh && shrink > 0) {
+              const t = Math.min(shrink, Math.max(0, th - minTh));
+              th -= t;
+              shrink -= t;
+            }
+            if (spec.chart && ch > minCh && shrink > 0) {
+              ch -= shrink;
+            }
+            if (hasBullets) bh = Math.max(minBh, bh);
+            if (spec.table) th = Math.max(minTh, th);
+            if (spec.chart) ch = Math.max(minCh, ch);
           }
         }
+
+        let yNext = contentTop;
 
         if (hasBullets) {
           slide.addText(
             spec.bullets.map((b) => ({
-              text: `• ${b}`,
+              text: normalizeBulletLine(b),
               options: {
+                bullet: true,
                 fontSize: CONTENT_BULLET_FONT_PT,
                 color: d.bodyColor,
                 fontFace: "Calibri",
-                paraSpaceBefore: 4,
-                paraSpaceAfter: 6,
+                paraSpaceBefore: 2,
+                paraSpaceAfter: 4,
                 lineSpacing: CONTENT_BULLET_LINE_SPACING_PT
               }
             })),
@@ -888,8 +928,10 @@ export async function buildNativeTypedPptxBuffer(deckTitle: string, slides: Pres
         }
 
         if (spec.table) {
+          const spaceLeft = contentBottom - yNext - (spec.chart ? gap + ch : 0);
+          th = Math.min(th, Math.max(0, spaceLeft));
           const colCount = spec.table.headers.length;
-          const colW = textW / colCount;
+          const colWEach = textW / colCount;
           const headerRow = spec.table.headers.map((h) => ({
             text: h,
             options: { bold: true, fill: { color: "E2E8F0" }, fontSize: 15 }
@@ -897,21 +939,26 @@ export async function buildNativeTypedPptxBuffer(deckTitle: string, slides: Pres
           const bodyRows = spec.table.rows.map((row) =>
             row.map((cell) => ({ text: cell, options: { fontSize: 14 } }))
           );
+          const tableRowHeights = Array(tableRowsTotal).fill(th / tableRowsTotal);
           slide.addTable([headerRow, ...bodyRows], {
             x: textX,
             y: yNext,
             w: textW,
             h: th,
-            colW: Array(colCount).fill(colW),
+            colW: Array(colCount).fill(colWEach),
+            rowH: tableRowHeights,
             border: { pt: 0.5, color: d.cardLine },
             fontFace: "Calibri",
             valign: "middle",
-            align: "left"
+            align: "left",
+            autoPage: false
           });
           yNext += th + (spec.chart ? gap : 0);
         }
 
         if (spec.chart) {
+          const spaceLeft = contentBottom - yNext;
+          ch = Math.min(ch, Math.max(0, spaceLeft));
           const chartData = spec.chart.series.map((s) => ({
             name: s.name,
             labels: spec.chart!.categories,

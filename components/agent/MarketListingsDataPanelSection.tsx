@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Button, Group, Paper, Select, Stack, Text, TextInput } from "@mantine/core";
 import type { AgentMarketListingCard } from "@/lib/agent/types";
 import { MarketListingCardView } from "@/components/agent/MarketListingCardView";
 
@@ -237,6 +238,13 @@ export function MarketListingsDataPanelSection({
   const from = (safePage - 1) * pageSize;
   const to = from + pageSize;
   const visibleListings = enableClientFiltersAndPagination ? filteredListings.slice(from, to) : listings;
+  const rangeStart = total === 0 ? 0 : from + 1;
+  const rangeEnd = total === 0 ? 0 : Math.min(to, total);
+  const filtersActive =
+    Boolean(appliedLocation) ||
+    Boolean(appliedSource) ||
+    Boolean(appliedPriceMin) ||
+    Boolean(appliedPriceMax);
 
   return (
     <div style={embedded ? { display: "grid", gap: 12 } : panelChrome}>
@@ -259,7 +267,13 @@ export function MarketListingsDataPanelSection({
         </button>
       </div>
       <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>
-        {loading ? "Načítám nabídky…" : error ? `Chyba: ${error}` : `${listings.length} nabídek · karty z API`}
+        {loading
+          ? "Načítám nabídky…"
+          : error
+            ? `Chyba: ${error}`
+            : enableClientFiltersAndPagination
+              ? `Uloženo celkem: ${listings.length}${filtersActive ? " (podle filtru níže)" : ""}`
+              : `${listings.length} nabídek · karty z API`}
       </p>
       {error && !loading ? (
         <p style={{ margin: 0, fontSize: 14, color: "#b91c1c" }}>{error}</p>
@@ -268,68 +282,64 @@ export function MarketListingsDataPanelSection({
         <p style={{ margin: 0, fontSize: 14, color: "#64748b" }}>Žádné záznamy k zobrazení.</p>
       ) : null}
       {enableClientFiltersAndPagination ? (
-        <div
-          style={{
-            border: "1px solid #e2e8f0",
-            borderRadius: 8,
-            padding: 10,
-            display: "grid",
-            gap: 8,
-            background: "#fff"
-          }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 600 }}>Filtry (běh agenta)</div>
-          <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
-            <input
-              value={draftLocation}
-              onChange={(e) => setDraftLocation(e.currentTarget.value)}
-              placeholder="Lokalita (např. Plzeň)"
-              style={{ padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 13 }}
-            />
-            <select
-              value={draftSource}
-              onChange={(e) => setDraftSource(e.currentTarget.value as "" | "sreality" | "bezrealitky")}
-              style={{ padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 13 }}
-            >
-              <option value="">Všechny zdroje</option>
-              <option value="sreality">Sreality</option>
-              <option value="bezrealitky">Bezrealitky</option>
-            </select>
-            <input
-              value={draftPriceMin}
-              onChange={(e) => setDraftPriceMin(e.currentTarget.value.replace(/\D/g, ""))}
-              placeholder="Cena od (Kč)"
-              inputMode="numeric"
-              style={{ padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 13 }}
-            />
-            <input
-              value={draftPriceMax}
-              onChange={(e) => setDraftPriceMax(e.currentTarget.value.replace(/\D/g, ""))}
-              placeholder="Cena do (Kč)"
-              inputMode="numeric"
-              style={{ padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 13 }}
-            />
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              type="button"
-              onClick={applyFilters}
-              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #1d4ed8", background: "#eff6ff", color: "#1d4ed8" }}
-            >
-              Použít filtry
-            </button>
-            <button
-              type="button"
-              onClick={resetFilters}
-              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff" }}
-            >
-              Zrušit filtry
-            </button>
-          </div>
-          <div style={{ fontSize: 12, color: "#64748b" }}>
-            Zobrazeno {total === 0 ? 0 : from + 1}-{Math.min(to, total)} z {total}.
-          </div>
-        </div>
+        <Paper withBorder p="xs" radius="sm">
+          <Stack gap="xs">
+            <Text size="xs" fw={600}>
+              Filtry
+            </Text>
+            <Text size="xs" c="dimmed">
+              Cena filtruje jen nabídky s cenou. Lokalita hledá část textu v názvu a lokaci.
+            </Text>
+            <Group grow align="flex-end" wrap="wrap" gap="xs">
+              <TextInput
+                label="Lokalita"
+                placeholder="např. Holešovice"
+                size="xs"
+                value={draftLocation}
+                onChange={(e) => setDraftLocation(e.currentTarget.value)}
+              />
+              <Select
+                label="Realitka"
+                placeholder="Všechny"
+                size="xs"
+                clearable
+                data={[
+                  { value: "sreality", label: "Sreality" },
+                  { value: "bezrealitky", label: "Bezrealitky" }
+                ]}
+                value={draftSource || null}
+                onChange={(v) => setDraftSource((v as "" | "sreality" | "bezrealitky" | null) ?? "")}
+              />
+              <TextInput
+                label="Cena od (Kč)"
+                placeholder="např. 3000000"
+                size="xs"
+                inputMode="numeric"
+                value={draftPriceMin}
+                onChange={(e) => setDraftPriceMin(e.currentTarget.value.replace(/\D/g, ""))}
+              />
+              <TextInput
+                label="Cena do (Kč)"
+                placeholder="např. 8000000"
+                size="xs"
+                inputMode="numeric"
+                value={draftPriceMax}
+                onChange={(e) => setDraftPriceMax(e.currentTarget.value.replace(/\D/g, ""))}
+              />
+            </Group>
+            <Group gap="xs">
+              <Button size="compact-xs" onClick={applyFilters}>
+                Použít filtry
+              </Button>
+              <Button size="compact-xs" variant="default" onClick={resetFilters}>
+                Zrušit filtry
+              </Button>
+            </Group>
+            <Text size="xs" c="dimmed">
+              Zobrazeno {rangeStart}–{rangeEnd} z {total}.
+            </Text>
+          </Stack>
+        </Paper>
       ) : null}
       {visibleListings.length > 0 ? (
         <div
@@ -356,7 +366,9 @@ export function MarketListingsDataPanelSection({
                 <div style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: "#1e293b" }}>
                   {c.price_czk.toLocaleString("cs-CZ")} Kč
                 </div>
-              ) : null}
+              ) : (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#64748b" }}>Cena není k dispozici</div>
+              )}
             </div>
           ))}
         </div>

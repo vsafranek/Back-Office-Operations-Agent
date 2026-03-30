@@ -1,4 +1,6 @@
 import { requireAuthenticatedUser } from "@/lib/auth/server-auth";
+import { normCs } from "@/lib/integrations/cz-market-regions";
+import { localityContextSearchTokens } from "@/lib/integrations/market-listing-locality-filter";
 import type { UserMarketListingFindRow } from "@/lib/market-listings/record-user-market-listing-finds";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 
@@ -12,9 +14,25 @@ function escapeIlikePattern(raw: string): string {
   return raw.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
 }
 
+/** Znehodnocení znaků, které lámají PostgREST `.or(...)` a LIKE zástupné znaky. */
+function sanitizePostgrestOrIlikeFragment(s: string): string {
+  return s.replace(/[%*,]/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+function pushDistinctIlike(parts: string[], seen: Set<string>, column: string, fragment: string) {
+  const inner = sanitizePostgrestOrIlikeFragment(fragment);
+  if (inner.length < 2) return;
+  const p = `%${escapeIlikePattern(inner)}%`;
+  const key = `${column}:${p}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  parts.push(`${column}.ilike.${p}`);
+}
+
 /**
  * Uložené nálezy inzerátů (agent, nástroje Nabídky, cron).
- * Query: page, limit | filtry: location (část textu, ILIKE), source (sreality|bezrealitky), price_min, price_max (Kč, jen řádky s vyplněnou cenou).
+ * Query: page, limit | filtry: location (kontext titulku + lokace, normCs + pravidla čtvrtí),
+ * source (sreality|bezrealitky), price_min, price_max (Kč, jen řádky s vyplněnou cenou).
  */
 export async function GET(request: Request) {
   try {
@@ -43,13 +61,28 @@ export async function GET(request: Request) {
     let q = supabase
       .from("user_market_listing_finds")
       .select(
-        "id, external_id, title, location, source, url, image_url, price_czk, agent_run_id, first_seen_at, last_seen_at",
+        "id, external_id, title, location, location_context, source, url, image_url, price_czk, agent_run_id, first_seen_at, last_seen_at",
         { count: "exact" }
       )
       .eq("user_id", user.id);
 
     if (locationQ && locationQ.length > 0) {
-      q = q.ilike("location", `%${escapeIlikePattern(locationQ)}%`);
+      const parts: string[] = [];
+      const seen = new Set<string>();
+      for (const t of localityContextSearchTokens(locationQ)) {
+        pushDistinctIlike(parts, seen, "location_context", t);
+      }
+      pushDistinctIlike(parts, seen, "title", locationQ);
+      pushDistinctIlike(parts, seen, "location", locationQ);
+      const nq = normCs(locationQ);
+      const rawSan = sanitizePostgrestOrIlikeFragment(locationQ);
+      if (nq.length >= 2 && nq !== rawSan.toLowerCase()) {
+        pushDistinctIlike(parts, seen, "title", nq);
+        pushDistinctIlike(parts, seen, "location", nq);
+      }
+      if (parts.length > 0) {
+        q = q.or(parts.join(","));
+      }
     }
     if (source) {
       q = q.eq("source", source);

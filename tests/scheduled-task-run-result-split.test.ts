@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { splitCronOkNotification } from "@/components/agent/ScheduledTaskRunResultCard";
+import {
+  splitCronOkNotification,
+  splitScheduledTaskCallerPrompt
+} from "@/components/agent/ScheduledTaskRunResultCard";
 
 describe("splitCronOkNotification", () => {
   it("returns single block when summary equals detail", () => {
@@ -21,5 +24,19 @@ describe("splitCronOkNotification", () => {
     const r = splitCronOkNotification("Jen shrnutí", null);
     expect(r.notice).toBeNull();
     expect(r.agentReply).toBe("Jen shrnutí");
+  });
+});
+
+describe("splitScheduledTaskCallerPrompt", () => {
+  it("returns prefix before cron delimiter", () => {
+    expect(
+      splitScheduledTaskCallerPrompt(
+        "PREFIX systému\n\n--- Dotaz / šablona úlohy ---\nUživatelský dotaz"
+      )
+    ).toBe("PREFIX systému");
+  });
+
+  it("returns null when delimiter missing", () => {
+    expect(splitScheduledTaskCallerPrompt("Jen jeden blok")).toBeNull();
   });
 });

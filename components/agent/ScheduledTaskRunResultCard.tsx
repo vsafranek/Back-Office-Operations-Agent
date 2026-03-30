@@ -26,6 +26,8 @@ export type ScheduledTaskNotificationRow = {
   summary: string;
   detail: string | null;
   panel_payload?: unknown | null;
+  agent_question?: string | null;
+  agent_answer?: string | null;
   read_at: string | null;
   created_at: string;
 };
@@ -39,6 +41,21 @@ export function cronNotificationFullBody(n: ScheduledTaskNotificationRow): strin
 }
 
 type SplitOkParts = { notice: string | null; agentReply: string | null };
+
+/** Stejný oddělovač jako u `runBackOfficeAgent` + cron úlohy (`orchestratorQuestionPrefix`). */
+const SCHEDULED_TASK_QUESTION_DELIM = "\n\n--- Dotaz / šablona úlohy ---\n";
+
+/**
+ * Část před `--- Dotaz / šablona úlohy ---` — systémové zadání / orchestrátor (volající kontext).
+ * Vlastní dotaz úlohy se v UI nezobrazuje (je v „Finální odpověď agenta“ jen výstup).
+ */
+export function splitScheduledTaskCallerPrompt(full: string | null | undefined): string | null {
+  const t = full?.trim() ?? "";
+  if (!t) return null;
+  const idx = t.indexOf(SCHEDULED_TASK_QUESTION_DELIM);
+  if (idx === -1) return null;
+  return t.slice(0, idx).trim() || null;
+}
 
 /**
  * Oddělí krátký řádek notifikace od plné odpovědi agenta.
@@ -75,6 +92,8 @@ export function ScheduledTaskRunResultCard({
 }: ScheduledTaskRunResultCardProps) {
   const { notice, agentReply } =
     n.status === "ok" ? splitCronOkNotification(n.summary, n.detail) : { notice: null, agentReply: null };
+  const finalAgentReply = n.agent_answer?.trim() || agentReply;
+  const callerPrompt = splitScheduledTaskCallerPrompt(n.agent_question);
   const panelSlice = n.panel_payload ? agentAnswerSliceFromPersistPayload(n.panel_payload) : null;
   const panelBundles =
     panelSlice?.dataPanelBundles && panelSlice.dataPanelBundles.length > 0
@@ -113,27 +132,34 @@ export function ScheduledTaskRunResultCard({
 
       {n.status === "ok" ? (
         <Stack gap="sm">
-          {notice ? (
+          {(notice ?? n.summary).trim() ? (
             <Box>
               <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb={4}>
-                Shrnutí (notifikace)
+                Shrnutí — co se zjistilo
               </Text>
-              <Text size="sm" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                {notice}
-              </Text>
+              <ScrollArea.Autosize mah={160} mih={40} type="auto" offsetScrollbars>
+                <Box py={4}>
+                  <FormattedAssistantContent content={(notice ?? n.summary).trim()} />
+                </Box>
+              </ScrollArea.Autosize>
             </Box>
           ) : null}
-          {notice && agentReply ? <Divider label="Plná odpověď agenta" labelPosition="left" /> : null}
-          {agentReply ? (
+          {callerPrompt ? (
             <Box>
-              {notice ? null : (
-                <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb={4}>
-                  Výsledek běhu
-                </Text>
-              )}
+              <Divider label="Prompt volajícího agenta" labelPosition="left" mb="sm" />
+              <ScrollArea.Autosize mah={280} mih={60} type="auto" offsetScrollbars>
+                <Box py={4}>
+                  <FormattedAssistantContent content={callerPrompt} />
+                </Box>
+              </ScrollArea.Autosize>
+            </Box>
+          ) : null}
+          {finalAgentReply ? (
+            <Box>
+              <Divider label="Finální odpověď agenta" labelPosition="left" mb="sm" />
               <ScrollArea.Autosize mah={360} mih={80} type="auto" offsetScrollbars>
                 <Box py={4}>
-                  <FormattedAssistantContent content={agentReply} />
+                  <FormattedAssistantContent content={finalAgentReply} />
                 </Box>
               </ScrollArea.Autosize>
             </Box>
@@ -163,17 +189,13 @@ export function ScheduledTaskRunResultCard({
           <Text size="xs" fw={700} tt="uppercase" c="dimmed">
             Chyba
           </Text>
-          <Text size="sm" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-            {n.summary}
-          </Text>
+          <FormattedAssistantContent content={n.summary} />
           {n.detail ? (
             <Box>
               <Text size="xs" fw={600} c="dimmed" mb={4}>
                 Detail
               </Text>
-              <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                {n.detail}
-              </Text>
+              <FormattedAssistantContent content={n.detail} />
             </Box>
           ) : null}
         </Stack>
@@ -193,12 +215,16 @@ export function ScheduledTaskRunModalContent({
   status,
   summary,
   detail,
+  agentQuestion,
+  agentAnswer,
   panelPayload,
   getAccessToken
 }: {
   status: "ok" | "error";
   summary: string;
   detail: string | null;
+  agentQuestion?: string | null;
+  agentAnswer?: string | null;
   panelPayload?: unknown | null;
   getAccessToken?: () => Promise<string | null>;
 }) {
@@ -206,14 +232,14 @@ export function ScheduledTaskRunModalContent({
     const body = [summary, detail ?? ""].filter((s) => s.trim()).join("\n\n").trim() || "—";
     return (
       <ScrollArea h="75vh" type="auto" offsetScrollbars>
-        <Text size="sm" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-          {body}
-        </Text>
+        <FormattedAssistantContent content={body} />
       </ScrollArea>
     );
   }
 
   const { notice, agentReply } = splitCronOkNotification(summary, detail);
+  const finalAgentReply = agentAnswer?.trim() || agentReply;
+  const callerPrompt = splitScheduledTaskCallerPrompt(agentQuestion);
   const panelSlice = panelPayload ? agentAnswerSliceFromPersistPayload(panelPayload) : null;
   const panelBundles =
     panelSlice?.dataPanelBundles && panelSlice.dataPanelBundles.length > 0
@@ -224,25 +250,24 @@ export function ScheduledTaskRunModalContent({
   return (
     <ScrollArea h="75vh" type="auto" offsetScrollbars>
       <Stack gap="md" pr="sm" pb="md">
-        {notice ? (
+        {(notice ?? summary).trim() ? (
           <Box>
             <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb={6}>
-              Shrnutí (notifikace)
+              Shrnutí — co se zjistilo
             </Text>
-            <Text size="sm" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-              {notice}
-            </Text>
+            <FormattedAssistantContent content={(notice ?? summary).trim()} />
           </Box>
         ) : null}
-        {notice && agentReply ? <Divider label="Plná odpověď agenta" labelPosition="left" /> : null}
-        {agentReply ? (
+        {callerPrompt ? (
           <Box>
-            {notice ? null : (
-              <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb={6}>
-                Výsledek běhu
-              </Text>
-            )}
-            <FormattedAssistantContent content={agentReply} />
+            <Divider label="Prompt volajícího agenta" labelPosition="left" mb="sm" />
+            <FormattedAssistantContent content={callerPrompt} />
+          </Box>
+        ) : null}
+        {finalAgentReply ? (
+          <Box>
+            <Divider label="Finální odpověď agenta" labelPosition="left" mb="sm" />
+            <FormattedAssistantContent content={finalAgentReply} />
           </Box>
         ) : (
           <Text size="sm" c="dimmed">
