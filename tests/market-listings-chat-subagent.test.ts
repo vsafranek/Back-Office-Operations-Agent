@@ -18,8 +18,25 @@ vi.mock("@/lib/agent/tools/market-listings-tool", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/agent/subagents/presentation-subagent", () => ({
+  runPresentationFromRowsSubAgent: vi.fn()
+}));
+
+vi.mock("@/lib/supabase/server-client", () => ({
+  getSupabaseAdminClient: vi.fn(() => ({
+    from: vi.fn(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          in: vi.fn(async () => ({ data: [], error: null }))
+        }))
+      }))
+    }))
+  }))
+}));
+
 import { generateUserFacingReply } from "@/lib/agent/llm/user-facing-reply";
 import { fetchMarketListings } from "@/lib/agent/tools/market-listings-tool";
+import { runPresentationFromRowsSubAgent } from "@/lib/agent/subagents/presentation-subagent";
 import { runMarketListingsChatSubAgent } from "@/lib/agent/subagents/market-listings-chat-subagent";
 
 const mockListing = {
@@ -35,6 +52,12 @@ const mockListing = {
 describe("runMarketListingsChatSubAgent", () => {
   beforeEach(() => {
     vi.mocked(fetchMarketListings).mockResolvedValue([mockListing]);
+    vi.mocked(runPresentationFromRowsSubAgent).mockResolvedValue({
+      publicUrl: "https://cdn.example/listings.pptx",
+      pdfPublicUrl: "https://cdn.example/listings.pdf",
+      totalSlidesLabel: 5,
+      includeOpeningTitleSlide: false
+    });
   });
 
   it("volá fetchMarketListings a vrací panel s novými nabídkami", async () => {
@@ -64,5 +87,29 @@ describe("runMarketListingsChatSubAgent", () => {
       expect(answer.dataPanel.listings).toHaveLength(1);
       expect(answer.dataPanel.listings[0]?.external_id).toBe("sreality:x");
     }
+    expect(runPresentationFromRowsSubAgent).not.toHaveBeenCalled();
+  });
+
+  it("vytvori prezentaci z novych nabidek, kdyz ji uzivatel explicitne chce", async () => {
+    const run = vi.fn();
+    const toolRunner = { run } as unknown as ToolRunner;
+    const ctx: AgentToolContext = { runId: "r2", userId: "u1" };
+    const answer = await runMarketListingsChatSubAgent({
+      toolRunner,
+      ctx,
+      question: "Najdi nove nabidky v Praze a priprav z nich prezentaci o 4 slidech"
+    });
+
+    expect(runPresentationFromRowsSubAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rows: [expect.objectContaining({ external_id: "sreality:x" })],
+        sourceLabel: "market_listings_fetch",
+        slideCount: 4
+      })
+    );
+    expect(answer.generated_artifacts).toEqual([
+      expect.objectContaining({ type: "presentation", url: "https://cdn.example/listings.pptx" }),
+      expect.objectContaining({ type: "presentation", url: "https://cdn.example/listings.pdf" })
+    ]);
   });
 });

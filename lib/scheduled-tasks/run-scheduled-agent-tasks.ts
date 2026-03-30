@@ -30,6 +30,25 @@ type TaskRow = {
   market_listings_params: unknown | null;
 };
 
+type ScheduledExecutionIntent =
+  | "analytics"
+  | "calendar_email"
+  | "presentation"
+  | "weekly_report"
+  | "web_search"
+  | "market_listings";
+
+function parseScheduledExecutionIntentMarker(systemPrompt: string): {
+  executionIntent?: ScheduledExecutionIntent;
+  systemPromptWithoutMarker: string;
+} {
+  const markerRe = /\[\[SCHEDULED_EXECUTION_INTENT:(analytics|calendar_email|presentation|weekly_report|web_search|market_listings)\]\]/i;
+  const m = markerRe.exec(systemPrompt);
+  const executionIntent = (m?.[1]?.toLowerCase() ?? undefined) as ScheduledExecutionIntent | undefined;
+  const systemPromptWithoutMarker = systemPrompt.replace(markerRe, "").trim();
+  return { executionIntent, systemPromptWithoutMarker };
+}
+
 function formatListingsCronContext(listings: MarketListing[]): string {
   const maxLines = 35;
   const lines = listings.slice(0, maxLines).map((l) => `- ${l.title} | ${l.source} | ${l.url}`);
@@ -117,9 +136,16 @@ export async function runScheduledAgentTasksCycle(opts: {
       continue;
     }
 
+    const { executionIntent, systemPromptWithoutMarker } = parseScheduledExecutionIntentMarker(row.system_prompt);
+    const effectiveExecutionIntent = executionIntent ?? (row.market_listings_params ? "market_listings" : undefined);
+    const executionIntentHint = effectiveExecutionIntent
+      ? `\n[Rezim vykonu obsahu pro tento beh: POVINNE pouzij intent "${effectiveExecutionIntent}" (jde o obsah ulohy), pokud to neni technicky nemozne.]`
+      : "";
     const prefix =
-      "[Jednorázový běh již naplánované úlohy — opakování řeší pouze cron v infrastruktuře, ne ty. Neplánuj další cron úlohy, nevolaj nástroj proposeScheduledAgentTask a nežádej uživatele o nastavení opakování. Zpracuj jen tento jeden dotaz podle systémového zadání níže. Buď stručný, pokud zadání nevyžaduje jinak.]\n" +
-      row.system_prompt;
+      "[Jednorázový běh již naplánované úlohy — opakování řeší pouze cron v infrastruktuře, ne ty. Neplánuj další cron úlohy, nevolaj nástroj proposeScheduledAgentTask a nežádej uživatele o nastavení opakování. Zpracuj jen tento jeden dotaz podle systémového zadání níže. Buď stručný, pokud zadání nevyžaduje jinak.]" +
+      executionIntentHint +
+      "\n" +
+      systemPromptWithoutMarker;
 
     let listingsBlock = "";
     let listingsForRecord: MarketListing[] = [];

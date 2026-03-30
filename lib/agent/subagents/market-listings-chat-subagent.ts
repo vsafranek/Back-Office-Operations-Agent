@@ -1,15 +1,27 @@
 import type { AgentAnswer, AgentToolContext } from "@/lib/agent/types";
 import type { ToolRunner } from "@/lib/agent/mcp-tools/tool-runner";
 import { generateUserFacingReply } from "@/lib/agent/llm/user-facing-reply";
+import { inferSlideCountFromUserText } from "@/lib/agent/llm/intent-heuristics";
 import type { MarketListing } from "@/lib/agent/tools/market-listing-model";
 import { inferMarketListingsInputFromQuestion } from "@/lib/agent/tools/market-listings-infer";
 import { fetchMarketListings } from "@/lib/agent/tools/market-listings-tool";
 import { recordUserMarketListingFinds } from "@/lib/market-listings/record-user-market-listing-finds";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
+import { runPresentationFromRowsSubAgent } from "@/lib/agent/subagents/presentation-subagent";
 
 const SUMMARY_LISTING_THRESHOLD = 12;
 const MAX_DETAIL_ITEMS = 25;
 const EXISTING_IDS_BATCH = 200;
+
+function shouldGenerateListingsPresentation(question: string): boolean {
+  return /\b(prezentac\w*|pptx|power\s*point|slid\w*|deck)\b/i.test(question);
+}
+
+function buildListingsPresentationTitle(question: string): string {
+  const q = question.trim();
+  if (!q) return "Prezentace realitnich nabidek";
+  return q.slice(0, 120);
+}
 
 function listingToCard(l: MarketListing) {
   return {
@@ -59,8 +71,6 @@ export async function runMarketListingsChatSubAgent(params: {
   question: string;
   onAnswerDelta?: (chunk: string) => void | Promise<void>;
 }): Promise<AgentAnswer> {
-  void params.toolRunner;
-
   const toolInput = inferMarketListingsInputFromQuestion(params.question);
   const listings = await fetchMarketListings(toolInput);
   const existingIds = await selectExistingListingIdsForUser(
@@ -132,11 +142,32 @@ export async function runMarketListingsChatSubAgent(params: {
     userContent
   });
 
+  const wantsPresentation = shouldGenerateListingsPresentation(params.question);
+  let presentationArtifacts:
+    | { type: "presentation"; label: string; url: string }[]
+    | undefined;
+  if (wantsPresentation && newListings.length > 0) {
+    const slideCount = inferSlideCountFromUserText(params.question) ?? 5;
+    const deck = await runPresentationFromRowsSubAgent({
+      toolRunner: params.toolRunner,
+      ctx: params.ctx,
+      slideCount,
+      question: params.question,
+      title: buildListingsPresentationTitle(params.question),
+      rows: newListings,
+      sourceLabel: "market_listings_fetch"
+    });
+    presentationArtifacts = [
+      { type: "presentation", label: `Prezentace (${deck.totalSlidesLabel} slidu) PPTX`, url: deck.publicUrl },
+      { type: "presentation", label: `Prezentace (${deck.totalSlidesLabel} slidu) PDF`, url: deck.pdfPublicUrl }
+    ];
+  }
+
   return {
     answer_text: reply.answer_text,
     confidence: reply.confidence,
     sources: citations,
-    generated_artifacts: [],
+    generated_artifacts: presentationArtifacts ?? [],
     next_actions: reply.next_actions,
     dataPanel: {
       kind: "market_listings",

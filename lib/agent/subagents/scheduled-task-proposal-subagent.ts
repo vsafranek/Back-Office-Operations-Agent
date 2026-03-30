@@ -16,6 +16,9 @@ const LlmExtractionSchema = z.object({
   system_prompt: z.string().min(1),
   user_question: z.string().optional(),
   agent_id: z.enum(["basic", "thinking-orchestrator"]).optional(),
+  execution_intent: z
+    .enum(["analytics", "calendar_email", "presentation", "weekly_report", "web_search", "market_listings"])
+    .optional(),
   /** Volitelně: filtry pro Sreality/Bezrealitky (location, sources, srealityOfferKind, …). */
   market_listings_params: z.record(z.string(), z.unknown()).optional()
 });
@@ -25,6 +28,7 @@ Orchestrator uz zaradil pozadavek jako scheduled_agent_task — ocekava se tedy 
 
 Vrat POUZE jeden JSON objekt (bez markdownu), klice:
 - title, cron_expression (5 poli pg_cron), timezone (IANA, vychozi Europe/Prague), system_prompt, user_question, agent_id ("basic"|"thinking-orchestrator")
+- execution_intent: jaky typ specialisty ma resit OBSAH jednoho behu ("analytics"|"calendar_email"|"presentation"|"weekly_report"|"web_search"|"market_listings")
 - market_listings_params (volitelny objekt): pri sledovani nabidek Sreality/Bezrealitky nastav napr. location Plzen, sources [sreality,bezrealitky], srealityOfferKind prodej|pronajem, bezrealitkyOfferType PRODEJ|PRONAJEM, srealityCategoryMain 1=byty 2=domy, perPage, regionGeocodeHint.
 Pokud uzivatel cas cronu nedefinuje ale z kontextu jde o denni monitoring, pouzij 0 9 * * * a timezone Europe/Prague.
 
@@ -34,8 +38,14 @@ system_prompt — POZOR:
 - Frekvenci a cas vyjadri VYHRADNE pres cron_expression + timezone, ne v system_prompt.
 
 user_question: konkretni dotaz nebo sablona pro tento beh (co zrovna zpracovat); opet bez navodu na dalsi cron.
+execution_intent urci podle obsahu behu: sledovani inzeratu => market_listings; SQL/KPI => analytics; e-mail/termin => calendar_email; atd.
 
 Pri pravidelnem sledovani novych nabidek vzdy dopln market_listings_params s location a sources.`;
+
+function buildIntentMarker(intent: z.infer<typeof LlmExtractionSchema>["execution_intent"]): string {
+  if (!intent) return "";
+  return `[[SCHEDULED_EXECUTION_INTENT:${intent}]]`;
+}
 
 export async function runScheduledTaskProposalSubAgent(params: {
   toolRunner: ToolRunner;
@@ -92,7 +102,7 @@ export async function runScheduledTaskProposalSubAgent(params: {
     title: raw.title.trim(),
     cron_expression: raw.cron_expression.trim(),
     timezone: (raw.timezone ?? "Europe/Prague").trim(),
-    system_prompt: raw.system_prompt.trim(),
+    system_prompt: [buildIntentMarker(raw.execution_intent), raw.system_prompt.trim()].filter(Boolean).join("\n"),
     user_question: raw.user_question?.trim() || "Splň naplánovanou úlohu podle systémového zadání.",
     agent_id: raw.agent_id ?? "basic",
     ...(market_listings_params ? { market_listings_params } : {})
