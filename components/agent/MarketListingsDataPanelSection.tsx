@@ -28,6 +28,8 @@ type Props = {
   getAccessToken?: () => Promise<string | null>;
   /** Použije filtry + stránkování nad výsledkem (pro záložku Z běhu agenta). */
   enableClientFiltersAndPagination?: boolean;
+  /** Bez vnějšího card/sticky wrapperu a bez nadpisu komponenty. */
+  embedded?: boolean;
 };
 
 function mapApiListing(row: {
@@ -58,7 +60,8 @@ export function MarketListingsDataPanelSection({
   fetchParams,
   initialListings,
   getAccessToken,
-  enableClientFiltersAndPagination = false
+  enableClientFiltersAndPagination = false,
+  embedded = false
 }: Props) {
   const [listings, setListings] = useState<AgentMarketListingCard[]>(initialListings);
   const [loading, setLoading] = useState(Boolean(fetchParams && Object.keys(fetchParams).length > 0));
@@ -236,9 +239,9 @@ export function MarketListingsDataPanelSection({
   const visibleListings = enableClientFiltersAndPagination ? filteredListings.slice(from, to) : listings;
 
   return (
-    <div style={panelChrome}>
+    <div style={embedded ? { display: "grid", gap: 12 } : panelChrome}>
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
-        <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2>
+        {!embedded ? <h2 style={{ margin: 0, fontSize: 18 }}>{title}</h2> : <span />}
         <button
           type="button"
           onClick={() => void handleRefresh()}

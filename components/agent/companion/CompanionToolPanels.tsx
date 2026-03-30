@@ -1529,6 +1529,7 @@ export function MarketSidebarPanel({
                   initialListings={panel.listings}
                   getAccessToken={getAccessToken}
                   enableClientFiltersAndPagination
+                  embedded
                 />
               ))
             )}
