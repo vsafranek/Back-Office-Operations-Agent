@@ -116,6 +116,16 @@ function shouldShowMarketListingsChatHint(result: AgentAnswer): boolean {
 /** Sekce „Data a grafy“ — bez čistého e-mailového panelu (ten je v záložce Maily). */
 function shouldShowDataAndChartsSection(result: AgentAnswer): boolean {
   if (result.intent === "casual_chat") return false;
+  if (
+    result.intent === "market_listings" &&
+    vizBundlesForDataSection(result).length === 0 &&
+    !getPanelBundles(result).some((b) => b.dataPanel.kind === "scheduled_task_confirmation") &&
+    !result.dataPanelDownloads?.chartPngs?.length &&
+    !result.dataPanelDownloads?.excel &&
+    !result.dataPanelDownloads?.csv
+  ) {
+    return false;
+  }
   if (vizBundlesForDataSection(result).length > 0) return true;
   if (result.dataPanelDownloads?.chartPngs?.length) return true;
   if (result.dataPanelDownloads?.excel || result.dataPanelDownloads?.csv) return true;
@@ -631,10 +641,22 @@ export function ConfigurableAgentPanel({
                           Nabídky
                         </Title>
                         <Text size="xs" c="dimmed">
-                          Karty nemovitostí z tohoto běhu jsou v postranním panelu v záložce{" "}
-                          <strong>Nabídky</strong> → <strong>Z běhu agenta</strong> (včetně přepínače mezi běhy v
-                          konverzaci).
+                          Výpis je filtrovaný na nové položky proti uloženým nálezům v databázi uživatele.
                         </Text>
+                        <Stack gap="md" w="100%" maw="100%" style={{ minWidth: 0 }}>
+                          {marketListingsPanelsFromAnswer(displayResult).map((panel, i) => (
+                            <div
+                              key={`${displayResult.runId ?? "run"}-market-chat-${i}`}
+                              id={
+                                displayResult.runId
+                                  ? `agent-market-panel--conv--${cId}--run--${displayResult.runId}--${i}`
+                                  : `agent-market-panel--conv--${cId}--${i}`
+                              }
+                            >
+                              <AgentDataPanel panel={panel} getAccessToken={getAccessToken} />
+                            </div>
+                          ))}
+                        </Stack>
                       </Stack>
                     ) : null}
 

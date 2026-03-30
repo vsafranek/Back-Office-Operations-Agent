@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { requireAuthenticatedUser } from "@/lib/auth/server-auth";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
-import { validateCronExpression } from "@/lib/scheduled-tasks/cron-helpers";
+import { normalizeUserCronExpression, validateCronExpression } from "@/lib/scheduled-tasks/cron-helpers";
 
 export const runtime = "nodejs";
 
@@ -81,8 +81,9 @@ export async function POST(request: Request) {
     const user = await requireAuthenticatedUser(request);
     const body = await request.json();
     const parsed = taskBodySchema.parse(body);
+    const normalizedCronExpression = normalizeUserCronExpression(parsed.cron_expression);
 
-    const cronCheck = validateCronExpression(parsed.cron_expression, parsed.timezone);
+    const cronCheck = validateCronExpression(normalizedCronExpression, parsed.timezone);
     if (!cronCheck.ok) {
       return Response.json({ error: cronCheck.error }, { status: 400 });
     }
@@ -91,7 +92,7 @@ export async function POST(request: Request) {
     const row: Record<string, unknown> = {
       user_id: user.id,
       title: parsed.title.trim(),
-      cron_expression: parsed.cron_expression.trim(),
+      cron_expression: normalizedCronExpression,
       timezone: parsed.timezone.trim(),
       system_prompt: parsed.system_prompt.trim(),
       user_question: (parsed.user_question ?? "Splň naplánovanou úlohu podle systémového zadání.").trim(),

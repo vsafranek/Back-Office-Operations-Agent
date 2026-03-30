@@ -57,6 +57,45 @@ type ScheduledTaskRow = {
   market_listings_params?: Record<string, unknown> | null;
 };
 
+type CronPreset = "custom" | "every5m" | "every10m" | "every15m" | "every30m" | "hourly";
+
+function cronPresetToExpression(preset: CronPreset): string {
+  switch (preset) {
+    case "every5m":
+      return "*/5 * * * *";
+    case "every10m":
+      return "*/10 * * * *";
+    case "every15m":
+      return "*/15 * * * *";
+    case "every30m":
+      return "*/30 * * * *";
+    case "hourly":
+      return "0 * * * *";
+    default:
+      return "";
+  }
+}
+
+function inferCronPreset(expression: string): CronPreset {
+  const normalized = expression
+    .trim()
+    .replace(/\*\s*\/\s*(\d+)/g, "*/$1")
+    .replace(/\s+/g, " ");
+  if (normalized === "*/5 * * * *") return "every5m";
+  if (normalized === "*/10 * * * *") return "every10m";
+  if (normalized === "*/15 * * * *") return "every15m";
+  if (normalized === "*/30 * * * *") return "every30m";
+  if (normalized === "0 * * * *") return "hourly";
+  return "custom";
+}
+
+function normalizeCronInput(expression: string): string {
+  return expression
+    .trim()
+    .replace(/\*\s*\/\s*(\d+)/g, "*/$1")
+    .replace(/\s+/g, " ");
+}
+
 const INITIAL_SCHED_FORM = {
   title: "",
   cron_expression: "0 8 * * *",
@@ -122,11 +161,13 @@ export default function SettingsPage() {
   const [uiPrefsSaving, setUiPrefsSaving] = useState(false);
   const [uiPrefsMessage, setUiPrefsMessage] = useState<string | null>(null);
   const [schedForm, setSchedForm] = useState(INITIAL_SCHED_FORM);
+  const [schedCreateCronPreset, setSchedCreateCronPreset] = useState<CronPreset>("custom");
 
   const [schedCreateOpened, schedCreateHandlers] = useDisclosure(false);
   const [schedEditOpened, schedEditHandlers] = useDisclosure(false);
   const [schedEditTaskId, setSchedEditTaskId] = useState<string | null>(null);
   const [schedEditSaving, setSchedEditSaving] = useState(false);
+  const [schedEditCronPreset, setSchedEditCronPreset] = useState<CronPreset>("custom");
   const [schedEditForm, setSchedEditForm] = useState({
     title: "",
     cron_expression: "",
@@ -287,6 +328,7 @@ export default function SettingsPage() {
 
   function openCreateScheduledTaskModal() {
     setSchedForm({ ...INITIAL_SCHED_FORM });
+    setSchedCreateCronPreset(inferCronPreset(INITIAL_SCHED_FORM.cron_expression));
     setSchedMessage(null);
     schedCreateHandlers.open();
   }
@@ -388,7 +430,7 @@ export default function SettingsPage() {
       },
       body: JSON.stringify({
         title: schedForm.title.trim(),
-        cron_expression: schedForm.cron_expression.trim(),
+        cron_expression: normalizeCronInput(schedForm.cron_expression),
         timezone: schedForm.timezone.trim(),
         system_prompt: schedForm.system_prompt.trim(),
         user_question: schedForm.user_question.trim(),
@@ -424,6 +466,7 @@ export default function SettingsPage() {
           ? JSON.stringify(task.market_listings_params, null, 2)
           : ""
     });
+    setSchedEditCronPreset(inferCronPreset(task.cron_expression));
     setSchedMessage(null);
     schedEditHandlers.open();
   }
@@ -469,7 +512,7 @@ export default function SettingsPage() {
       },
       body: JSON.stringify({
         title: schedEditForm.title.trim(),
-        cron_expression: schedEditForm.cron_expression.trim(),
+        cron_expression: normalizeCronInput(schedEditForm.cron_expression),
         timezone: schedEditForm.timezone.trim(),
         system_prompt: schedEditForm.system_prompt.trim(),
         user_question:
@@ -944,6 +987,7 @@ select cron.schedule(
         onClose={() => {
           schedCreateHandlers.close();
           setSchedForm({ ...INITIAL_SCHED_FORM });
+          setSchedCreateCronPreset(inferCronPreset(INITIAL_SCHED_FORM.cron_expression));
         }}
         title="Nová cron úloha"
         size="lg"
@@ -960,8 +1004,33 @@ select cron.schedule(
             <TextInput
               label="Cron (5 polí, jako v pg_cron)"
               value={schedForm.cron_expression}
-              onChange={(e) => setSchedForm({ ...schedForm, cron_expression: e.currentTarget.value })}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setSchedForm({ ...schedForm, cron_expression: value });
+                setSchedCreateCronPreset(inferCronPreset(value));
+              }}
               placeholder="0 8 * * *"
+              disabled={schedCreateCronPreset !== "custom"}
+            />
+            <Select
+              label="Rychlé opakování"
+              description="Vyberte interval bez psaní cron syntaxe. Vlastní výraz ponechte na „Vlastní cron“."
+              value={schedCreateCronPreset}
+              onChange={(v) => {
+                const next = (v as CronPreset | null) ?? "custom";
+                setSchedCreateCronPreset(next);
+                if (next !== "custom") {
+                  setSchedForm({ ...schedForm, cron_expression: cronPresetToExpression(next) });
+                }
+              }}
+              data={[
+                { value: "custom", label: "Vlastní cron" },
+                { value: "every5m", label: "Každých 5 minut" },
+                { value: "every10m", label: "Každých 10 minut" },
+                { value: "every15m", label: "Každých 15 minut" },
+                { value: "every30m", label: "Každých 30 minut" },
+                { value: "hourly", label: "Každou hodinu (v :00)" }
+              ]}
             />
             <TextInput
               label="Časová zóna (IANA)"
@@ -1003,6 +1072,7 @@ select cron.schedule(
                 onClick={() => {
                   schedCreateHandlers.close();
                   setSchedForm({ ...INITIAL_SCHED_FORM });
+                  setSchedCreateCronPreset(inferCronPreset(INITIAL_SCHED_FORM.cron_expression));
                 }}
               >
                 Zrušit
@@ -1020,6 +1090,7 @@ select cron.schedule(
         onClose={() => {
           schedEditHandlers.close();
           setSchedEditTaskId(null);
+          setSchedEditCronPreset("custom");
         }}
         title="Upravit naplánovanou úlohu"
         size="lg"
@@ -1035,7 +1106,32 @@ select cron.schedule(
             <TextInput
               label="Cron (5 polí, jako v pg_cron)"
               value={schedEditForm.cron_expression}
-              onChange={(e) => setSchedEditForm({ ...schedEditForm, cron_expression: e.currentTarget.value })}
+              onChange={(e) => {
+                const value = e.currentTarget.value;
+                setSchedEditForm({ ...schedEditForm, cron_expression: value });
+                setSchedEditCronPreset(inferCronPreset(value));
+              }}
+              disabled={schedEditCronPreset !== "custom"}
+            />
+            <Select
+              label="Rychlé opakování"
+              description="Pro vlastní výraz ponechte „Vlastní cron“."
+              value={schedEditCronPreset}
+              onChange={(v) => {
+                const next = (v as CronPreset | null) ?? "custom";
+                setSchedEditCronPreset(next);
+                if (next !== "custom") {
+                  setSchedEditForm({ ...schedEditForm, cron_expression: cronPresetToExpression(next) });
+                }
+              }}
+              data={[
+                { value: "custom", label: "Vlastní cron" },
+                { value: "every5m", label: "Každých 5 minut" },
+                { value: "every10m", label: "Každých 10 minut" },
+                { value: "every15m", label: "Každých 15 minut" },
+                { value: "every30m", label: "Každých 30 minut" },
+                { value: "hourly", label: "Každou hodinu (v :00)" }
+              ]}
             />
             <TextInput
               label="Časová zóna (IANA)"
@@ -1084,6 +1180,7 @@ select cron.schedule(
                 onClick={() => {
                   schedEditHandlers.close();
                   setSchedEditTaskId(null);
+                  setSchedEditCronPreset("custom");
                 }}
               >
                 Zrušit

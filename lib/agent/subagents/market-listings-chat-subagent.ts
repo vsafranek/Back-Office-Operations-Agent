@@ -5,8 +5,11 @@ import type { MarketListing } from "@/lib/agent/tools/market-listing-model";
 import { inferMarketListingsInputFromQuestion } from "@/lib/agent/tools/market-listings-infer";
 import { fetchMarketListings } from "@/lib/agent/tools/market-listings-tool";
 import { recordUserMarketListingFinds } from "@/lib/market-listings/record-user-market-listing-finds";
+import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 
 const SUMMARY_LISTING_THRESHOLD = 12;
+const MAX_DETAIL_ITEMS = 25;
+const EXISTING_IDS_BATCH = 200;
 
 function listingToCard(l: MarketListing) {
   return {
@@ -15,8 +18,35 @@ function listingToCard(l: MarketListing) {
     location: l.location,
     source: l.source,
     url: l.url,
-    ...(l.image_url ? { image_url: l.image_url } : {})
+    ...(l.image_url ? { image_url: l.image_url } : {}),
+    ...(l.price_czk != null ? { price_czk: l.price_czk } : {})
   };
+}
+
+async function selectExistingListingIdsForUser(userId: string, externalIds: string[]): Promise<Set<string>> {
+  if (externalIds.length === 0) return new Set<string>();
+  try {
+    const supabase = getSupabaseAdminClient();
+    const existing = new Set<string>();
+    for (let i = 0; i < externalIds.length; i += EXISTING_IDS_BATCH) {
+      const chunk = externalIds.slice(i, i + EXISTING_IDS_BATCH);
+      const { data, error } = await supabase
+        .from("user_market_listing_finds")
+        .select("external_id")
+        .eq("user_id", userId)
+        .in("external_id", chunk);
+      if (error) throw error;
+      for (const row of data ?? []) {
+        if (typeof row.external_id === "string" && row.external_id.trim().length > 0) {
+          existing.add(row.external_id);
+        }
+      }
+    }
+    return existing;
+  } catch {
+    // If lookup fails (e.g. local env/cert issue), fail open and keep UX functional.
+    return new Set<string>();
+  }
 }
 
 /**
@@ -33,6 +63,11 @@ export async function runMarketListingsChatSubAgent(params: {
 
   const toolInput = inferMarketListingsInputFromQuestion(params.question);
   const listings = await fetchMarketListings(toolInput);
+  const existingIds = await selectExistingListingIdsForUser(
+    params.ctx.userId,
+    listings.map((l) => l.external_id).filter(Boolean)
+  );
+  const newListings = listings.filter((l) => !existingIds.has(l.external_id));
 
   void recordUserMarketListingFinds({
     userId: params.ctx.userId,
@@ -51,16 +86,24 @@ export async function runMarketListingsChatSubAgent(params: {
           "Nelze načíst žádné nabídky (API vrátilo prázdný seznam). Stručně vysvětli česky (např. filtry, dostupnost API, env Bezrealitky).",
           "Neuváděj DuckDuckGo. Karty zůstanou prázdné, dokud API nic nevrátí."
         ].join("\n\n")
-      : listings.length > SUMMARY_LISTING_THRESHOLD
+      : newListings.length === 0
+        ? [
+            `Dotaz uživatele: ${params.question}`,
+            "Parametry vyhledávání (fetchParams):",
+            JSON.stringify(toolInput, null, 2),
+            `Načteno ${listings.length} nabídek, ale po porovnání s DB nejsou žádné nové inzeráty.`,
+            "Úkol: odpověz česky stručně (2-4 věty), že nebyly nalezeny nové nabídky, a doporuč upřesnit filtry (lokalita, cena, dispozice)."
+          ].join("\n\n")
+        : newListings.length > SUMMARY_LISTING_THRESHOLD
         ? [
             `Dotaz uživatele: ${params.question}`,
             "Parametry (fetchParams) — stejné v pravém panelu po načtení:",
             JSON.stringify(toolInput, null, 2),
             `Počet nalezených nabídek: ${listings.length}.`,
+            `Počet NOVÝCH proti databázi uživatele: ${newListings.length}.`,
             "Data jsou výhradně z Sreality / Bezrealitky (interní fetch).",
-            "Úkol: napiš krátkou sumarizaci česky (2–4 krátké odstavce nebo odrážky): počet záznamů, jaké zdroje (sreality, bezrealitky) jsou v mixu, přibližný rozptyl cen nebo lokalit jen pokud je z ukázky zjevné.",
-            "NEVYPISUJ celý seznam inzerátů — uživatel je vidí v panelu vpravo jako karty.",
-            `První 3 titulky pro kontext: ${listings
+            "Úkol: napiš česky stručnou sumarizaci + krátký výpis prvních nových inzerátů (max 10 položek, odrážky: název, lokalita, cena pokud je).",
+            `První 5 NOVÝCH titulků pro kontext: ${newListings
               .slice(0, 3)
               .map((l) => l.title)
               .join(" · ")}`
@@ -69,10 +112,10 @@ export async function runMarketListingsChatSubAgent(params: {
             `Dotaz uživatele: ${params.question}`,
             "Parametry:",
             JSON.stringify(toolInput, null, 2),
-            `Nalezeno ${listings.length} nabídek (málo — popiš je jednotlivě stručně).`,
+            `Nalezeno ${listings.length} nabídek, z toho ${newListings.length} nových proti DB uživatele.`,
             "Data výhradně z interního API (Sreality/Bezrealitky).",
-            "Úkol česky: ke každé nabídce 1–2 věty (lokalita, zdroj). Odkaz do textu nedávej — je v panelu.",
-            JSON.stringify(listings, null, 2)
+            "Úkol česky: vypiš jednotlivě nové nabídky (max 25), stručně po bodech. Odkazy v textu neuváděj.",
+            JSON.stringify(newListings.slice(0, MAX_DETAIL_ITEMS), null, 2)
           ].join("\n\n");
 
   const reply = await generateUserFacingReply({
@@ -89,36 +132,19 @@ export async function runMarketListingsChatSubAgent(params: {
     userContent
   });
 
-  const artifactContent =
-    listings.length > 40
-      ? JSON.stringify(
-          {
-            count: listings.length,
-            fetchParams: toolInput,
-            sample: listings.slice(0, 5).map(listingToCard)
-          },
-          null,
-          2
-        )
-      : JSON.stringify(listings, null, 2);
-
   return {
     answer_text: reply.answer_text,
     confidence: reply.confidence,
     sources: citations,
-    generated_artifacts: [
-      {
-        type: "report",
-        label: "Market listings (metadata)",
-        content: artifactContent
-      }
-    ],
+    generated_artifacts: [],
     next_actions: reply.next_actions,
     dataPanel: {
       kind: "market_listings",
-      title: "Nabídky na trhu",
-      fetchParams: { ...toolInput } as Record<string, unknown>,
-      listings: []
+      title:
+        newListings.length > 0
+          ? `Nové nabídky (${newListings.length})`
+          : `Nové nabídky (0)`,
+      listings: newListings.map(listingToCard)
     }
   };
 }

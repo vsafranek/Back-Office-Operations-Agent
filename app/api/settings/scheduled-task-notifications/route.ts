@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     const { data, error } = await supabase
       .from("scheduled_task_run_notifications")
       .select(
-        "id, task_id, agent_run_id, status, summary, detail, read_at, created_at, user_scheduled_agent_tasks(title, cron_expression)"
+        "id, task_id, agent_run_id, status, summary, detail, panel_payload, read_at, created_at, user_scheduled_agent_tasks(title, cron_expression)"
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
@@ -54,6 +54,7 @@ export async function GET(request: Request) {
       status: string;
       summary: string;
       detail: string | null;
+      panel_payload: unknown | null;
       read_at: string | null;
       created_at: string;
       user_scheduled_agent_tasks: TaskEmbed | TaskEmbed[] | null;
@@ -77,6 +78,7 @@ export async function GET(request: Request) {
       status: r.status as "ok" | "error",
       summary: r.summary,
       detail: r.detail,
+      panel_payload: r.panel_payload,
       read_at: r.read_at,
       created_at: r.created_at
     };

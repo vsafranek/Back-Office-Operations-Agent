@@ -12,7 +12,9 @@ import {
   Stack,
   Text
 } from "@mantine/core";
+import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
 import { FormattedAssistantContent } from "@/components/agent/FormattedAssistantContent";
+import { agentAnswerSliceFromPersistPayload } from "@/lib/agent/conversation/agent-panel-persist";
 
 export type ScheduledTaskNotificationRow = {
   id: string;
@@ -23,6 +25,7 @@ export type ScheduledTaskNotificationRow = {
   status: "ok" | "error";
   summary: string;
   detail: string | null;
+  panel_payload?: unknown | null;
   read_at: string | null;
   created_at: string;
 };
@@ -61,15 +64,24 @@ export type ScheduledTaskRunResultCardProps = {
   notification: ScheduledTaskNotificationRow;
   onOpenFullMessage: () => void;
   onMarkRead?: () => void;
+  getAccessToken?: () => Promise<string | null>;
 };
 
 export function ScheduledTaskRunResultCard({
   notification: n,
   onOpenFullMessage,
-  onMarkRead
+  onMarkRead,
+  getAccessToken
 }: ScheduledTaskRunResultCardProps) {
   const { notice, agentReply } =
     n.status === "ok" ? splitCronOkNotification(n.summary, n.detail) : { notice: null, agentReply: null };
+  const panelSlice = n.panel_payload ? agentAnswerSliceFromPersistPayload(n.panel_payload) : null;
+  const panelBundles =
+    panelSlice?.dataPanelBundles && panelSlice.dataPanelBundles.length > 0
+      ? panelSlice.dataPanelBundles
+      : panelSlice?.dataPanel
+        ? [{ dataPanel: panelSlice.dataPanel, dataPanelDownloads: panelSlice.dataPanelDownloads }]
+        : [];
 
   return (
     <Paper withBorder p="sm" radius="md">
@@ -130,6 +142,21 @@ export function ScheduledTaskRunResultCard({
               Úloha doběhla — text odpovědi není k dispozici.
             </Text>
           )}
+          {panelBundles.length > 0 ? (
+            <Box>
+              <Divider label="Data z běhu (panely)" labelPosition="left" my="sm" />
+              <Stack gap="md">
+                {panelBundles.map((b, i) => (
+                  <AgentDataPanel
+                    key={`${n.id}-panel-${i}`}
+                    panel={b.dataPanel}
+                    dataPanelDownloads={b.dataPanelDownloads}
+                    getAccessToken={getAccessToken}
+                  />
+                ))}
+              </Stack>
+            </Box>
+          ) : null}
         </Stack>
       ) : (
         <Stack gap="xs">
@@ -165,11 +192,15 @@ export function ScheduledTaskRunResultCard({
 export function ScheduledTaskRunModalContent({
   status,
   summary,
-  detail
+  detail,
+  panelPayload,
+  getAccessToken
 }: {
   status: "ok" | "error";
   summary: string;
   detail: string | null;
+  panelPayload?: unknown | null;
+  getAccessToken?: () => Promise<string | null>;
 }) {
   if (status === "error") {
     const body = [summary, detail ?? ""].filter((s) => s.trim()).join("\n\n").trim() || "—";
@@ -183,6 +214,13 @@ export function ScheduledTaskRunModalContent({
   }
 
   const { notice, agentReply } = splitCronOkNotification(summary, detail);
+  const panelSlice = panelPayload ? agentAnswerSliceFromPersistPayload(panelPayload) : null;
+  const panelBundles =
+    panelSlice?.dataPanelBundles && panelSlice.dataPanelBundles.length > 0
+      ? panelSlice.dataPanelBundles
+      : panelSlice?.dataPanel
+        ? [{ dataPanel: panelSlice.dataPanel, dataPanelDownloads: panelSlice.dataPanelDownloads }]
+        : [];
   return (
     <ScrollArea h="75vh" type="auto" offsetScrollbars>
       <Stack gap="md" pr="sm" pb="md">
@@ -211,6 +249,21 @@ export function ScheduledTaskRunModalContent({
             Úloha doběhla — text odpovědi není k dispozici.
           </Text>
         )}
+        {panelBundles.length > 0 ? (
+          <Box>
+            <Divider label="Data z běhu (panely)" labelPosition="left" />
+            <Stack gap="md" mt="md">
+              {panelBundles.map((b, i) => (
+                <AgentDataPanel
+                  key={`modal-panel-${i}`}
+                  panel={b.dataPanel}
+                  dataPanelDownloads={b.dataPanelDownloads}
+                  getAccessToken={getAccessToken}
+                />
+              ))}
+            </Stack>
+          </Box>
+        ) : null}
       </Stack>
     </ScrollArea>
   );

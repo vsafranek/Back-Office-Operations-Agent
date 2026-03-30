@@ -15,7 +15,7 @@ import {
 import { useDisclosure } from "@mantine/hooks";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 const mainLinks = [
@@ -65,8 +65,23 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [mobileOpened, { toggle, close }] = useDisclosure(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
   const isAuth = pathname.startsWith("/auth");
   const isPublicLegal = pathname === "/privacy" || pathname === "/terms";
+  const isHome = pathname === "/";
+
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data }) => {
+      setSignedIn(Boolean(data.session));
+      setAuthReady(true);
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSignedIn(Boolean(session));
+      setAuthReady(true);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, [supabase]);
 
   async function logout() {
     await supabase.auth.signOut();
@@ -93,6 +108,15 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
           </Anchor>
           {children}
         </Box>
+      </Box>
+    );
+  }
+
+  // On homepage for logged-out users, keep a clean public layout without app chrome.
+  if (isHome && authReady && !signedIn) {
+    return (
+      <Box mih="100vh" bg="gray.0">
+        <Box>{children}</Box>
       </Box>
     );
   }

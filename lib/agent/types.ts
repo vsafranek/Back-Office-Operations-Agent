@@ -79,6 +79,7 @@ export type AgentMarketListingCard = {
   source: string;
   url: string;
   image_url?: string;
+  price_czk?: number | null;
 };
 
 /** Kandidát na příjemce e-mailu (CRM) — stejný tvar jako `EmailRecipientCandidate` na serveru, bez importu server modulu do klienta. */

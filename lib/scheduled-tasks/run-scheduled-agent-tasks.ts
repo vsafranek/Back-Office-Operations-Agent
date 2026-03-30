@@ -5,6 +5,10 @@ import { logger } from "@/lib/observability/logger";
 import { fetchMarketListings, mergeStoredMarketListingsParams } from "@/lib/agent/tools/market-listings-tool";
 import type { MarketListing } from "@/lib/agent/tools/market-listing-model";
 import { recordUserMarketListingFinds } from "@/lib/market-listings/record-user-market-listing-finds";
+import {
+  buildAgentPanelPersistPayload,
+  type AgentPanelPersistPayloadV1
+} from "@/lib/agent/conversation/agent-panel-persist";
 
 export type ScheduledTaskRunResult = {
   taskId: string;
@@ -42,6 +46,7 @@ async function insertNotification(
     status: "ok" | "error";
     summary: string;
     detail?: string | null;
+    panel_payload?: AgentPanelPersistPayloadV1 | null;
   }
 ) {
   const { error } = await supabase.from("scheduled_task_run_notifications").insert({
@@ -51,7 +56,8 @@ async function insertNotification(
     status: row.status,
     summary: row.summary.slice(0, 2000),
     /** Plný text odpovědi u úspěchu; u chyby krátká zpráva (API klient řeže délku). */
-    detail: row.detail != null ? row.detail.slice(0, 200_000) : null
+    detail: row.detail != null ? row.detail.slice(0, 200_000) : null,
+    panel_payload: row.panel_payload ?? null
   });
   if (error) {
     logger.warn("scheduled_task_notification_insert_failed", { taskId: row.task_id, message: error.message });
@@ -170,13 +176,15 @@ export async function runScheduledAgentTasksCycle(opts: {
       const full = answer.answer_text?.trim() ?? "";
       const summaryShort =
         full.length === 0 ? "Úloha doběhla." : full.length > 480 ? `${full.slice(0, 477)}…` : full;
+      const panelPayload = buildAgentPanelPersistPayload(answer);
       await insertNotification(supabase, {
         user_id: row.user_id,
         task_id: row.id,
         agent_run_id: answer.runId ?? null,
         status: "ok",
         summary: summaryShort,
-        detail: full.length > 0 ? full : null
+        detail: full.length > 0 ? full : null,
+        panel_payload: panelPayload
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : "unknown";

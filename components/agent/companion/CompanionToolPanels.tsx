@@ -1528,6 +1528,7 @@ export function MarketSidebarPanel({
                   fetchParams={panel.fetchParams}
                   initialListings={panel.listings}
                   getAccessToken={getAccessToken}
+                  enableClientFiltersAndPagination
                 />
               ))
             )}
@@ -1700,6 +1701,7 @@ export function ScheduledTasksNotificationsPanel({
     status: "ok" | "error";
     summary: string;
     detail: string | null;
+    panel_payload?: unknown | null;
   } | null>(null);
 
   async function load() {
@@ -1882,10 +1884,12 @@ export function ScheduledTasksNotificationsPanel({
                           createdAt: n.created_at,
                           status: n.status,
                           summary: n.summary,
-                          detail: n.detail
+                          detail: n.detail,
+                          panel_payload: n.panel_payload
                         })
                       }
                       onMarkRead={!n.read_at ? () => void markReadId(n.id) : undefined}
+                      getAccessToken={getAccessToken}
                     />
                   ))}
                 </Stack>
@@ -1917,6 +1921,8 @@ export function ScheduledTasksNotificationsPanel({
             status={cronMessageModal.status}
             summary={cronMessageModal.summary}
             detail={cronMessageModal.detail}
+            panelPayload={cronMessageModal.panel_payload}
+            getAccessToken={getAccessToken}
           />
         ) : null}
       </Modal>

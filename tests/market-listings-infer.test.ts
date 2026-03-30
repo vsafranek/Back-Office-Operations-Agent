@@ -41,6 +41,7 @@ describe("inferMarketListingsInputFromQuestion", () => {
   it("obec mimo tabulku → regionGeocodeHint (Nominatim ve fetchMarketListings)", () => {
     const i = inferMarketListingsInputFromQuestion("Byty k prodeji v Dačicích");
     expect(i.regionGeocodeHint).toBe("Dačicích");
+    expect(i.listingLocationNeedle).toBe("Dačicích");
     expect(i.bezrealitkyRegionOsmIds).toBeUndefined();
     expect(i.srealityLocalityRegionId).toBeUndefined();
   });
@@ -48,6 +49,7 @@ describe("inferMarketListingsInputFromQuestion", () => {
   it("Plzeň jako město neexpanduje na celý Plzeňský kraj (Nominatim + okres ve fetchMarketListings)", () => {
     const i = inferMarketListingsInputFromQuestion("Byty na prodej v Plzni");
     expect(i.regionGeocodeHint).toBe("Plzni");
+    expect(i.listingLocationNeedle).toBe("Plzni");
     expect(i.bezrealitkyRegionOsmIds).toBeUndefined();
     expect(i.srealityLocalityRegionId).toBeUndefined();
   });

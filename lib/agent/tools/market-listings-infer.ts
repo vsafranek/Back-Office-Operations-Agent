@@ -38,6 +38,7 @@ export function inferMarketListingsInputFromQuestion(question: string): FetchMar
 
   const region = resolveCzMarketRegionFromText(q);
   const regionGeocodeHint = region ? undefined : extractCzPlaceHintForGeocode(q) ?? undefined;
+  const listingLocationNeedle = region ? undefined : regionGeocodeHint;
 
   let location = "Česko";
   if (region) {
@@ -52,6 +53,7 @@ export function inferMarketListingsInputFromQuestion(question: string): FetchMar
     bezrealitkyOfferType,
     srealityOfferKind,
     ...(regionGeocodeHint ? { regionGeocodeHint } : {}),
+    ...(listingLocationNeedle ? { listingLocationNeedle } : {}),
     ...(region
       ? {
           bezrealitkyRegionOsmIds: [...region.bezrealitkyRegionOsmIds],

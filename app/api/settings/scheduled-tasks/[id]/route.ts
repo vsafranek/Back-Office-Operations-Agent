@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { requireAuthenticatedUser } from "@/lib/auth/server-auth";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
-import { validateCronExpression } from "@/lib/scheduled-tasks/cron-helpers";
+import { normalizeUserCronExpression, validateCronExpression } from "@/lib/scheduled-tasks/cron-helpers";
 
 export const runtime = "nodejs";
 
@@ -22,6 +22,8 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
     const { id } = await ctx.params;
     const body = await request.json();
     const parsed = patchSchema.parse(body);
+    const normalizedCronExpression =
+      parsed.cron_expression !== undefined ? normalizeUserCronExpression(parsed.cron_expression) : undefined;
 
     if (parsed.cron_expression !== undefined || parsed.timezone !== undefined) {
       const supabase = getSupabaseAdminClient();
@@ -36,7 +38,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
         return Response.json({ error: "Úloha nenalezena." }, { status: 404 });
       }
 
-      const expr = parsed.cron_expression ?? existing.cron_expression;
+      const expr = normalizedCronExpression ?? existing.cron_expression;
       const tz = parsed.timezone ?? existing.timezone;
       const cronCheck = validateCronExpression(expr, tz);
       if (!cronCheck.ok) {
@@ -46,7 +48,7 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
 
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (parsed.title !== undefined) updates.title = parsed.title.trim();
-    if (parsed.cron_expression !== undefined) updates.cron_expression = parsed.cron_expression.trim();
+    if (normalizedCronExpression !== undefined) updates.cron_expression = normalizedCronExpression;
     if (parsed.timezone !== undefined) updates.timezone = parsed.timezone.trim();
     if (parsed.system_prompt !== undefined) updates.system_prompt = parsed.system_prompt.trim();
     if (parsed.user_question !== undefined) updates.user_question = parsed.user_question.trim();

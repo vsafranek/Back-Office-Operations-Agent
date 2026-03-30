@@ -647,7 +647,7 @@ export function ChatCompanionSidebar({
                 style={{
                   flex: 1,
                   minHeight: 0,
-                  maxHeight: "min(calc(100dvh - 120px), 720px)"
+                  height: "100%"
                 }}
               >
                 <Stack gap="xs" pr="xs" pb="md">

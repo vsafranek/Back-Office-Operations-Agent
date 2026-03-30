@@ -2,6 +2,7 @@ import { fetchBezrealitkyListings } from "@/lib/integrations/bezrealitky-listing
 import { fetchSrealityListings } from "@/lib/integrations/sreality-listings";
 import { normCs } from "@/lib/integrations/cz-market-regions";
 import { resolveCzMarketLocationFromNominatim } from "@/lib/integrations/nominatim-cz-region";
+import { placeMatchesGeocodeSeed } from "@/lib/integrations/nominatim-cz-region";
 import { getEnv } from "@/lib/config/env";
 import { logger } from "@/lib/observability/logger";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
@@ -77,7 +78,11 @@ function filterListingsByLocationNeedle(listings: MarketListing[], needle: strin
   const n = needle?.trim();
   if (!n || n.length < 2) return listings;
   const nn = normCs(n);
-  return listings.filter((r) => normCs(`${r.title} ${r.location}`).includes(nn));
+  return listings.filter((r) => {
+    const haystack = normCs(`${r.title} ${r.location}`);
+    if (haystack.includes(nn)) return true;
+    return placeMatchesGeocodeSeed(n, r.location) || placeMatchesGeocodeSeed(n, r.title);
+  });
 }
 
 export const FetchMarketListingsOutputSchema = z.array(MarketListingSchema);

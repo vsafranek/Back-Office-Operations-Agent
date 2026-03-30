@@ -37,7 +37,7 @@ describe("runMarketListingsChatSubAgent", () => {
     vi.mocked(fetchMarketListings).mockResolvedValue([mockListing]);
   });
 
-  it("volá fetchMarketListings, dataPanel má fetchParams a prázdné listings pro UI", async () => {
+  it("volá fetchMarketListings a vrací panel s novými nabídkami", async () => {
     const run = vi.fn();
     const toolRunner = { run } as unknown as ToolRunner;
 
@@ -60,13 +60,9 @@ describe("runMarketListingsChatSubAgent", () => {
     expect(generateUserFacingReply).toHaveBeenCalled();
     expect(answer.dataPanel?.kind).toBe("market_listings");
     if (answer.dataPanel?.kind === "market_listings") {
-      expect(answer.dataPanel.fetchParams).toEqual(
-        expect.objectContaining({
-          location: "Praha",
-          sources: ["sreality", "bezrealitky"]
-        })
-      );
-      expect(answer.dataPanel.listings).toHaveLength(0);
+      expect(answer.dataPanel.title).toContain("Nové nabídky");
+      expect(answer.dataPanel.listings).toHaveLength(1);
+      expect(answer.dataPanel.listings[0]?.external_id).toBe("sreality:x");
     }
   });
 });

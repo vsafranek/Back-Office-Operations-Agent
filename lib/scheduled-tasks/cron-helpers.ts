@@ -1,11 +1,23 @@
 import { CronExpressionParser } from "cron-parser";
 
 /**
+ * Opraví běžné překlepy při zadání cronu.
+ * Příklady: "star-space-slash-10" nebo "star-slash-space-10" ve
+ * výrazu pro minuty převede na správný tvar s intervalem.
+ */
+export function normalizeUserCronExpression(expression: string): string {
+  return expression
+    .trim()
+    .replace(/\*\s*\/\s*(\d+)/g, "*/$1")
+    .replace(/\s+/g, " ");
+}
+
+/**
  * pg_cron / Unix cron: minuta hodina den_měsíce měsíc den_týdne (5 polí).
  * cron-parser očekává 6 polí: vteřina minuta hodina … — u 5 polí doplníme vteřinu 0.
  */
 export function normalizeCronExpressionForParser(expression: string): string {
-  const atoms = expression.trim().split(/\s+/).filter(Boolean);
+  const atoms = normalizeUserCronExpression(expression).split(/\s+/).filter(Boolean);
   if (atoms.length === 5) {
     return `0 ${atoms.join(" ")}`;
   }
