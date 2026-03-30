@@ -49,15 +49,27 @@ function createAzureOpenAIClient(env: AppEnv): OpenAI {
 function normalizeMessageContentToString(content: unknown): string {
   if (content == null) return "";
   if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  const pieces: string[] = [];
-  for (const part of content) {
-    if (part == null || typeof part !== "object") continue;
-    const o = part as Record<string, unknown>;
-    if (typeof o.text === "string") pieces.push(o.text);
-    else if (typeof o.refusal === "string") pieces.push(o.refusal);
+  if (Array.isArray(content)) {
+    const pieces: string[] = [];
+    for (const part of content) {
+      if (part == null) continue;
+      if (typeof part === "string") {
+        pieces.push(part);
+        continue;
+      }
+      if (typeof part !== "object") continue;
+      const o = part as Record<string, unknown>;
+      if (typeof o.text === "string") pieces.push(o.text);
+      else if (typeof o.refusal === "string") pieces.push(o.refusal);
+    }
+    return pieces.join("");
   }
-  return pieces.join("");
+  if (typeof content === "object") {
+    const o = content as Record<string, unknown>;
+    if (typeof o.text === "string") return o.text;
+    if (typeof o.refusal === "string") return o.refusal;
+  }
+  return "";
 }
 
 function extractCompletionText(completion: ChatCompletion): string {
@@ -68,6 +80,13 @@ function extractCompletionText(completion: ChatCompletion): string {
   const refusal = message?.refusal;
   if (typeof refusal === "string" && refusal.trim()) {
     return refusal.trim();
+  }
+  const raw = message as unknown as Record<string, unknown> | undefined;
+  /** Některé brány vrací odmítnutí jen u části `content` typu refusal. */
+  const nested = raw?.content;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    const nestedText = normalizeMessageContentToString(nested).trim();
+    if (nestedText) return nestedText;
   }
   return "";
 }
@@ -108,11 +127,16 @@ export async function generateWithAzureProxy(params: {
 
       const text = extractCompletionText(completion);
       if (!text) {
-        const fr = completion.choices[0]?.finish_reason ?? null;
+        const ch0 = completion.choices[0];
+        const msg = ch0?.message as unknown as Record<string, unknown> | undefined;
+        const fr = ch0?.finish_reason ?? null;
         logger.warn("azure_proxy_empty_content", {
           runId: params.runId,
           finishReason: fr,
-          choiceCount: completion.choices?.length ?? 0
+          choiceCount: completion.choices?.length ?? 0,
+          contentType: msg?.content === null ? "null" : typeof msg?.content,
+          hasToolCalls: Array.isArray(msg?.tool_calls) && (msg.tool_calls as unknown[]).length > 0,
+          messageKeys: msg && typeof msg === "object" ? Object.keys(msg) : []
         });
         throw new Error("OpenAI chat completion did not include message content.");
       }

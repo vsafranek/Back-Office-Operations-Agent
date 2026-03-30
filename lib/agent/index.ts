@@ -9,6 +9,7 @@ import { logger } from "@/lib/observability/logger";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 import { WEEKLY_REPORT_DEFAULT_SLIDE_COUNT } from "@/lib/agent/defaults";
 import { runAgentOrchestrator } from "@/lib/agent/orchestrator/agent-orchestrator";
+import type { FetchMarketListingsInput } from "@/lib/agent/tools/market-listings-tool";
 import { getMcpToolRunnerForAgent } from "@/lib/agent/mcp-tools/tool-registry";
 import type { AgentRunProgress } from "@/lib/agent/types";
 import { splitCompoundUserTasks } from "@/lib/agent/llm/compound-question-split";
@@ -58,6 +59,11 @@ export async function runBackOfficeAgent(input: {
    * Běh z uložené cron úlohy — klasifikátor nesmí zvolit `scheduled_agent_task` (jinak by se zacyklil návrh úlohy).
    */
   scheduledTaskExecution?: boolean;
+  /**
+   * U běhu naplánované úlohy s `market_listings`: předej uložené fetch parametry, aby market subagent neinferoval
+   * z řetězce obsahujícího systémový prefix (např. „v infrastruktuře“).
+   */
+  marketListingsFetchParamsOverride?: FetchMarketListingsInput | null;
   options?: {
     presentation?: {
       slideCount?: number;
@@ -128,8 +134,21 @@ export async function runBackOfficeAgent(input: {
           trace: traceRef
         });
 
+  /**
+   * Velký kontext z cronu (prefix + desítky řádků nabídek) přeteče kontext LLM — Azure pak vrátí prázdnou zprávu.
+   * Zkrátíme řetězec pro všechny kroky (klasifikace, orchestrátor, subagenti); u market_listings zůstávají přesné fetch parametry.
+   */
+  const SCHEDULED_AGENT_QUESTION_MAX_CHARS = 22_000;
+
+  function capQuestionForScheduledLlm(q: string): string {
+    if (!input.scheduledTaskExecution || q.length <= SCHEDULED_AGENT_QUESTION_MAX_CHARS) return q;
+    const note = `\n\n---\n[Část dotazu byla zkrácena z ${q.length} na ${SCHEDULED_AGENT_QUESTION_MAX_CHARS} znaků kvůli limitu kontextu u naplánované úlohy. Nabídky bere subagent z interního API podle uložených parametrů.]`;
+    const budget = Math.max(512, SCHEDULED_AGENT_QUESTION_MAX_CHARS - note.length);
+    return q.slice(0, budget) + note;
+  }
+
   const effectiveTasks = taskSeeds.map((t) =>
-    prefix ? `${prefix}\n\n--- Dotaz / šablona úlohy ---\n${t}` : t
+    capQuestionForScheduledLlm(prefix ? `${prefix}\n\n--- Dotaz / šablona úlohy ---\n${t}` : t)
   );
 
   let classified: ClassifiedAgentIntent;
@@ -251,7 +270,8 @@ export async function runBackOfficeAgent(input: {
       trace: handle.trace,
       traceDispatchId: dispatchId,
       toolRunner,
-      onAnswerDelta: input.onAnswerDelta
+      onAnswerDelta: input.onAnswerDelta,
+      marketListingsFetchParamsOverride: input.marketListingsFetchParamsOverride ?? null
     });
   } else {
     await emit(`Rozloženo na ${effectiveTasks.length} podotázky…`);
@@ -342,7 +362,8 @@ export async function runBackOfficeAgent(input: {
         trace: handle.trace,
         traceDispatchId: partDispatchId,
         toolRunner,
-        onAnswerDelta: undefined
+        onAnswerDelta: undefined,
+        marketListingsFetchParamsOverride: input.marketListingsFetchParamsOverride ?? null
       });
 
       const labelRaw = taskSeeds[i] ?? eff;

@@ -5,11 +5,23 @@ import type { z } from "zod";
 
 type FetchMarketListingsInput = z.infer<typeof FetchMarketListingsInputSchema>;
 
+/** Oddělovač z `runBackOfficeAgent` u naplánovaných úloh — text před ním obsahuje systémový prefix („v infrastruktuře“ apod.). */
+export const MARKET_LISTINGS_INFER_QUESTION_SLICE_MARKER = "--- Dotaz / šablona úlohy ---";
+
+/**
+ * Pro odhad fetch parametrů použije jen část za šablonou naplánované úlohy, aby regex lokality nebral text z prefixu.
+ */
+export function sliceQuestionForMarketListingInfer(question: string): string {
+  const idx = question.indexOf(MARKET_LISTINGS_INFER_QUESTION_SLICE_MARKER);
+  if (idx === -1) return question;
+  return question.slice(idx + MARKET_LISTINGS_INFER_QUESTION_SLICE_MARKER.length).trimStart();
+}
+
 /**
  * Z přirozeného jazyka odvodí vstup pro fetchMarketListings (chatová větev bez LLM v args nástroje).
  */
 export function inferMarketListingsInputFromQuestion(question: string): FetchMarketListingsInput {
-  const q = question.trim();
+  const q = sliceQuestionForMarketListingInfer(question).trim();
   const low = q.toLowerCase();
 
   const mentionsBez = /bezrealitk|bez\s*realit/i.test(low);

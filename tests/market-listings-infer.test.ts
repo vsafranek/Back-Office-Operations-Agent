@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { inferMarketListingsInputFromQuestion } from "@/lib/agent/tools/market-listings-infer";
+import {
+  inferMarketListingsInputFromQuestion,
+  MARKET_LISTINGS_INFER_QUESTION_SLICE_MARKER
+} from "@/lib/agent/tools/market-listings-infer";
 
 describe("inferMarketListingsInputFromQuestion", () => {
   it("jen Bezrealitky, pronájem, Plzeňský kraj", () => {
@@ -52,5 +55,21 @@ describe("inferMarketListingsInputFromQuestion", () => {
     expect(i.listingLocationNeedle).toBe("Plzni");
     expect(i.bezrealitkyRegionOsmIds).toBeUndefined();
     expect(i.srealityLocalityRegionId).toBeUndefined();
+  });
+
+  it("přeskočí falešnou lokalitu „infrastruktuře“ z běžné věty a najde další „v …“", () => {
+    const i = inferMarketListingsInputFromQuestion(
+      "Cron běží v infrastruktuře. Byty na prodej v Plzni"
+    );
+    expect(i.regionGeocodeHint).toBe("Plzni");
+    expect(i.listingLocationNeedle).toBe("Plzni");
+  });
+
+  it(`bere jen text za „${MARKET_LISTINGS_INFER_QUESTION_SLICE_MARKER}“ (prefix naplánované úlohy)`, () => {
+    const i = inferMarketListingsInputFromQuestion(
+      `[Jednorázový běh — cron v infrastruktuře, ne ty.]\n\n${MARKET_LISTINGS_INFER_QUESTION_SLICE_MARKER}\nNabídky v Plzni`
+    );
+    expect(i.regionGeocodeHint).toBe("Plzni");
+    expect(i.location).toBe("Česko");
   });
 });

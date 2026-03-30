@@ -3,7 +3,11 @@ import type { ToolRunner } from "@/lib/agent/mcp-tools/tool-runner";
 import { generateUserFacingReply } from "@/lib/agent/llm/user-facing-reply";
 import type { MarketListing } from "@/lib/agent/tools/market-listing-model";
 import { inferMarketListingsInputFromQuestion } from "@/lib/agent/tools/market-listings-infer";
-import { fetchMarketListings } from "@/lib/agent/tools/market-listings-tool";
+import {
+  FetchMarketListingsInputSchema,
+  fetchMarketListings,
+  type FetchMarketListingsInput
+} from "@/lib/agent/tools/market-listings-tool";
 import { recordUserMarketListingFinds } from "@/lib/market-listings/record-user-market-listing-finds";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 
@@ -62,9 +66,13 @@ export async function runMarketListingsChatSubAgent(params: {
   ctx: AgentToolContext;
   question: string;
   onAnswerDelta?: (chunk: string) => void | Promise<void>;
+  /** Naplánovaná úloha: přesně `market_listings_params` z DB, aby druhý fetch nebyl z rozbitého inferenceru. */
+  fetchParamsOverride?: FetchMarketListingsInput;
 }): Promise<AgentAnswer> {
   void params.toolRunner;
-  const toolInput = inferMarketListingsInputFromQuestion(params.question);
+  const toolInput = params.fetchParamsOverride
+    ? FetchMarketListingsInputSchema.parse(params.fetchParamsOverride)
+    : inferMarketListingsInputFromQuestion(params.question);
   const listings = await fetchMarketListings(toolInput);
   const existingIds = await selectExistingListingIdsForUser(
     params.ctx.userId,

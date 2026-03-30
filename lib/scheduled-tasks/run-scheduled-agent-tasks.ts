@@ -50,10 +50,15 @@ function parseScheduledExecutionIntentMarker(systemPrompt: string): {
 }
 
 function formatListingsCronContext(listings: MarketListing[]): string {
-  const maxLines = 35;
+  const maxLines = 18;
+  const maxChars = 9_500;
   const lines = listings.slice(0, maxLines).map((l) => `- ${l.title} | ${l.source} | ${l.url}`);
   const more = listings.length > maxLines ? `\n… a dalších ${listings.length - maxLines} nabídek.` : "";
-  return `Počet stažených nabídek v tomto běhu: ${listings.length}\n${lines.join("\n")}${more}`;
+  let body = `Počet stažených nabídek v tomto běhu: ${listings.length}\n${lines.join("\n")}${more}`;
+  if (body.length > maxChars) {
+    body = `${body.slice(0, maxChars)}\n… (výpis zkrácen — celkem ${listings.length} nabídek; LLM má k dispozici i přesný fetch v subagentovi.)`;
+  }
+  return body;
 }
 
 async function insertNotification(
@@ -174,7 +179,8 @@ export async function runScheduledAgentTasksCycle(opts: {
         question: questionWithContext,
         agentId: row.agent_id === "thinking-orchestrator" ? "thinking-orchestrator" : "basic",
         orchestratorQuestionPrefix: prefix,
-        scheduledTaskExecution: true
+        scheduledTaskExecution: true,
+        marketListingsFetchParamsOverride: mergedParams
       });
 
       if (opts.updateLastRunAtAfterSuccess === true) {

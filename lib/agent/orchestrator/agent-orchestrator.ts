@@ -12,6 +12,7 @@ import { runScheduledTaskProposalSubAgent } from "@/lib/agent/subagents/schedule
 import { runCasualChatSubAgent } from "@/lib/agent/subagents/casual-chat-subagent";
 import { runPresentationFromRowsSubAgent } from "@/lib/agent/subagents/presentation-subagent";
 import { parseTaskCapabilities } from "@/lib/agent/llm/task-capabilities";
+import type { FetchMarketListingsInput } from "@/lib/agent/tools/market-listings-tool";
 
 export type AgentIntent =
   | "analytics"
@@ -145,6 +146,8 @@ export async function runAgentOrchestrator(params: {
   traceDispatchId?: string | null;
   toolRunner: ToolRunner;
   onAnswerDelta?: (chunk: string) => void | Promise<void>;
+  /** Cron / uložená úloha: přesné parametry stažení místo inferenceru z celé otázky (prefix „v infrastruktuře“ apod.). */
+  marketListingsFetchParamsOverride?: FetchMarketListingsInput | null;
 }): Promise<AgentAnswer> {
   const { toolRunner } = params;
 
@@ -232,7 +235,8 @@ export async function runAgentOrchestrator(params: {
         toolRunner,
         ctx,
         question: params.question,
-        onAnswerDelta: params.onAnswerDelta
+        onAnswerDelta: params.onAnswerDelta,
+        fetchParamsOverride: params.marketListingsFetchParamsOverride ?? undefined
       });
     } else if (step === "market_listings_presentation") {
       const rows = composedAnswer ? extractRowsForPresentation(composedAnswer) : [];
