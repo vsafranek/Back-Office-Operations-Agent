@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ViewingEmailRecipientCandidate } from "@/lib/agent/types";
 import { ensureViewingEmailSignOff, stripViewingEmailSignOff } from "@/lib/agent/viewing-email-sign-off";
 
@@ -63,6 +63,11 @@ export function ViewingEmailDraftPanel({
   const [confirmSend, setConfirmSend] = useState(false);
   const [sent, setSent] = useState<{ messageId: string | null } | null>(null);
 
+  /** Po začátku úprav v textarea už nespouštět strip/ensure na každý echo z parentu (kazí kurzor a podpis). */
+  const userEditedBodyRef = useRef(false);
+  const bodyRef = useRef(body);
+  bodyRef.current = body;
+
   const runKey = `${conversationId ?? ""}:${agentRunId ?? ""}`;
   useEffect(() => {
     let initialTo = (draft.to ?? "").trim();
@@ -88,18 +93,28 @@ export function ViewingEmailDraftPanel({
       if (UUID_RE.test(id) && !lids.includes(id)) lids.push(id);
     }
     setLeadIds(lids);
+    userEditedBodyRef.current = false;
     // Panel má `key` podle běhu — synchronizace stavu jen při novém návrhu z agenta.
   }, [runKey]);
 
   const signName = senderDisplayName?.trim() ?? "";
 
   useEffect(() => {
-    const raw = draft.body;
-    const next =
+    const raw = draft.body ?? "";
+    const normalized =
       signName.length > 0
         ? ensureViewingEmailSignOff(stripViewingEmailSignOff(raw, signName), signName)
         : raw;
-    setBody(next);
+
+    if (userEditedBodyRef.current) {
+      // Stejný text jako v poli → jen echo z dashboardu po lokální změně; neresynchronizovat (znovu by se doplnil podpis).
+      if (raw === bodyRef.current) return;
+      // Jiný obsah zvenku (např. řádek „Termín prohlídky“ z kalendáře) → aplikovat včetně sjednocení podpisu.
+      setBody(normalized);
+      return;
+    }
+
+    setBody(normalized);
   }, [draft.body, signName]);
 
   const displayName = senderDisplayName?.trim() || "přihlášeného uživatele";
@@ -373,6 +388,7 @@ export function ViewingEmailDraftPanel({
           <textarea
             value={body}
             onChange={(e) => {
+              userEditedBodyRef.current = true;
               const v = e.target.value;
               setBody(v);
               onBodyChange?.(v);

@@ -22,22 +22,40 @@ type Draft = Extract<AgentDataPanel, { kind: "scheduled_task_confirmation" }>["d
 const SYNC_SAVED = "1";
 const SYNC_CANCELLED = "0";
 
-const SCHEDULED_TASK_UI_SYNC = "scheduled-task-ui-sync";
+/** Sdílený název události — importujte v panelech, které po uložení obnovují data. */
+export const SCHEDULED_TASK_UI_SYNC_EVENT = "scheduled-task-ui-sync";
 
-function dispatchScheduledTaskUiSync(storageKey: string) {
+export function scheduledTaskUiStorageKey(syncKey: string): string {
+  return `scheduled_task_ui:${syncKey.trim()}`;
+}
+
+/** Klíč sessionStorage pro daný běh chatu (`runId`). */
+export function isScheduledTaskUiSavedInSession(storageKey: string | null): boolean {
+  if (!storageKey || typeof window === "undefined") return false;
+  return sessionStorage.getItem(storageKey) === SYNC_SAVED;
+}
+
+function dispatchScheduledTaskUiSync(storageKey: string, taskId?: string | null) {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent(SCHEDULED_TASK_UI_SYNC, { detail: { key: storageKey } }));
+  window.dispatchEvent(
+    new CustomEvent(SCHEDULED_TASK_UI_SYNC_EVENT, {
+      detail: { key: storageKey, taskId: taskId && taskId.length > 0 ? taskId : undefined }
+    })
+  );
 }
 
 export function ScheduledTaskConfirmationPanel({
   draft,
   getAccessToken,
-  syncKey
+  syncKey,
+  onSaved
 }: {
   draft: Draft;
   getAccessToken?: () => Promise<string | null>;
   /** Sdílí stav Potvrzeno / Zrušeno mezi chatovou sekcí a panelem Úlohy (cron), např. runId odpovědi. */
   syncKey?: string | null;
+  /** Po úspěšném POST (např. obnovení seznamu úloh a zavření návrhu v postranním panelu). */
+  onSaved?: (info: { taskId: string }) => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,9 +63,7 @@ export function ScheduledTaskConfirmationPanel({
   const [cancelled, setCancelled] = useState(false);
 
   const storageKey =
-    syncKey && typeof syncKey === "string" && syncKey.trim().length > 0
-      ? `scheduled_task_ui:${syncKey.trim()}`
-      : null;
+    syncKey && typeof syncKey === "string" && syncKey.trim().length > 0 ? scheduledTaskUiStorageKey(syncKey) : null;
 
   useEffect(() => {
     if (!storageKey || typeof window === "undefined") return;
@@ -66,8 +82,8 @@ export function ScheduledTaskConfirmationPanel({
       const key = (e as CustomEvent<{ key?: string }>).detail?.key;
       if (key === storageKey) read();
     };
-    window.addEventListener(SCHEDULED_TASK_UI_SYNC, onSync as EventListener);
-    return () => window.removeEventListener(SCHEDULED_TASK_UI_SYNC, onSync as EventListener);
+    window.addEventListener(SCHEDULED_TASK_UI_SYNC_EVENT, onSync as EventListener);
+    return () => window.removeEventListener(SCHEDULED_TASK_UI_SYNC_EVENT, onSync as EventListener);
   }, [storageKey]);
 
   async function confirm() {
@@ -97,15 +113,19 @@ export function ScheduledTaskConfirmationPanel({
           ...(draft.market_listings_params != null ? { market_listings_params: draft.market_listings_params } : {})
         })
       });
-      const payload = (await res.json()) as { error?: string };
+      const payload = (await res.json()) as { error?: string; task?: { id?: string } };
       if (!res.ok) {
         setError(payload.error ?? `Chyba ${res.status}`);
         setLoading(false);
         return;
       }
+      const taskId = typeof payload.task?.id === "string" ? payload.task.id : null;
       if (storageKey && typeof window !== "undefined") {
         sessionStorage.setItem(storageKey, SYNC_SAVED);
-        dispatchScheduledTaskUiSync(storageKey);
+        dispatchScheduledTaskUiSync(storageKey, taskId);
+      }
+      if (taskId) {
+        onSaved?.({ taskId });
       }
       setSaved(true);
     } catch (e) {

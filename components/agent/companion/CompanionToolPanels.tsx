@@ -44,7 +44,12 @@ import {
   type ScheduledTaskNotificationRow
 } from "@/components/agent/ScheduledTaskRunResultCard";
 import { AgentDataPanel } from "@/components/agent/AgentDataPanel";
-import { ScheduledTaskConfirmationPanel } from "@/components/agent/ScheduledTaskConfirmationPanel";
+import {
+  ScheduledTaskConfirmationPanel,
+  SCHEDULED_TASK_UI_SYNC_EVENT,
+  scheduledTaskUiStorageKey,
+  isScheduledTaskUiSavedInSession
+} from "@/components/agent/ScheduledTaskConfirmationPanel";
 import { ViewingEmailDraftPanel } from "@/components/agent/ViewingEmailDraftPanel";
 import { MarketListingsDataPanelSection } from "@/components/agent/MarketListingsDataPanelSection";
 import { MarketListingCardView } from "@/components/agent/MarketListingCardView";
@@ -1897,6 +1902,19 @@ export function MarketSidebarPanel({
 
 export type { ScheduledTaskNotificationRow };
 
+type SavedScheduledTaskRow = {
+  id: string;
+  title: string;
+  cron_expression: string;
+  timezone: string;
+  agent_id: string;
+  enabled: boolean;
+  last_run_at: string | null;
+  created_at: string;
+  run_count?: number;
+  last_event_at?: string | null;
+};
+
 /** Přehled běhů naplánovaných úloh (cron) a označení přečtení. */
 export function ScheduledTasksNotificationsPanel({
   getAccessToken,
@@ -1916,6 +1934,10 @@ export function ScheduledTasksNotificationsPanel({
   const [err, setErr] = useState<string | null>(null);
   /** Počet řádků v `user_scheduled_agent_tasks` — ověření, že úloha z Nastavení je v DB. */
   const [savedTaskCount, setSavedTaskCount] = useState<number | null>(null);
+  const [savedTasks, setSavedTasks] = useState<SavedScheduledTaskRow[]>([]);
+  const [expandedActiveTaskIds, setExpandedActiveTaskIds] = useState<string[]>([]);
+  /** Po úspěšném uložení návrhu skryjeme fialový formulář a zobrazíme aktualizovaný seznam úloh. */
+  const [confirmPanelDismissed, setConfirmPanelDismissed] = useState(false);
   /** Celý text odpovědi / chyby z cron běhu (modal — bez ořezu výšky panelu). */
   const [cronMessageModal, setCronMessageModal] = useState<{
     taskTitle: string;
@@ -1929,7 +1951,12 @@ export function ScheduledTasksNotificationsPanel({
   } | null>(null);
   const [selectedRunByTask, setSelectedRunByTask] = useState<Record<string, string>>({});
 
-  async function load() {
+  const pendingStorageKey =
+    pendingTaskSyncKey && pendingTaskSyncKey.trim().length > 0
+      ? scheduledTaskUiStorageKey(pendingTaskSyncKey)
+      : null;
+
+  const load = useCallback(async () => {
     setErr(null);
     const token = await getAccessToken();
     if (!token) {
@@ -1945,10 +1972,13 @@ export function ScheduledTasksNotificationsPanel({
     ]);
 
     if (tasksRes.ok) {
-      const tasksPayload = (await tasksRes.json()) as { tasks?: unknown[] };
-      setSavedTaskCount(Array.isArray(tasksPayload.tasks) ? tasksPayload.tasks.length : 0);
+      const tasksPayload = (await tasksRes.json()) as { tasks?: SavedScheduledTaskRow[] };
+      const list = Array.isArray(tasksPayload.tasks) ? tasksPayload.tasks : [];
+      setSavedTasks(list);
+      setSavedTaskCount(list.length);
     } else {
       setSavedTaskCount(null);
+      setSavedTasks([]);
     }
 
     const payload = (await notifRes.json()) as {
@@ -1964,11 +1994,43 @@ export function ScheduledTasksNotificationsPanel({
     setItems(payload.notifications ?? []);
     onLoaded?.(payload.unread_count ?? 0);
     setLoading(false);
-  }
+  }, [getAccessToken, onLoaded]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
+
+  const pendingDraftKey = useMemo(() => {
+    if (!pendingTaskDraft) return "";
+    return `${pendingTaskSyncKey ?? "norun"}:${pendingTaskDraft.title}:${pendingTaskDraft.cron_expression}`;
+  }, [pendingTaskDraft, pendingTaskSyncKey]);
+
+  useEffect(() => {
+    setConfirmPanelDismissed(false);
+  }, [pendingDraftKey]);
+
+  useEffect(() => {
+    if (!pendingStorageKey) return;
+    const readDismissed = () => {
+      setConfirmPanelDismissed(isScheduledTaskUiSavedInSession(pendingStorageKey));
+    };
+    readDismissed();
+    const onSync = (e: Event) => {
+      const d = (e as CustomEvent<{ key?: string; taskId?: string }>).detail;
+      if (d?.key !== pendingStorageKey) return;
+      readDismissed();
+      if (!isScheduledTaskUiSavedInSession(pendingStorageKey)) return;
+      void (async () => {
+        await load();
+        const tid = d.taskId;
+        if (tid) {
+          setExpandedActiveTaskIds((prev) => (prev.includes(tid) ? prev : [tid, ...prev]));
+        }
+      })();
+    };
+    window.addEventListener(SCHEDULED_TASK_UI_SYNC_EVENT, onSync as EventListener);
+    return () => window.removeEventListener(SCHEDULED_TASK_UI_SYNC_EVENT, onSync as EventListener);
+  }, [pendingStorageKey, load]);
 
   async function markAllRead() {
     const token = await getAccessToken();
@@ -2002,8 +2064,10 @@ export function ScheduledTasksNotificationsPanel({
     return [...m.entries()];
   }, [items]);
 
+  const showPendingConfirmation = pendingTaskDraft != null && !confirmPanelDismissed;
+
   const pendingBlock =
-    pendingTaskDraft != null ? (
+    showPendingConfirmation && pendingTaskDraft ? (
       <Stack gap="xs">
         <Text size="sm" fw={600}>
           Návrh úlohy (čeká na uložení)
@@ -2016,8 +2080,62 @@ export function ScheduledTasksNotificationsPanel({
           draft={pendingTaskDraft}
           getAccessToken={getAccessToken}
           syncKey={pendingTaskSyncKey}
+          onSaved={({ taskId }) => {
+            setConfirmPanelDismissed(true);
+            void (async () => {
+              await load();
+              setExpandedActiveTaskIds((prev) => (prev.includes(taskId) ? prev : [taskId, ...prev]));
+            })();
+          }}
         />
-        <Divider label="Historie běhů" labelPosition="center" />
+      </Stack>
+    ) : null;
+
+  const activeTasksSection =
+    savedTasks.length > 0 ? (
+      <Stack gap="xs">
+        <Text size="xs" fw={600} tt="uppercase" c="dimmed">
+          Aktivní naplánované úlohy
+        </Text>
+        <Accordion
+          variant="separated"
+          multiple
+          value={expandedActiveTaskIds}
+          onChange={setExpandedActiveTaskIds}
+        >
+          {savedTasks.map((t) => (
+            <Accordion.Item key={t.id} value={t.id}>
+              <Accordion.Control>
+                <Group justify="space-between" wrap="nowrap" gap="xs">
+                  <Text size="sm" fw={600} lineClamp={2} style={{ flex: 1 }}>
+                    {t.title}
+                  </Text>
+                  <Badge size="sm" variant="light" color={t.enabled ? "teal" : "gray"}>
+                    {t.enabled ? "Zapnuto" : "Vypnuto"}
+                  </Badge>
+                </Group>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap={6}>
+                  <Text size="xs" c="dimmed">
+                    Cron: <Code>{t.cron_expression}</Code> · {t.timezone}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    Profil agenta: {t.agent_id}
+                  </Text>
+                  {t.last_run_at ? (
+                    <Text size="xs" c="dimmed">
+                      Poslední běh (účet): {new Date(t.last_run_at).toLocaleString("cs-CZ")}
+                    </Text>
+                  ) : null}
+                  <Anchor component={Link} href="/settings" size="xs" fw={500} target="_blank">
+                    Upravit v Nastavení →
+                  </Anchor>
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+          ))}
+        </Accordion>
       </Stack>
     ) : null;
 
@@ -2025,6 +2143,7 @@ export function ScheduledTasksNotificationsPanel({
     return (
       <Stack gap="sm">
         {pendingBlock}
+        {activeTasksSection}
         <Skeleton h={20} />
         <Skeleton h={60} />
         <Skeleton h={60} />
@@ -2040,6 +2159,10 @@ export function ScheduledTasksNotificationsPanel({
         <strong>shrnutí (notifikace)</strong> je zvlášť od <strong>plné odpovědi agenta</strong>, pokud je text delší než
         stručný náhled. Úlohy spravujete v Nastavení.
       </Text>
+      {activeTasksSection}
+      {savedTasks.length > 0 ? (
+        <Divider label="Historie běhů z cronu" labelPosition="center" />
+      ) : null}
       <Group justify="space-between" wrap="nowrap">
         <Button size="compact-xs" variant="light" onClick={() => void load()}>
           Obnovit
