@@ -25,6 +25,7 @@ export type AgentIntent =
 
 type PlannedStep =
   | "analytics"
+  | "analytics_presentation"
   | "calendar_email"
   | "presentation"
   | "weekly_report"
@@ -34,17 +35,92 @@ type PlannedStep =
   | "scheduled_agent_task"
   | "casual_chat";
 
+type InitialPlan = {
+  steps: PlannedStep[];
+};
+
 function planSteps(params: {
   intent: AgentIntent;
   question: string;
 }): PlannedStep[] {
   const caps = parseTaskCapabilities(params.question);
+  if (params.intent === "analytics") {
+    return caps.needsPresentation
+      ? ["analytics", "analytics_presentation"]
+      : ["analytics"];
+  }
   if (params.intent === "market_listings") {
     return caps.needsPresentation
       ? ["market_listings", "market_listings_presentation"]
       : ["market_listings"];
   }
   return [params.intent];
+}
+
+function buildInitialPlan(params: { intent: AgentIntent; question: string }): InitialPlan {
+  return { steps: planSteps(params) };
+}
+
+function extractRowsForPresentation(answer: AgentAnswer): Record<string, unknown>[] {
+  const panel = answer.dataPanel;
+  if (!panel) return [];
+  if (panel.kind === "clients_q1") return panel.rows;
+  if (panel.kind === "leads_sales_6m") return panel.rows;
+  if (panel.kind === "clients_filtered") return panel.rows;
+  if (panel.kind === "deal_sales_detail") return panel.rows;
+  if (panel.kind === "missing_reconstruction") return panel.rows;
+  if (panel.kind === "market_listings") {
+    return panel.listings.map((l) => ({
+      title: l.title,
+      location: l.location,
+      source: l.source,
+      url: l.url,
+      price_czk: l.price_czk ?? null
+    }));
+  }
+  return [];
+}
+
+function shouldRunStep(params: {
+  step: PlannedStep;
+  currentAnswer: AgentAnswer | null;
+}): { ok: boolean; reason?: string } {
+  if (params.step === "market_listings_presentation") {
+    const rows = params.currentAnswer ? extractRowsForPresentation(params.currentAnswer) : [];
+    if (rows.length === 0) {
+      return {
+        ok: false,
+        reason: "Prezentaci přeskakuji, protože předchozí krok nevrátil žádná data z nabídek."
+      };
+    }
+  }
+  if (params.step === "analytics_presentation") {
+    const rows = params.currentAnswer ? extractRowsForPresentation(params.currentAnswer) : [];
+    if (rows.length === 0) {
+      return {
+        ok: false,
+        reason: "Prezentaci přeskakuji, protože analytický krok nevrátil tabulková data."
+      };
+    }
+  }
+  return { ok: true };
+}
+
+function replanRemainingSteps(params: {
+  remainingSteps: PlannedStep[];
+  currentAnswer: AgentAnswer | null;
+}): { steps: PlannedStep[]; note?: string } {
+  const rows = params.currentAnswer ? extractRowsForPresentation(params.currentAnswer) : [];
+  if (rows.length > 0) return { steps: params.remainingSteps };
+
+  const removed = params.remainingSteps.filter((s) => s === "analytics_presentation" || s === "market_listings_presentation");
+  if (removed.length === 0) return { steps: params.remainingSteps };
+
+  const steps = params.remainingSteps.filter((s) => s !== "analytics_presentation" && s !== "market_listings_presentation");
+  return {
+    steps,
+    note: "Plán upraven podle kontextu: krok prezentace byl přeskočen, protože nejsou dostupná tabulková data."
+  };
 }
 
 function mergeStepAnswers(base: AgentAnswer, extra: AgentAnswer): AgentAnswer {
@@ -91,10 +167,27 @@ export async function runAgentOrchestrator(params: {
     traceParentId
   };
 
-  const steps = planSteps({ intent: params.intent, question: params.question });
+  // Phase 1: upfront plan what steps/subagents to run.
+  const initialPlan = buildInitialPlan({ intent: params.intent, question: params.question });
+  let steps = [...initialPlan.steps];
   let composedAnswer: AgentAnswer | null = null;
 
-  for (const step of steps) {
+  while (steps.length > 0) {
+    const step = steps.shift()!;
+    // Phase 2: context-aware guard before each next step.
+    const gate = shouldRunStep({ step, currentAnswer: composedAnswer });
+    if (!gate.ok) {
+      const skipAnswer: AgentAnswer = {
+        answer_text: gate.reason ?? "Další krok byl přeskočen.",
+        confidence: 0.8,
+        sources: [],
+        generated_artifacts: [],
+        next_actions: []
+      };
+      composedAnswer = composedAnswer ? mergeStepAnswers(composedAnswer, skipAnswer) : skipAnswer;
+      continue;
+    }
+
     let stepAnswer: AgentAnswer;
 
     if (step === "calendar_email") {
@@ -142,46 +235,49 @@ export async function runAgentOrchestrator(params: {
         onAnswerDelta: params.onAnswerDelta
       });
     } else if (step === "market_listings_presentation") {
-      const cards =
-        composedAnswer?.dataPanel?.kind === "market_listings"
-          ? composedAnswer.dataPanel.listings
-          : [];
-      if (cards.length === 0) {
-        stepAnswer = {
-          answer_text: "Prezentaci nelze vytvořit, protože nejsou k dispozici žádné nové nabídky.",
-          confidence: 0.7,
-          sources: [],
-          generated_artifacts: [],
-          next_actions: ["Upravte filtry a zkuste načíst více nabídek."]
-        };
-      } else {
-        const caps = parseTaskCapabilities(params.question);
-        const deck = await runPresentationFromRowsSubAgent({
-          toolRunner,
-          ctx,
-          slideCount: Math.min(14, Math.max(1, caps.slideCount ?? params.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT)),
-          question: params.question,
-          title: params.question.trim().slice(0, 120) || "Prezentace realitnich nabidek",
-          rows: cards.map((c) => ({
-            title: c.title,
-            location: c.location,
-            source: c.source,
-            url: c.url,
-            price_czk: c.price_czk ?? null
-          })),
-          sourceLabel: "market_listings"
-        });
-        stepAnswer = {
-          answer_text: "Vytvořil jsem prezentaci z načtených realitních nabídek.",
-          confidence: 0.9,
-          sources: [],
-          generated_artifacts: [
-            { type: "presentation", label: `Prezentace (${deck.totalSlidesLabel} slidu) PPTX`, url: deck.publicUrl },
-            { type: "presentation", label: `Prezentace (${deck.totalSlidesLabel} slidu) PDF`, url: deck.pdfPublicUrl }
-          ],
-          next_actions: ["Otevřete PPTX/PDF a případně upřesněte filtry pro další běh."]
-        };
-      }
+      const rows = composedAnswer ? extractRowsForPresentation(composedAnswer) : [];
+      const caps = parseTaskCapabilities(params.question);
+      const deck = await runPresentationFromRowsSubAgent({
+        toolRunner,
+        ctx,
+        slideCount: Math.min(14, Math.max(1, caps.slideCount ?? params.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT)),
+        question: params.question,
+        title: params.question.trim().slice(0, 120) || "Prezentace realitnich nabidek",
+        rows,
+        sourceLabel: "market_listings"
+      });
+      stepAnswer = {
+        answer_text: "Vytvořil jsem prezentaci z načtených realitních nabídek.",
+        confidence: 0.9,
+        sources: [],
+        generated_artifacts: [
+          { type: "presentation", label: `Prezentace (${deck.totalSlidesLabel} slidu) PPTX`, url: deck.publicUrl },
+          { type: "presentation", label: `Prezentace (${deck.totalSlidesLabel} slidu) PDF`, url: deck.pdfPublicUrl }
+        ],
+        next_actions: ["Otevřete PPTX/PDF a případně upřesněte filtry pro další běh."]
+      };
+    } else if (step === "analytics_presentation") {
+      const rows = composedAnswer ? extractRowsForPresentation(composedAnswer) : [];
+      const caps = parseTaskCapabilities(params.question);
+      const deck = await runPresentationFromRowsSubAgent({
+        toolRunner,
+        ctx,
+        slideCount: Math.min(14, Math.max(1, caps.slideCount ?? params.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT)),
+        question: params.question,
+        title: params.question.trim().slice(0, 120) || "Analyticka prezentace",
+        rows,
+        sourceLabel: "analytics"
+      });
+      stepAnswer = {
+        answer_text: "Na základě analytických dat jsem vytvořil prezentaci.",
+        confidence: 0.9,
+        sources: [],
+        generated_artifacts: [
+          { type: "presentation", label: `Prezentace (${deck.totalSlidesLabel} slidu) PPTX`, url: deck.publicUrl },
+          { type: "presentation", label: `Prezentace (${deck.totalSlidesLabel} slidu) PDF`, url: deck.pdfPublicUrl }
+        ],
+        next_actions: ["Otevřete PPTX/PDF a případně upřesněte metriky."]
+      };
     } else if (step === "scheduled_agent_task") {
       stepAnswer = await runScheduledTaskProposalSubAgent({
         toolRunner,
@@ -201,6 +297,20 @@ export async function runAgentOrchestrator(params: {
     }
 
     composedAnswer = composedAnswer ? mergeStepAnswers(composedAnswer, stepAnswer) : stepAnswer;
+
+    // Phase 3: adaptive replan based on actual output of the previous step.
+    const replanned = replanRemainingSteps({ remainingSteps: steps, currentAnswer: composedAnswer });
+    steps = replanned.steps;
+    if (replanned.note) {
+      const noteAnswer: AgentAnswer = {
+        answer_text: replanned.note,
+        confidence: 0.85,
+        sources: [],
+        generated_artifacts: [],
+        next_actions: []
+      };
+      composedAnswer = mergeStepAnswers(composedAnswer, noteAnswer);
+    }
   }
 
   return (

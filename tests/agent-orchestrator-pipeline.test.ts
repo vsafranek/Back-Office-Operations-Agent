@@ -29,6 +29,7 @@ vi.mock("@/lib/agent/subagents/casual-chat-subagent", () => ({
 }));
 
 import { runAgentOrchestrator } from "@/lib/agent/orchestrator/agent-orchestrator";
+import { runAnalyticsSubAgent } from "@/lib/agent/subagents/analytics-subagent";
 import { runMarketListingsChatSubAgent } from "@/lib/agent/subagents/market-listings-chat-subagent";
 import { runPresentationFromRowsSubAgent } from "@/lib/agent/subagents/presentation-subagent";
 
@@ -61,6 +62,19 @@ describe("runAgentOrchestrator pipeline", () => {
       totalSlidesLabel: 4,
       includeOpeningTitleSlide: true
     });
+    vi.mocked(runAnalyticsSubAgent).mockResolvedValue({
+      answer_text: "Analytika hotova.",
+      confidence: 0.9,
+      sources: ["vw_clients"],
+      generated_artifacts: [],
+      next_actions: [],
+      dataPanel: {
+        kind: "clients_filtered",
+        source: "vw_clients",
+        title: "Klienti",
+        rows: [{ month: "2026-03", value: 10 }]
+      }
+    });
   });
 
   it("composes market_listings + presentation pipeline from one request", async () => {
@@ -90,5 +104,60 @@ describe("runAgentOrchestrator pipeline", () => {
     ]);
     expect(out.answer_text).toContain("Nalezeny nove nabidky.");
     expect(out.answer_text).toContain("Vytvořil jsem prezentaci");
+  });
+
+  it("composes analytics + presentation pipeline from one request", async () => {
+    const ctx: AgentToolContext = { runId: "r2", userId: "u1" };
+    const toolRunner = { run: vi.fn() } as unknown as ToolRunner;
+
+    const out = await runAgentOrchestrator({
+      intent: "analytics",
+      ctx,
+      question: "Zpracuj analytiku klientu a priprav prezentaci o 3 slidech",
+      contextText: "",
+      trace: undefined,
+      traceDispatchId: null,
+      toolRunner
+    });
+
+    expect(runAnalyticsSubAgent).toHaveBeenCalledOnce();
+    expect(runPresentationFromRowsSubAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slideCount: 3,
+        rows: [{ month: "2026-03", value: 10 }]
+      })
+    );
+    expect(out.generated_artifacts).toEqual([
+      expect.objectContaining({ type: "presentation", url: "https://example/deck.pptx" }),
+      expect.objectContaining({ type: "presentation", url: "https://example/deck.pdf" })
+    ]);
+    expect(out.answer_text).toContain("Analytika hotova.");
+    expect(out.answer_text).toContain("Na základě analytických dat");
+  });
+
+  it("replans and skips presentation step when no rows are available", async () => {
+    vi.mocked(runAnalyticsSubAgent).mockResolvedValueOnce({
+      answer_text: "Analytika hotova bez tabulky.",
+      confidence: 0.8,
+      sources: ["vw_clients"],
+      generated_artifacts: [],
+      next_actions: []
+    });
+
+    const ctx: AgentToolContext = { runId: "r3", userId: "u1" };
+    const toolRunner = { run: vi.fn() } as unknown as ToolRunner;
+    const out = await runAgentOrchestrator({
+      intent: "analytics",
+      ctx,
+      question: "Udelej analytiku a prezentaci o 3 slidech",
+      contextText: "",
+      trace: undefined,
+      traceDispatchId: null,
+      toolRunner
+    });
+
+    expect(runPresentationFromRowsSubAgent).not.toHaveBeenCalled();
+    expect(out.answer_text).toContain("Analytika hotova bez tabulky.");
+    expect(out.answer_text).toContain("Plán upraven podle kontextu");
   });
 });
