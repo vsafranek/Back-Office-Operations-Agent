@@ -57,7 +57,7 @@ export async function classifyAgentIntent(params: {
             "scheduled_agent_task: POUZE kdyz uzivatel EXPLICITNE chce OPAKOVANI v case nebo automaticky beh — napr. kazdy den, kazde rano, pravidelne, cron, kazdou hodinu, automaticky mi posilej, hlidej mi to denne. " +
             "Bez takove frekvence/casovani to NENI scheduled_agent_task: napr. „Informuj me o novych nabidkach v Praze Holesovice“ bez „kazdy den“ apod. → market_listings (jednorazove zobrazeni), NE cron.\n" +
             "casual_chat: pozdravy, diky, „jak se mas“, obecna zdvorilost, konverzace bez pozadavku na data, nastroje, e-mail, report ani webovy fakticky dotaz.\n" +
-            "slideCount dopln u presentation nebo weekly_report pri konkretnim poctu OBSAHOVYCH slidu bez titulku (cislice nebo cesky); jinak vynechej (system pouzije standard 3 obsahove + titulek)."
+            "slideCount dopln u presentation nebo weekly_report pri konkretnim poctu OBSAHOVYCH slidu bez titulku (cislice nebo cesky); jinak vynechej (system odhadne podle dat, typicky 4–8 obsahovych slidu + titulek)."
         },
         { role: "user", content: `Pozadavek:\n${params.question}${history}` }
       ]

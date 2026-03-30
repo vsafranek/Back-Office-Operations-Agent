@@ -38,6 +38,7 @@ export async function runPresentationFromRowsSubAgent(params: {
     publicUrl: string;
     pdfPublicUrl: string;
     storagePrefix?: string;
+    slides?: unknown[];
   }>("runPresentationAgent", params.ctx, {
     runId: storageKey,
     title: params.title,
@@ -47,10 +48,12 @@ export async function runPresentationFromRowsSubAgent(params: {
     includeOpeningTitleSlide
   });
 
+  const actualSlideCount = Array.isArray(presentation.slides) ? presentation.slides.length : 0;
+
   return {
     publicUrl: presentation.publicUrl,
     pdfPublicUrl: presentation.pdfPublicUrl,
-    totalSlidesLabel,
+    totalSlidesLabel: actualSlideCount > 0 ? actualSlideCount : totalSlidesLabel,
     includeOpeningTitleSlide
   };
 }

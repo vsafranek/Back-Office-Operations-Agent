@@ -147,6 +147,107 @@ const NATIVE_MAX_BODY_LINE = 220;
 const BOA_TITLE_MASTER = "BOA_TITLE_MASTER";
 const BOA_CONTENT_MASTER = "BOA_CONTENT_MASTER";
 
+/** Max slidů v jednom decku (včetně titulku). */
+export const MAX_DECK_SLIDES = 15;
+
+/** Odrážky jen text — na jeden slide se vejde čitelně jen omezený počet. */
+export const MAX_BULLETS_PER_CONTENT_SLIDE = 5;
+/** Tabulka nebo graf zabírají výšku — méně bodů nad nimi. */
+export const MAX_BULLETS_WITH_TABLE_OR_CHART = 4;
+export const MAX_BULLETS_WITH_TABLE_AND_CHART = 3;
+
+function maxBulletsForContentSlide(s: Extract<PresentationSlide, { type: "content" }>): number {
+  const hasT = s.table != null;
+  const hasC = s.chart != null;
+  if (hasT && hasC) return MAX_BULLETS_WITH_TABLE_AND_CHART;
+  if (hasT || hasC) return MAX_BULLETS_WITH_TABLE_OR_CHART;
+  return MAX_BULLETS_PER_CONTENT_SLIDE;
+}
+
+const MIN_BULLETS_TEXT_ONLY_CONTENT = 3;
+const SCHEMA_MAX_BULLETS = 8;
+
+/**
+ * Pokračovací content slide bez tabulky/grafu musí mít alespoň 3 odrážky (contentSlideSchema).
+ * Upraví chunky: přesune body z předchozího dílu, případně sloučí, jinak doplní neutrální řádky.
+ */
+function normalizeContentBulletChunks(chunks: string[][]): string[][] {
+  const out = chunks.map((c) => [...c]);
+  for (let i = out.length - 1; i >= 1; i--) {
+    if (out[i]!.length >= MIN_BULLETS_TEXT_ONLY_CONTENT) continue;
+    const prev = out[i - 1]!;
+    const cur = out[i]!;
+    const minKeepOnFirst = i - 1 === 0 ? 0 : MIN_BULLETS_TEXT_ONLY_CONTENT;
+    while (cur.length < MIN_BULLETS_TEXT_ONLY_CONTENT && prev.length > minKeepOnFirst) {
+      cur.unshift(prev.pop()!);
+    }
+    if (cur.length >= MIN_BULLETS_TEXT_ONLY_CONTENT) continue;
+
+    const merged = [...prev, ...cur];
+    if (merged.length <= SCHEMA_MAX_BULLETS) {
+      out[i - 1] = merged;
+      out.splice(i, 1);
+      continue;
+    }
+
+    const pad = "Související body na předchozím slidě — doplněno pro strukturu decku.";
+    while (cur.length < MIN_BULLETS_TEXT_ONLY_CONTENT) cur.push(pad);
+  }
+  return out;
+}
+
+/**
+ * Rozdělí přeplněné content slidy — více slidů místo dlouhého seznamu nad tabulkou/grafem.
+ * Zachová tabulku/graf jen na prvním dílu daného nadpisu.
+ */
+export function expandDenseContentSlides(slides: PresentationSlide[], maxSlides: number = MAX_DECK_SLIDES): PresentationSlide[] {
+  const result: PresentationSlide[] = [];
+  for (const s of slides) {
+    if (s.type !== "content") {
+      result.push(s);
+      continue;
+    }
+    const maxB = maxBulletsForContentSlide(s);
+    if (s.bullets.length <= maxB) {
+      result.push(s);
+      continue;
+    }
+    const rawChunks: string[][] = [];
+    for (let i = 0; i < s.bullets.length; i += maxB) {
+      rawChunks.push(s.bullets.slice(i, i + maxB));
+    }
+    const chunks = normalizeContentBulletChunks(rawChunks);
+    const totalParts = chunks.length;
+    for (let idx = 0; idx < chunks.length; idx++) {
+      const chunk = chunks[idx]!;
+      const isFirst = idx === 0;
+      result.push({
+        type: "content",
+        title: totalParts > 1 ? `${s.title} (${idx + 1}/${totalParts})` : s.title,
+        bullets: chunk,
+        ...(isFirst ? { table: s.table, chart: s.chart } : {})
+      });
+    }
+  }
+  return result.length > maxSlides ? result.slice(0, maxSlides) : result;
+}
+
+/**
+ * Zaručí splnění contentSlideSchema u textových slidů bez tabulky/grafu (min. 3 odrážky).
+ * Ochrana proti výjimečnému výstupu LLM nebo oříznutí decku.
+ */
+export function ensureContentSlidesMeetMinBullets(slides: PresentationSlide[]): PresentationSlide[] {
+  const fill = "Doplňující bod — podrobnosti vycházejí z dat výše.";
+  return slides.map((s) => {
+    if (s.type !== "content") return s;
+    if (s.table != null || s.chart != null) return s;
+    if (s.bullets.length >= MIN_BULLETS_TEXT_ONLY_CONTENT) return s;
+    const b = [...s.bullets];
+    while (b.length < MIN_BULLETS_TEXT_ONLY_CONTENT && b.length < SCHEMA_MAX_BULLETS) b.push(fill);
+    return { ...s, bullets: b };
+  });
+}
+
 function padTemplateBullets(lines: string[]): string[] {
   const out = lines.map((s) => s.trim()).filter(Boolean);
   const padded = [...out];
@@ -159,13 +260,297 @@ function safeNum(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Sloupce / klíče, které do prezentace nepatří (UUID, cizí klíče, audit). */
+const INTERNAL_FIELD_KEY_RE =
+  /^(id|uuid|guid|property_id|external_id|listing_id|run_id|user_id|tenant_id|created_at|updated_at|deleted_at|metadata|raw)$/i;
+const INTERNAL_FIELD_SUFFIX_RE = /_id$|_uuid$|_key$/i;
+
+function isInternalFieldKey(k: string): boolean {
+  const t = k.trim();
+  if (!t) return true;
+  if (INTERNAL_FIELD_KEY_RE.test(t)) return true;
+  if (INTERNAL_FIELD_SUFFIX_RE.test(t) && t.toLowerCase() !== "listed_price") return true;
+  return false;
+}
+
+function rowHasMeaningfulMonth(row: Record<string, unknown>): boolean {
+  const m = row.month;
+  if (m == null) return false;
+  const s = String(m).trim();
+  return s.length > 0 && !/^n\/?a$/i.test(s);
+}
+
+/** Nemovitost / inzerát / rekonstrukce — typické tabulky z Back Office. */
+function isPropertyStyleRow(row: Record<string, unknown>): boolean {
+  if (typeof row.property_id === "string" && row.property_id.trim().length > 0) return true;
+  if (typeof row.title === "string" && row.title.trim().length > 0) {
+    if (row.city != null || row.missing_reconstruction != null || row.missing_structural_changes != null) return true;
+    if (
+      row.listed_price != null ||
+      row.price_czk != null ||
+      row.listing_price != null ||
+      row.price != null
+    )
+      return true;
+    const rn = row.reconstruction_notes;
+    if (rn != null && String(rn).trim().length > 0) return true;
+  }
+  return false;
+}
+
+function parseNumericPrice(value: unknown): number {
+  if (value == null) return NaN;
+  if (typeof value === "number") return Number.isFinite(value) ? value : NaN;
+  const s = String(value).replace(/\s/g, "").replace(",", ".").replace(/[^\d.-]/g, "");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+/** Čitelná cena pro slid (bez technického názvu sloupce). */
+function formatCzkHuman(value: unknown): string | null {
+  const n = parseNumericPrice(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n >= 1_000_000) {
+    const mil = n / 1_000_000;
+    const txt =
+      mil >= 100
+        ? Math.round(mil).toString()
+        : mil >= 10
+          ? mil.toFixed(1).replace(".", ",")
+          : mil.toFixed(2).replace(/,?0+$/, "").replace(".", ",");
+    return `${txt} mil. Kč`;
+  }
+  return `${Math.round(n).toLocaleString("cs-CZ")} Kč`;
+}
+
+function inferFallbackDataProfile(rows: Record<string, unknown>[]): "property" | "crm_series" | "generic" {
+  if (rows.length === 0) return "generic";
+  const n = rows.length;
+  const propHits = rows.filter(isPropertyStyleRow).length;
+  if (propHits >= Math.max(1, Math.ceil(n * 0.45))) return "property";
+  const anyMonth = rows.some(rowHasMeaningfulMonth);
+  const anyLeads = rows.some((r) => r.leads_count != null && String(r.leads_count).trim() !== "");
+  const anySold = rows.some((r) => r.sold_count != null && String(r.sold_count).trim() !== "");
+  if (anyMonth || anyLeads || anySold) return "crm_series";
+  return "generic";
+}
+
+/**
+ * Odrážka z řádku nemovitosti / inzerce — souvislá čeština, bez id a technických názvů sloupců.
+ */
+export function formatPropertyBulletForSlide(row: Record<string, unknown>): string {
+  const title = String(row.title ?? "Nabídka bez názvu").trim().slice(0, 92);
+  const city = String(row.city ?? "").trim();
+  const district =
+    row.address && typeof row.address === "object"
+      ? String((row.address as Record<string, unknown>).district ?? "").trim()
+      : "";
+  const loc = [city, district].filter(Boolean).join(", ");
+
+  const price =
+    formatCzkHuman(row.listed_price) ??
+    formatCzkHuman(row.price_czk) ??
+    formatCzkHuman(row.listing_price) ??
+    formatCzkHuman(row.price);
+
+  const notesRaw = row.reconstruction_notes ?? row.notes ?? row.description ?? row.note;
+  let notes = "";
+  if (notesRaw != null) {
+    notes = String(notesRaw).trim().replace(/\s+/g, " ");
+    if (notes.length > 130) notes = `${notes.slice(0, 127)}…`;
+  }
+
+  const flags: string[] = [];
+  if (row.missing_reconstruction === true) flags.push("chybí podklady k rekonstrukci");
+  else if (row.missing_reconstruction === false) flags.push("dokumentace k rekonstrukci je v pořádku");
+  if (row.missing_structural_changes === true) flags.push("stavební zásahy je potřeba řešit");
+  else if (row.missing_structural_changes === false) flags.push("bez náročných stavebních zásahů");
+
+  const head = loc ? `${title} (${loc})` : title;
+  const sentences: string[] = [];
+  if (price) sentences.push(`v inzerci uvedena cena přibližně ${price}`);
+  if (notes) sentences.push(notes.endsWith(".") ? notes.slice(0, -1) : notes);
+  if (flags.length) sentences.push(flags.join(", "));
+
+  let line = sentences.length ? `${head}: ${sentences.join("; ")}.` : head;
+  if (!sentences.length && price) line = `${head}: ${price}.`;
+
+  return line.length > NATIVE_MAX_BODY_LINE ? `${line.slice(0, NATIVE_MAX_BODY_LINE - 1)}…` : line;
+}
+
+const HUMAN_FIELD_LABEL: Record<string, string> = {
+  status: "stav",
+  state: "stav",
+  label: "označení",
+  description: "popis",
+  note: "poznámka",
+  notes: "poznámky",
+  email: "e-mail",
+  phone: "telefon",
+  name: "název"
+};
+
+function humanPhraseForField(key: string, value: unknown): string | null {
+  const val = String(value).trim().replace(/\s+/g, " ");
+  if (!val) return null;
+  const k = key.toLowerCase();
+  if (/price|czk|listed|amount|castka/i.test(k) && parseNumericPrice(value) > 0) {
+    const p = formatCzkHuman(value);
+    return p ? `odhadovaná hodnota z dat ${p}` : null;
+  }
+  const lab = HUMAN_FIELD_LABEL[k] ?? key.replace(/_/g, " ");
+  const short = val.length > 88 ? `${val.slice(0, 85)}…` : val;
+  return `${lab} „${short}“`;
+}
+
+/** Obecný řádek tabulky — věty, bez „id:“ a anglických klíčů; interní klíče přeskočí. */
+function formatGenericRecordBullet(row: Record<string, unknown>): string {
+  if (isPropertyStyleRow(row)) return formatPropertyBulletForSlide(row);
+
+  const entries = Object.entries(row).filter(([k, v]) => v != null && typeof v !== "object" && !isInternalFieldKey(k));
+
+  if (entries.length === 0 && row.address && typeof row.address === "object") {
+    const a = row.address as Record<string, unknown>;
+    const addr = [a.city, a.district, a.country].filter(Boolean).join(", ");
+    if (addr) {
+      const t = String(row.title ?? row.name ?? "Záznam").trim();
+      return `${t}: lokalita ${addr}.`.slice(0, NATIVE_MAX_BODY_LINE);
+    }
+  }
+
+  const titleEntry = entries.find(([k]) => k === "title" || k === "name");
+  const rest = entries.filter(([k]) => k !== titleEntry?.[0]);
+  const phrases: string[] = [];
+  if (titleEntry) {
+    const tv = String(titleEntry[1]).trim();
+    if (tv) phrases.push(`jde o „${tv.slice(0, 100)}“`);
+  }
+  for (const [k, v] of rest.slice(0, 5)) {
+    const ph = humanPhraseForField(k, v);
+    if (ph) phrases.push(ph);
+  }
+
+  let line = phrases.length ? phrases.join(", ") + "." : "Záznam (žádné vhodné sloupce k textovému shrnutí).";
+  line = line.charAt(0).toUpperCase() + line.slice(1);
+  return line.length > NATIVE_MAX_BODY_LINE ? `${line.slice(0, NATIVE_MAX_BODY_LINE - 1)}…` : line;
+}
+
+function monthSummaryLine(rows: Record<string, unknown>[]): string {
+  const u = [...new Set(rows.filter(rowHasMeaningfulMonth).map((r) => String(r.month).trim()))];
+  if (u.length === 0) {
+    return "Časová osa: ve zdroji není vyplněný sloupec měsíc — data nejsou měsíční časovou řadou KPI.";
+  }
+  const shown = u.slice(0, 16);
+  const more = u.length > 16 ? ` (+${u.length - 16} dalších)` : "";
+  return `Pokryté měsíce: ${shown.join(", ")}${more}`;
+}
+
+function tryRewriteJsonishBulletLine(raw: string): string | null {
+  const t = raw.trim();
+  if (!t.startsWith("{") || t.length < 35) return null;
+  try {
+    const obj = JSON.parse(t) as Record<string, unknown>;
+    if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+      if (isPropertyStyleRow(obj)) return formatPropertyBulletForSlide(obj);
+      return formatGenericRecordBullet(obj);
+    }
+  } catch {
+    /* neúplný / rozbitý JSON z LLM */
+  }
+  if (t.startsWith("{") && t.length > 80) {
+    return "Strukturovaný záznam — podrobnosti zobrazte v tabulkovém přehledu v aplikaci (text nešel bezpečně zobrazit).";
+  }
+  return null;
+}
+
+/**
+ * Odrážka ve tvaru „id: … · title: … · listed_price: …“ (LLM zkopíroval tabulku jako text).
+ */
+function tryRewriteTechKeyValueBulletLine(raw: string): string | null {
+  const t = raw.trim();
+  if (!t.includes(":") || t.length < 28) return null;
+  if (!/\b(id|title|listed_price|reconstruction_notes|property_id|price_czk|city|missing_reconstruction)\s*:/i.test(t)) {
+    return null;
+  }
+  const chunks = t
+    .split(/\s*(?:·|•)\s*|\s*\|\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (chunks.length < 2) return null;
+  const obj: Record<string, unknown> = {};
+  for (const part of chunks) {
+    const idx = part.indexOf(":");
+    if (idx <= 0) continue;
+    const key = part.slice(0, idx).trim();
+    let val = part.slice(idx + 1).trim();
+    if (!key || val.length === 0) continue;
+    if (isInternalFieldKey(key)) continue;
+    if (/price|czk|amount|listed/i.test(key)) {
+      const n = parseNumericPrice(val);
+      obj[key] = Number.isFinite(n) && n > 0 ? n : val;
+    } else {
+      obj[key] = val;
+    }
+  }
+  if (Object.keys(obj).length < 2) return null;
+  if (isPropertyStyleRow(obj)) return formatPropertyBulletForSlide(obj);
+  return formatGenericRecordBullet(obj);
+}
+
+function humanizeContentBulletText(raw: string): string {
+  return tryRewriteJsonishBulletLine(raw) ?? tryRewriteTechKeyValueBulletLine(raw) ?? raw;
+}
+
+function buildExecutiveCrmBullets(
+  rows: Record<string, unknown>[],
+  totalLeads: number,
+  totalSold: number,
+  conversion: string
+): string[] {
+  const hasKpi = rows.some((r) => safeNum(r.leads_count) > 0 || safeNum(r.sold_count) > 0);
+  if (!hasKpi && rows.length > 0) {
+    return [
+      `Počet záznamů v exportu: ${rows.length}`,
+      "Sloupce leadů / prodaných nejsou v těchto řádcích vyplněné — nejde standardně o měsíční KPI report.",
+      "Pro grafy a konverze ověřte SQL preset (aliasy sloupců leads_count, sold_count, month).",
+      "Níže je čitelný výpis záznamů místo surového JSON.",
+      "Obsah doplňte podle skutečného významu datasetu."
+    ];
+  }
+  return [
+    `Analyzováno záznamů: ${rows.length}`,
+    `Celkem leadů: ${totalLeads}`,
+    `Celkem prodáno: ${totalSold}`,
+    `Konverzní poměr lead → prodej: ${conversion} %`,
+    "Obsah vychází z datového exportu za poslední období."
+  ];
+}
+
+function buildExecutivePropertyBullets(rows: Record<string, unknown>[]): string[] {
+  const cities = [...new Set(rows.map((r) => String(r.city ?? "").trim()).filter(Boolean))];
+  const missRec = rows.filter((r) => r.missing_reconstruction === true).length;
+  const missStruct = rows.filter((r) => r.missing_structural_changes === true).length;
+  return [
+    `Evidence objektů / nemovitostí: ${rows.length} záznamů`,
+    cities.length
+      ? `Lokality (výběr): ${cities.slice(0, 6).join(", ")}${cities.length > 6 ? ` (+${cities.length - 6})` : ""}`
+      : "Lokalita: ověřte mapování sloupce city v presetu.",
+    missRec > 0
+      ? `U ${missRec} záznamů chybí podklady k rekonstrukci.`
+      : "Příznak rekonstrukce: bez záznamů se stavem „chybí“ nebo příznak není vyplněn.",
+    missStruct > 0
+      ? `U ${missStruct} záznamů jsou uvedeny stavební zásahy k řešení.`
+      : "Stavební zásahy: dle příznaků bez otevřených položek.",
+    "Další slid uvádí čitelné řádky místo JSON."
+  ];
+}
+
 /** Ploché slidové položky pro výpočet fallbacku (interní). */
 function buildFallbackFlatSlides(rows: Record<string, unknown>[], slideCount: number) {
-  const months = rows.map((row) => String(row.month ?? "n/a"));
+  const profile = inferFallbackDataProfile(rows);
   const totalLeads = rows.reduce((acc, row) => acc + safeNum(row.leads_count), 0);
   const totalSold = rows.reduce((acc, row) => acc + safeNum(row.sold_count), 0);
   const conversion = totalLeads > 0 ? ((totalSold / totalLeads) * 100).toFixed(1) : "0.0";
-  const topRows = rows.slice(0, 10).map((row) => JSON.stringify(row));
   const padBullets = (bullets: string[]) => {
     const next = bullets.slice(0, 8);
     while (next.length < 4) {
@@ -174,48 +559,88 @@ function buildFallbackFlatSlides(rows: Record<string, unknown>[], slideCount: nu
     return next;
   };
 
+  const detailFromRows = (): string[] => {
+    if (rows.length === 0) {
+      return [
+        "Nejsou dostupná žádná data pro výpočet detailních metrik.",
+        "Zkontrolujte SQL preset a zdrojové tabulky.",
+        "Po doplnění dat workflow spusťte znovu.",
+        "Doporučení: pravidelná validace před každým reportingem."
+      ];
+    }
+    if (profile === "property") return padBullets(rows.slice(0, 8).map(formatPropertyBulletForSlide));
+    return padBullets(rows.slice(0, 8).map(formatGenericRecordBullet));
+  };
+
+  const slide2Property = {
+    title: "Struktura portfolia",
+    bullets: [
+      `V datové sadě je ${rows.length} položek; na slidu „Detail“ je čitelný výpis (ne JSON).`,
+      "Ověřte jedinečnost property_id a soulad s interní evidencí.",
+      "Prioritizujte objekty s chybějící dokumentací rekonstrukce.",
+      "Kontrolujte adresy vůči dokumentaci a účelové využití v katastru.",
+      "Podrobnější tabulku a filtry použijte v aplikaci Back Office."
+    ]
+  };
+
+  const slide2Crm = {
+    title: "Trend a sezónnost",
+    bullets: [
+      monthSummaryLine(rows),
+      "Sledujte odchylky mezi novými leady a uzavřenými obchody.",
+      "Identifikujte vrcholy a propady v pipeline.",
+      "Při uzdravování leadů zkontrolujte zdroje akvizice.",
+      "Při poklesu prodejů zkontrolujte rychlost follow-upu."
+    ]
+  };
+
+  const slide2Generic = {
+    title: "Přehled datové sady",
+    bullets: [
+      monthSummaryLine(rows),
+      "Dataset neodpovídá ani portfoliu nemovitostí ani typickému měsíčnímu KPI exportu.",
+      "Ověřte význam sloupců a zdroj SQL presetu.",
+      "Detailní řádky jsou uvedeny čitelně na dalším slidu.",
+      "Pro report doporučujeme upřesnit zadání nebo šablonu exportu."
+    ]
+  };
+
+  const executive =
+    profile === "property"
+      ? { title: "Executive shrnutí", bullets: buildExecutivePropertyBullets(rows) }
+      : {
+          title: "Executive shrnutí",
+          bullets: buildExecutiveCrmBullets(rows, totalLeads, totalSold, conversion)
+        };
+
+  const second =
+    profile === "property" ? slide2Property : profile === "crm_series" ? slide2Crm : slide2Generic;
+
   const base = [
+    executive,
+    second,
     {
-      title: "Executive shrnutí",
-      bullets: [
-        `Analyzováno záznamů: ${rows.length}`,
-        `Celkem leadů: ${totalLeads}`,
-        `Celkem prodáno: ${totalSold}`,
-        `Konverzní poměr lead → prodej: ${conversion} %`,
-        "Obsah vychází z datového exportu za poslední období."
-      ]
-    },
-    {
-      title: "Trend a sezónnost",
-      bullets: [
-        `Pokryté měsíce: ${months.join(", ") || "bez měsíčních dat"}`,
-        "Sledujte odchylky mezi novými leady a uzavřenými obchody.",
-        "Identifikujte vrcholy a propady v pipeline.",
-        "Při uzdravování leadů zkontrolujte zdroje akvizice.",
-        "Při poklesu prodejů zkontrolujte rychlost follow-upu."
-      ]
-    },
-    {
-      title: "Detailní metriky",
-      bullets:
-        rows.length > 0
-          ? padBullets(topRows.slice(0, 6))
-          : [
-              "Nejsou dostupná žádná data pro výpočet detailních metrik.",
-              "Zkontrolujte SQL preset a zdrojové tabulky.",
-              "Po doplnění dat workflow spusťte znovu.",
-              "Doporučení: pravidelná validace před každým reportingem."
-            ]
+      title: profile === "property" ? "Evidence záznamů" : "Detailní metriky",
+      bullets: detailFromRows()
     },
     {
       title: "Rizika a doporučené kroky",
-      bullets: [
-        "Nastavte odpovědnost za každý klíčový KPI ukazatel.",
-        "Zaveďte týdenní kontrolu kvality dat před prezentací.",
-        "Prioritizujte leady s nejvyšším potenciálem uzavření.",
-        "Sledujte dobu od prvního kontaktu po uzavření.",
-        "Připravte akční plán na příští reportovací období."
-      ]
+      bullets:
+        profile === "property"
+          ? [
+              "Zajistěte kompletní dokumentaci rekonstrukcí u rizikových nemovitostí.",
+              "Sjednoťte pravidla pro příznaky missing_reconstruction / structural_changes.",
+              "Pravidelně synchronizujte data s katastrem a interní CRM evidencí.",
+              "Definujte vlastníka dat a frekvenci kontroly kvality.",
+              "Pro hromadné změny použijte importní skripty s validací."
+            ]
+          : [
+              "Nastavte odpovědnost za každý klíčový KPI ukazatel.",
+              "Zaveďte týdenní kontrolu kvality dat před prezentací.",
+              "Prioritizujte leady s nejvyšším potenciálem uzavření.",
+              "Sledujte dobu od prvního kontaktu po uzavření.",
+              "Připravte akční plán na příští reportovací období."
+            ]
     }
   ];
 
@@ -282,7 +707,7 @@ export function clampPresentationSlidesForTemplate(slides: PresentationSlide[]):
         return {
           ...s,
           title: ell(s.title, TEMPLATE_MAX_TITLE_CHARS),
-          bullets: s.bullets.map((b) => ell(b, TEMPLATE_MAX_BULLET_CHARS)),
+          bullets: s.bullets.map((b) => ell(humanizeContentBulletText(b), TEMPLATE_MAX_BULLET_CHARS)),
           table: s.table
             ? {
                 headers: s.table.headers.map((h) => ell(h, 40)),
@@ -337,7 +762,7 @@ export function clampPresentationSlidesForNative(slides: PresentationSlide[]): P
         return {
           ...s,
           title: ell(s.title, NATIVE_MAX_TITLE_HEADER),
-          bullets: s.bullets.map((b) => ell(b, NATIVE_MAX_BODY_LINE)),
+          bullets: s.bullets.map((b) => ell(humanizeContentBulletText(b), NATIVE_MAX_BODY_LINE)),
           table: s.table
             ? {
                 headers: s.table.headers.map((h) => ell(h, 48)),
@@ -482,7 +907,7 @@ export function ensureOpeningTitleSlide(
   deckTitle: string,
   slideCount: number
 ): PresentationSlide[] {
-  const clipped = slides.slice(0, slideCount);
+  const clipped = slides.slice(0, Math.min(slideCount, MAX_DECK_SLIDES));
   if (clipped.length === 0) return clipped;
   const deck = deckTitle.trim().slice(0, 120) || "Report";
 
@@ -510,7 +935,7 @@ export function ensureOpeningTitleSlide(
   if (clipped[0]!.type === "title") {
     const t = clipped[0] as Extract<PresentationSlide, { type: "title" }>;
     const hero = deriveHeroTitle(deck, t.title);
-    return [{ ...t, title: hero }, ...clipped.slice(1)].slice(0, slideCount);
+    return [{ ...t, title: hero }, ...clipped.slice(1)];
   }
 
   const oldFirst = clipped[0]!;
@@ -535,21 +960,27 @@ export function ensureOpeningTitleSlide(
   if (oldFirst.type === "content" && tail[0]?.type === "content") {
     const a = oldFirst;
     const b = tail[0];
-    tail = [
-      {
-        type: "content",
-        title: a.title,
-        bullets: [...a.bullets, ...b.bullets].slice(0, 8),
-        table: b.table ?? a.table,
-        chart: b.chart ?? a.chart
-      },
-      ...tail.slice(1)
-    ];
+    const hasRich = !!(a.table || a.chart || b.table || b.chart);
+    const combined = [...a.bullets, ...b.bullets];
+    if (!hasRich && combined.length <= MAX_BULLETS_PER_CONTENT_SLIDE) {
+      tail = [
+        {
+          type: "content",
+          title: a.title,
+          bullets: combined,
+          table: b.table ?? a.table,
+          chart: b.chart ?? a.chart
+        },
+        ...tail.slice(1)
+      ];
+    } else {
+      tail = [oldFirst, ...tail];
+    }
   } else {
     tail = [oldFirst, ...tail];
   }
 
-  return [titleSlide, ...tail].slice(0, slideCount);
+  return [titleSlide, ...tail];
 }
 
 /** Odstraní úvodní slide(y) typu title (např. vypnutý titulní slide v nastavení). */
@@ -677,12 +1108,9 @@ function contentCardBox(pptx: InstanceType<typeof PptxGenJS>, slide: PptxSlide) 
 }
 
 const CONTENT_BULLET_FONT_PT = 21;
-const CONTENT_BULLET_LINE_SPACING_PT = 30;
+/** Těsnější řádkování než dřív — PowerPoint s odrážkami jinak dělá „díry“ mezi odstavci. */
+const CONTENT_BULLET_LINE_SPACING_PT = 22;
 
-/**
- * Odhad výšky bloku odrážek (PPTX) — záměrně horší případ (užší řádky, mezery odstavce),
- * aby poslední řádek nezasahoval pod tabulku/graf.
- */
 /** Jedna odrážka na řádek — odstraní nadbytečné prefixy, aby se v PPTX neopakovaly symboly. */
 function normalizeBulletLine(raw: string): string {
   const oneLine = raw.replace(/\s+/g, " ").trim();
@@ -696,6 +1124,9 @@ function estimateTableHeightInches(rowCount: number): number {
   return Math.min(4.6, perRowIn * rowCount + 0.12);
 }
 
+/**
+ * Odhad výšky bloku odrážek (PPTX) — zohledňuje zalomení a těsnější mezery mezi odstavci.
+ */
 function estimateBulletBlockHeightInches(
   bullets: string[],
   textWidthInches: number,
@@ -707,15 +1138,15 @@ function estimateBulletBlockHeightInches(
   const avgCharWInch = (fontSizePt / 72) * 0.56;
   const charsPerLine = Math.max(12, Math.floor(effectiveW / Math.max(0.015, avgCharWInch)));
   const lineStepIn = lineSpacingPt / 72;
-  const paraGapIn = 12 / 72;
-  let h = 0.14;
+  const paraGapIn = 5 / 72;
+  let h = 0.12;
   for (const raw of bullets) {
     const b = raw.trim();
     const lines = Math.max(1, Math.ceil((b.length + 2) / charsPerLine));
     h += lines * lineStepIn + paraGapIn;
   }
-  h += 0.16;
-  return Math.min(4.35, h);
+  h += 0.12;
+  return Math.min(3.85, h);
 }
 
 export async function buildNativeTypedPptxBuffer(deckTitle: string, slides: PresentationSlide[]): Promise<Buffer> {
@@ -832,7 +1263,7 @@ export async function buildNativeTypedPptxBuffer(deckTitle: string, slides: Pres
         const tableRowsTotal = spec.table ? spec.table.rows.length + 1 : 0;
         const bulletBlockH = hasBullets
           ? Math.min(
-              4.25,
+              3.5,
               estimateBulletBlockHeightInches(spec.bullets, textW, CONTENT_BULLET_FONT_PT, CONTENT_BULLET_LINE_SPACING_PT)
             )
           : 0;
@@ -910,8 +1341,8 @@ export async function buildNativeTypedPptxBuffer(deckTitle: string, slides: Pres
                 fontSize: CONTENT_BULLET_FONT_PT,
                 color: d.bodyColor,
                 fontFace: "Calibri",
-                paraSpaceBefore: 2,
-                paraSpaceAfter: 4,
+                paraSpaceBefore: 0,
+                paraSpaceAfter: 2,
                 lineSpacing: CONTENT_BULLET_LINE_SPACING_PT
               }
             })),

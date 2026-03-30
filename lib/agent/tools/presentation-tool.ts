@@ -9,11 +9,14 @@ import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 import { generatePptxFromBlueWhiteTemplate } from "@/lib/agent/tools/presentation-from-template";
 import {
   type PresentationSlide,
+  MAX_DECK_SLIDES,
   buildFallbackPresentationSlides,
   buildNativeTypedPptxBuffer,
   clampPresentationSlidesForNative,
   clampPresentationSlidesForTemplate,
   ensureOpeningTitleSlide,
+  expandDenseContentSlides,
+  ensureContentSlidesMeetMinBullets,
   generateSkippedPdfPlaceholder,
   generateTypedPdfBuffer,
   parsePresentationSlidesFromLlmJson,
@@ -21,6 +24,7 @@ import {
   presentationSlidesToTemplateSpecs,
   stripLeadingTitleSlides
 } from "@/lib/agent/tools/presentation-typed-deck";
+import { inferSlideCountFromUserText } from "@/lib/agent/llm/intent-heuristics";
 
 export type { PresentationSlide };
 
@@ -55,7 +59,7 @@ const PresentationArtifactInputSchema = z.object({
 const PresentationArtifactOutputSchema = z.object({
   publicUrl: z.string().url(),
   pdfPublicUrl: z.string().url(),
-  slides: z.array(presentationSlideSchema).min(2).max(15),
+  slides: z.array(presentationSlideSchema).min(2).max(MAX_DECK_SLIDES),
   storagePrefix: z.string().min(3)
 });
 
@@ -98,23 +102,35 @@ export const presentationToolContract = {
   ]
 };
 
+/** Doporučený počet obsahových slidů z rozsahu dat a délky kontextu (volá se jen když uživatel v textu neřekl „N slidy“). */
+function boostContentSlideCountFromPayload(rowsLen: number, contextChars: number): number {
+  let c = 4;
+  if (rowsLen >= 22) c = 8;
+  else if (rowsLen >= 14) c = 7;
+  else if (rowsLen >= 8) c = 6;
+  else if (rowsLen >= 5) c = 5;
+  if (contextChars > 1400) c += 2;
+  else if (contextChars > 700) c += 1;
+  return Math.min(14, c);
+}
+
 const SLIDE_JSON_INSTRUCTIONS = `Kazdy prvek pole je objekt s polem \"type\" a podle typu dalsi pole:
 - {\"type\":\"title\",\"title\":\"...\",\"subtitle\":\"...volitelne\"} — prvni slide MUSI byt type title. Pole \"title\": strucny nazev tematu (2–6 slov, max ~40 znaku), NIKOLIV cele uzivatelske zadani ani dlouha veta; \"subtitle\" muze doplnit kontext.
-- {\"type\":\"content\",\"title\":\"...\",\"bullets\":[\"...\"], \"table\":{\"headers\":[\"A\"],\"rows\":[[\"1\"]]},\"chart\":{\"kind\":\"bar\"|\"line\",\"categories\":[\"Led\",\"Unor\"],\"series\":[{\"name\":\"Leady\",\"values\":[10,14]}]}} } — aspon 3 bullets NEBO tabulka NEBO graf; table/chart volitelne, kategorie hodnot u grafu stejna delka jako values.
+- {\"type\":\"content\",\"title\":\"...\",\"bullets\":[\"...\"], \"table\":...,\"chart\":... } — aspon 3 bullets NEBO tabulka NEBO graf; na JEDNOM content slidu maximalne 5 odracek; pokud je tabulka nebo graf, maximalne 4 odracky; pokud tabulka i graf, maximalne 3. Vice bodu rozdel do DALSIHO content slidu (vic polozek v JSON poli). table/chart volitelne, kategorie a values u grafu stejna delka.
 - {\"type\":\"stats\",\"title\":\"...\",\"stats\":[{\"value\":\"...\",\"label\":\"...\"}] } — 2 az 6 paru (napr. hodnota KPI + popisek).
 - {\"type\":\"quote\",\"quote\":\"...\",\"title\":\"...volitelne\",\"attribution\":\"...volitelne\"}
 - {\"type\":\"section\",\"title\":\"...\",\"subtitle\":\"...volitelne\"} — deli sekce, velky nadpis.
 
-Pis vyhradne cesky. Zadny markdown, zadny text mimo JSON.`;
+Nikdy nevkladaj cele JSON objekty ani technicke dvojice „sloupec: hodnota“ (id:, listed_price:, …). Kazdy radek tabulky prevezmi do 1–2 prirozenych vet v cestine (nazev, mesto, cena v Kc, stav rekonstrukce). Pis vyhradne cesky. Zadny markdown, zadny text mimo JSON.`;
 
 const SLIDE_JSON_INSTRUCTIONS_NO_OPENING = `Kazdy prvek pole je objekt s polem \"type\" a podle typu dalsi pole:
 - ZADNY slide s type \"title\" — vsechny slidy jsonou pouze content, stats, quote nebo section.
-- {\"type\":\"content\",\"title\":\"...\",\"bullets\":[\"...\"], \"table\":...,\"chart\":... } — aspon 3 bullets NEBO tabulka NEBO graf; table/chart volitelne.
+- {\"type\":\"content\",\"title\":\"...\",\"bullets\":[\"...\"], \"table\":...,\"chart\":... } — aspon 3 bullets NEBO tabulka NEBO graf; na jednom slidu max 5 odracek (s tabulkou/grafem max 4/3), jinak dalsi slide.
 - {\"type\":\"stats\",\"title\":\"...\",\"stats\":[{\"value\":\"...\",\"label\":\"...\"}] } — 2 az 6 paru.
 - {\"type\":\"quote\",\"quote\":\"...\",\"title\":\"...volitelne\",\"attribution\":\"...volitelne\"}
 - {\"type\":\"section\",\"title\":\"...\",\"subtitle\":\"...volitelne\"}
 
-Pis vyhradne cesky. Zadny markdown, zadny text mimo JSON.`;
+Nikdy nevkladaj cele JSON objekty jako odrázky; pouze čitelné věty. Pis vyhradne cesky. Zadny markdown, zadny text mimo JSON.`;
 
 async function buildPresentationSlides(params: {
   runId: string;
@@ -127,13 +143,12 @@ async function buildPresentationSlides(params: {
 }) {
   const sample = params.rows.slice(0, 16);
   const maxTokens = Math.min(2200, Math.max(900, params.slideCount * 220));
-  const weeklyDeckHint = params.includeOpeningTitleSlide
-    ? params.slideCount === 4
-      ? "\nStruktura (celkem 4 slidy vcetne titulku): 1) title — kratky nazev (2–6 slov). 2) content — KPI/shrnuti. 3) content — trendy. 4) content nebo stats — doporuceni.\n"
-      : ""
-    : params.slideCount === 3
-      ? "\nStruktura (3 obsahove slidy bez titulku): 1) content — KPI/shrnuti. 2) content — trendy. 3) content nebo stats.\n"
-      : "";
+  const weeklyDeckHint =
+    params.slideCount >= 6 && params.includeOpeningTitleSlide
+      ? "\nMas vice slidů: rozloz temata logicky (KPI, trend, rizika, odporuceni…), na kazdem content slidu jen par odracek.\n"
+      : params.slideCount >= 5 && !params.includeOpeningTitleSlide
+        ? "\nBez titulku — rozdel obsah na vice obsahovych slidů, na jednom slidě malo bodů.\n"
+        : "";
   const templateHint =
     params.layoutMode === "branded_template"
       ? " Sablona PPTX ma omezeny prostor: u content zvol kratsi titulky (~55 znaku) a kratsi body (~140 znaku). "
@@ -141,8 +156,8 @@ async function buildPresentationSlides(params: {
   const styledHint =
     params.layoutMode === "styled_slide"
       ? params.includeOpeningTitleSlide
-        ? " Vystup bude kreslen podle typu slidu — drz title/subtitle strucne, u content preferuj 4–7 odracek kde to da smysl, kazdy bod jedna myslenka (~do 200 znaku). "
-        : " Vystup bude kreslen podle typu slidu (bez titulniho slidu) — u content preferuj 4–7 odracek kde to da smysl, kazdy bod jedna myslenka (~do 200 znaku). "
+        ? " Vystup bude kreslen podle typu slidu — drz title/subtitle strucne; u content maximalne 5 odracek na slide (s tabulkou max 4, s tabulkou i grafem max 3), jinak pridej dalsi content slide. Kazdy bod jedna myslenka (~do 200 znaku). "
+        : " Vystup bez titulniho slidu — stejna pravidla poctu odracek na slide jako vyse; vice slidů s malo body. "
       : "";
 
   let llmText = "";
@@ -216,9 +231,18 @@ export async function generatePresentationArtifact(params: PresentationArtifactI
   await ensurePublicStorageBucket(supabase, bucketName);
 
   const includeOpening = parsedInput.data.includeOpeningTitleSlide !== false;
+  const ctxText = parsedInput.data.context ?? "";
+  const explicitSlidesFromQuestion = inferSlideCountFromUserText(ctxText);
+
   let contentSlideCount = Math.min(14, Math.max(1, parsedInput.data.slideCount ?? WEEKLY_REPORT_DEFAULT_SLIDE_COUNT));
+  if (explicitSlidesFromQuestion !== undefined) {
+    contentSlideCount = Math.min(14, explicitSlidesFromQuestion);
+  } else {
+    const boosted = boostContentSlideCountFromPayload(parsedInput.data.rows.length, ctxText.length);
+    contentSlideCount = Math.min(14, Math.max(contentSlideCount, boosted));
+  }
   if (!includeOpening && contentSlideCount < 2) contentSlideCount = 2;
-  const totalSlideCount = Math.min(15, includeOpening ? contentSlideCount + 1 : contentSlideCount);
+  const totalSlideCount = Math.min(MAX_DECK_SLIDES, includeOpening ? contentSlideCount + 1 : contentSlideCount);
   const templateCfg = resolvePresentationTemplate(env);
   const slidesRaw = await buildPresentationSlides({
     ...parsedInput.data,
@@ -229,6 +253,7 @@ export async function generatePresentationArtifact(params: PresentationArtifactI
   let slidesOrdered = includeOpening
     ? ensureOpeningTitleSlide(slidesRaw, parsedInput.data.title, totalSlideCount)
     : stripLeadingTitleSlides(slidesRaw).slice(0, totalSlideCount);
+  slidesOrdered = expandDenseContentSlides(slidesOrdered, MAX_DECK_SLIDES);
   if (slidesOrdered.length < 2) {
     slidesOrdered = buildFallbackPresentationSlides(
       parsedInput.data.rows,
@@ -237,9 +262,10 @@ export async function generatePresentationArtifact(params: PresentationArtifactI
       { includeOpeningTitleSlide: includeOpening }
     );
   }
-  const slides = templateCfg.useTemplate
+  let slides = templateCfg.useTemplate
     ? clampPresentationSlidesForTemplate(slidesOrdered)
     : clampPresentationSlidesForNative(slidesOrdered);
+  slides = ensureContentSlidesMeetMinBullets(slides);
 
   const useFlag = env.PRESENTATION_USE_TEMPLATE?.trim().toLowerCase();
   const templateForcedOn = useFlag === "true" || useFlag === "1" || useFlag === "yes" || useFlag === "on";

@@ -1,14 +1,101 @@
 import { describe, expect, it } from "vitest";
+import type { PresentationSlide } from "@/lib/agent/tools/presentation-typed-deck";
 import {
   parsePresentationSlidesFromLlmJson,
+  presentationSlideSchema,
   presentationSlidesToTemplateSpecs,
+  buildFallbackPresentationSlides,
   buildNativeTypedPptxBuffer,
+  formatPropertyBulletForSlide,
+  clampPresentationSlidesForNative,
   deriveHeroTitle,
   ensureOpeningTitleSlide,
+  expandDenseContentSlides,
+  ensureContentSlidesMeetMinBullets,
   stripLeadingTitleSlides
 } from "@/lib/agent/tools/presentation-typed-deck";
 
 describe("presentation typed slides", () => {
+  it("fallback deck pro nemovitosti: žádné opakované n/a měsíce ani JSON v odrážkách", () => {
+    const rows: Record<string, unknown>[] = [
+      {
+        property_id: "01aa0001-01aa-41aa-81aa-010000000001",
+        title: "Byt 2+1 Korunní",
+        city: "Praha",
+        address: { city: "Praha", country: "CZ", district: "Vinohrady" },
+        missing_reconstruction: true,
+        missing_structural_changes: true
+      },
+      {
+        property_id: "02",
+        title: "Dům Únětice",
+        city: "Únětice",
+        missing_reconstruction: false,
+        missing_structural_changes: false
+      }
+    ];
+    const slides = buildFallbackPresentationSlides(rows, 4, "Portfolio", { includeOpeningTitleSlide: false });
+    const blob = JSON.stringify(slides);
+    expect(blob).not.toMatch(/Pokryté měsíce:.*n\/a/i);
+    expect(blob).not.toMatch(/"property_id"/);
+    const detail = slides.find((s) => s.type === "content" && /Evidence|Detail/i.test(s.title));
+    expect(detail?.type).toBe("content");
+    if (detail?.type === "content") {
+      expect(detail.bullets.some((b) => b.includes("Korunní"))).toBe(true);
+    }
+  });
+
+  it("formatPropertyBulletForSlide: věty místo klíčů id / listed_price", () => {
+    const line = formatPropertyBulletForSlide({
+      id: "01dd0005-01dd-41dd-81dd-010000000005",
+      title: "Luxusní loft Smíchov",
+      listed_price: 18_900_000,
+      reconstruction_notes: "Kompletní rekonstrukce 2022, loftový standard."
+    });
+    expect(line).toContain("Luxusní loft");
+    expect(line.toLowerCase()).toContain("mil");
+    expect(line.toLowerCase()).not.toContain("listed_price");
+    expect(line.toLowerCase()).not.toContain("id:");
+  });
+
+  it("clamp přepíše i textový řádek „id: · title: · listed_price:“ na větu", () => {
+    const slides = parsePresentationSlidesFromLlmJson(
+      [
+        {
+          type: "content",
+          title: "Objekty",
+          bullets: [
+            "id: 01dd · title: Byt test · listed_price: 7200000 · reconstruction_notes: Panel 80. let.",
+            "b",
+            "c"
+          ]
+        }
+      ],
+      1
+    )!;
+    const clamped = clampPresentationSlidesForNative(slides);
+    const b0 = (clamped[0] as { bullets: string[] }).bullets[0]!;
+    expect(b0.toLowerCase()).not.toContain("listed_price");
+  });
+
+  it("clamp přepíše JSON-like odrážku na čitelný text", () => {
+    const raw = JSON.stringify({
+      property_id: "x",
+      title: "Test byt",
+      city: "Praha",
+      missing_reconstruction: true
+    });
+    const slides = parsePresentationSlidesFromLlmJson(
+      [{ type: "content", title: "X", bullets: [raw, "b", "c"] }],
+      1
+    )!;
+    const clamped = clampPresentationSlidesForNative(slides);
+    expect(clamped[0]!.type).toBe("content");
+    const b0 = (clamped[0] as { bullets: string[] }).bullets[0]!;
+    expect(b0).toContain("Test byt");
+    expect(b0).not.toContain("property_id");
+  });
+
   it("parsuje LLM pole podle discriminated union", () => {
     const raw = [
       { type: "title", title: "Týdenní report", subtitle: "Leden" },
@@ -81,6 +168,61 @@ describe("presentation typed slides", () => {
     const fixed = ensureOpeningTitleSlide(slides, deck, 2);
     expect(fixed[0]!.type).toBe("title");
     expect((fixed[0] as { title: string }).title).toBe("Výkon obchodníků");
+  });
+
+  it("expandDenseContentSlides: pokračování má vždy ≥3 odrážky (nebo sloučení)", () => {
+    const slides = parsePresentationSlidesFromLlmJson(
+      [
+        { type: "title", title: "T", subtitle: "s" },
+        {
+          type: "content",
+          title: "Tab + body",
+          bullets: ["a", "b", "c", "d", "e"],
+          table: { headers: ["X"], rows: [["1"]] }
+        }
+      ],
+      2
+    )!;
+    const expanded = expandDenseContentSlides(slides);
+    for (const sl of expanded) {
+      if (sl.type !== "content") continue;
+      const nb = sl.bullets.length;
+      const rich = !!(sl.table ?? sl.chart);
+      expect(nb >= 3 || rich).toBe(true);
+      expect(presentationSlideSchema.safeParse(sl).success).toBe(true);
+    }
+  });
+
+  it("ensureContentSlidesMeetMinBullets doplní textový slide pod minimum schématu", () => {
+    const thin: PresentationSlide[] = [{ type: "content", title: "A", bullets: ["x", "y"] }];
+    const fixed = ensureContentSlidesMeetMinBullets(thin);
+    expect(fixed[0]!.type).toBe("content");
+    expect((fixed[0] as { bullets: string[] }).bullets.length).toBeGreaterThanOrEqual(3);
+    expect(presentationSlideSchema.safeParse(fixed[0]).success).toBe(true);
+  });
+
+  it("expandDenseContentSlides rozdělí dlouhý seznam bodů a tabulku nechá jen na prvním dílu", () => {
+    const slides = parsePresentationSlidesFromLlmJson(
+      [
+        { type: "title", title: "T", subtitle: "s" },
+        {
+          type: "content",
+          title: "Hustý slide",
+          bullets: ["a", "b", "c", "d", "e", "f", "g"],
+          table: { headers: ["X"], rows: [["1"]] }
+        }
+      ],
+      2
+    )!;
+    const expanded = expandDenseContentSlides(slides);
+    const contentSlides = expanded.filter((s) => s.type === "content");
+    expect(contentSlides.length).toBeGreaterThanOrEqual(2);
+    const first = contentSlides[0] as { table?: unknown; bullets: string[] };
+    const second = contentSlides[1] as { table?: unknown; bullets: string[] };
+    expect(first.table).toBeDefined();
+    expect(second.table).toBeUndefined();
+    expect(first.bullets.length).toBeLessThanOrEqual(4);
+    expect(second.bullets.length).toBeLessThanOrEqual(4);
   });
 
   it("vygeneruje neprázdný pptx z nativního builderu", async () => {

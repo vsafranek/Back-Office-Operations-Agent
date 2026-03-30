@@ -404,6 +404,7 @@ export function ConfigurableAgentPanel({
       assistantStreamRef.current = "";
       setResult(payload);
       onRunComplete?.(payload);
+      setQuestion("");
     } catch (e) {
       setPhaseLog([]);
       setOrchestratorStreamText("");
