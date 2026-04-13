@@ -1,0 +1,26 @@
+{
+  "hash_id": 123456789,
+  "name": "Prodej bytu 2+kk 58 m2",
+  "locality": "Praha 2 - Vinohrady",
+  "description": "Byt po rekonstrukci, balkon, sklep.",
+  "seo": {
+    "category_main_cb": 1,
+    "category_sub_cb": 4,
+    "category_type_cb": 1,
+    "locality": "praha-2-vinohrady"
+  },
+  "gps": {
+    "lat": 50.0755,
+    "lon": 14.4378
+  },
+  "price_czk": {
+    "value_raw": 7490000
+  },
+  "_links": {
+    "images": [
+      {
+        "href": "https://d18-a.sdn.cz/d_18/c_img_gY_4/ABCD.jpeg?fl=res,400,300,1|shr,,20|jpg,80"
+      }
+    ]
+  }
+}

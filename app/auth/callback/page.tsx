@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Loader, Paper, Stack, Text, Title } from "@mantine/core";
 import { useEffect, useState } from "react";
@@ -6,11 +6,11 @@ import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 /**
- * Cíl pro emailRedirectTo po registraci / ověření e-mailu (doplňte URL v Supabase Auth → Redirect URLs).
+ * CĂ­l pro emailRedirectTo po registraci / ovÄ›Ĺ™enĂ­ e-mailu (doplĹte URL v Supabase Auth â†’ Redirect URLs).
  */
 export default function AuthCallbackPage() {
   const router = useRouter();
-  const [message, setMessage] = useState("Dokončuji přihlášení…");
+  const [message, setMessage] = useState("DokonÄŤuji pĹ™ihlĂˇĹˇenĂ­â€¦");
 
   useEffect(() => {
     const supabase = getSupabaseBrowserClient();
@@ -21,10 +21,10 @@ export default function AuthCallbackPage() {
         return;
       }
       if (data.session) {
-        router.replace("/dashboard");
+        router.replace("/");
         return;
       }
-      setMessage("Relace nebyla nalezena. Zkuste se přihlásit znovu.");
+      setMessage("Relace nebyla nalezena. Zkuste se pĹ™ihlĂˇsit znovu.");
       router.replace("/auth/login");
     })();
   }, [router]);
@@ -34,7 +34,7 @@ export default function AuthCallbackPage() {
       <Stack align="center" gap="md">
         <Loader size="sm" />
         <div style={{ textAlign: "center" }}>
-          <Title order={4}>Ověření účtu</Title>
+          <Title order={4}>OvÄ›Ĺ™enĂ­ ĂşÄŤtu</Title>
           <Text size="sm" c="dimmed" mt="xs">
             {message}
           </Text>
@@ -43,3 +43,4 @@ export default function AuthCallbackPage() {
     </Paper>
   );
 }
+

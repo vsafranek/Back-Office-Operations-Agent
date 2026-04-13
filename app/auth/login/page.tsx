@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Anchor, Button, Divider, Paper, PasswordInput, Stack, Text, TextInput, Title } from "@mantine/core";
 import Link from "next/link";
@@ -35,14 +35,14 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/dashboard");
+    router.push("/");
   }
 
   async function handleGoogleLogin() {
     setGoogleLoading(true);
     setMessage(null);
 
-    const redirectTo = `${window.location.origin}/dashboard`;
+    const redirectTo = `${window.location.origin}/`;
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -65,7 +65,7 @@ export default function LoginPage() {
     setMicrosoftLoading(true);
     setMessage(null);
 
-    const redirectTo = `${window.location.origin}/dashboard`;
+    const redirectTo = `${window.location.origin}/`;
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "azure",
       options: {
@@ -82,10 +82,10 @@ export default function LoginPage() {
 
   return (
     <Paper shadow="sm" p="xl" radius="md" withBorder>
-      <Title order={2}>Přihlášení</Title>
+      <Title order={2}>PĹ™ihlĂˇĹˇenĂ­</Title>
       <Text size="sm" c="dimmed" mt="xs">
-        E-mail a heslo, nebo přihlášení přes <strong>Google</strong> / <strong>Microsoft</strong>. Účty se stejným e-mailem v aplikaci po
-        přihlášení sloučíme.
+        E-mail a heslo, nebo pĹ™ihlĂˇĹˇenĂ­ pĹ™es <strong>Google</strong> / <strong>Microsoft</strong>. ĂšÄŤty se stejnĂ˝m e-mailem v aplikaci po
+        pĹ™ihlĂˇĹˇenĂ­ slouÄŤĂ­me.
       </Text>
 
       <form onSubmit={handleLogin}>
@@ -107,28 +107,28 @@ export default function LoginPage() {
             autoComplete="current-password"
           />
           <Button type="submit" fullWidth loading={loading}>
-            {loading ? "Přihlašuji..." : "Přihlásit se e-mailem"}
+            {loading ? "PĹ™ihlaĹˇuji..." : "PĹ™ihlĂˇsit se e-mailem"}
           </Button>
         </Stack>
       </form>
 
       <Anchor component={Link} href="/auth/forgot-password" size="sm" mt="md" display="inline-block">
-        Zapomenuté heslo
+        ZapomenutĂ© heslo
       </Anchor>
 
       <Divider label="nebo" labelPosition="center" my="lg" />
 
       <Stack gap="sm">
         <Button variant="light" fullWidth onClick={() => void handleGoogleLogin()} loading={googleLoading}>
-          {googleLoading ? "Přesměrovávám…" : "Přihlásit přes Google"}
+          {googleLoading ? "PĹ™esmÄ›rovĂˇvĂˇmâ€¦" : "PĹ™ihlĂˇsit pĹ™es Google"}
         </Button>
         <Button variant="light" fullWidth onClick={() => void handleMicrosoftLogin()} loading={microsoftLoading}>
-          {microsoftLoading ? "Přesměrovávám…" : "Přihlásit přes Microsoft"}
+          {microsoftLoading ? "PĹ™esmÄ›rovĂˇvĂˇmâ€¦" : "PĹ™ihlĂˇsit pĹ™es Microsoft"}
         </Button>
       </Stack>
 
       <Text size="sm" mt="lg">
-        Nemáš účet?{" "}
+        NemĂˇĹˇ ĂşÄŤet?{" "}
         <Anchor component={Link} href="/auth/register" size="sm">
           Registrovat
         </Anchor>
@@ -142,3 +142,4 @@ export default function LoginPage() {
     </Paper>
   );
 }
+
