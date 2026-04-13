@@ -62,17 +62,35 @@ function asNumber(value: unknown): number | null {
   return null;
 }
 
-function pickFirstImage(raw: SrealityRawEstate): string | null {
-  const images = raw._links?.images ?? raw._links?.image_middle2;
-  if (!Array.isArray(images)) return null;
+function toAbsoluteHttpUrl(url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
 
-  for (const item of images) {
-    const href = asString(item?.href);
-    if (href && /^https?:\/\//i.test(href)) {
-      return href;
-    }
-  }
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith("//")) return `https:${trimmed}`;
+
   return null;
+}
+
+function pickGalleryImages(raw: SrealityRawEstate): string[] {
+  const candidates = [...(raw._links?.images ?? []), ...(raw._links?.image_middle2 ?? [])];
+  const seen = new Set<string>();
+  const images: string[] = [];
+
+  for (const item of candidates) {
+    const href = asString(item?.href);
+    if (!href) continue;
+
+    const absolute = toAbsoluteHttpUrl(href);
+    if (!absolute || seen.has(absolute)) continue;
+
+    seen.add(absolute);
+    images.push(absolute);
+
+    if (images.length >= 30) break;
+  }
+
+  return images;
 }
 
 function extractFloorAreaM2(raw: SrealityRawEstate): number | null {
@@ -102,7 +120,7 @@ export function parseSrealityListingDeterministic(record: SourceListingRecord): 
   }
 
   const priceRaw = asNumber(raw.price_czk?.value_raw ?? raw.price);
-  const imageUrl = pickFirstImage(raw);
+  const imageUrls = pickGalleryImages(raw);
   const lat = asNumber(raw.gps?.lat);
   const lon = asNumber(raw.gps?.lon);
 
@@ -138,15 +156,11 @@ export function parseSrealityListingDeterministic(record: SourceListingRecord): 
         sourceCategorySubCb: propertySubtypeCb
       }
     },
-    media: imageUrl
-      ? [
-          {
-            mediaUrl: imageUrl,
-            mediaType: "image",
-            sortOrder: 0
-          }
-        ]
-      : [],
+    media: imageUrls.map((mediaUrl, index) => ({
+      mediaUrl,
+      mediaType: "image",
+      sortOrder: index
+    })),
     parserName: "deterministic-sreality",
     parserVersion: "1.0.0",
     confidence: 0.86,
@@ -159,7 +173,8 @@ export function parseSrealityListingDeterministic(record: SourceListingRecord): 
       priceAmount: priceRaw != null ? Math.round(priceRaw) : null
     },
     diagnostics: {
-      missingImage: !imageUrl,
+      missingImage: imageUrls.length === 0,
+      imageCount: imageUrls.length,
       hadSeo: raw.seo != null,
       sourceUrl: record.sourceUrl
     },

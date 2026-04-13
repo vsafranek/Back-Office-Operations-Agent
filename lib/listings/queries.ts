@@ -1,4 +1,5 @@
-import type { ListingFilters } from "@/lib/listings/filters";
+﻿import type { ListingFilters } from "@/lib/listings/filters";
+import type { ListingCardDto, ListingDetailDto, ListingMapBounds } from "@/lib/listings/types";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 
 type ListingRow = {
@@ -41,58 +42,17 @@ type ListingMediaRow = {
   height?: number | null;
 };
 
-export type ListingListItem = {
-  id: string;
-  sourceKey: string;
-  sourceListingId: string;
-  title: string;
-  description: string | null;
-  sourceUrl: string;
-  locality: string;
-  city: string | null;
-  district: string | null;
-  region: string | null;
-  countryCode: string;
-  latitude: number | null;
-  longitude: number | null;
-  offerType: string | null;
-  propertyType: string | null;
-  disposition: string | null;
-  floorAreaM2: number | null;
-  landAreaM2: number | null;
-  floorNumber: number | null;
-  totalFloors: number | null;
-  priceAmount: number | null;
-  currency: string;
-  priceNote: string | null;
-  isActive: boolean;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  publishedAt: string | null;
-  previewImageUrl: string | null;
-  imageCount: number;
-};
-
-export type ListingDetailItem = ListingListItem & {
-  images: Array<{
-    url: string;
-    type: string;
-    sortOrder: number;
-    width: number | null;
-    height: number | null;
-  }>;
-  metadata: Record<string, unknown> | null;
-};
-
 export type ListingSearchResult = {
-  items: ListingListItem[];
+  items: ListingCardDto[];
   total: number;
   page: number;
   perPage: number;
   hasNextPage: boolean;
+  mapBounds: ListingMapBounds | null;
+  totalInBounds: number | null;
 };
 
-function toListItem(row: ListingRow, mediaRows: ListingMediaRow[]): ListingListItem {
+function toListItem(row: ListingRow, mediaRows: ListingMediaRow[]): ListingCardDto {
   const sorted = [...mediaRows].sort((a, b) => a.sort_order - b.sort_order);
   return {
     id: row.id,
@@ -123,6 +83,7 @@ function toListItem(row: ListingRow, mediaRows: ListingMediaRow[]): ListingListI
     lastSeenAt: row.last_seen_at,
     publishedAt: row.published_at,
     previewImageUrl: sorted[0]?.media_url ?? null,
+    galleryPreviewUrls: sorted.slice(0, 10).map((media) => media.media_url),
     imageCount: sorted.length
   };
 }
@@ -150,6 +111,43 @@ async function fetchMediaByListingIds(listingIds: string[]): Promise<Map<string,
   }, new Map<string, ListingMediaRow[]>());
 }
 
+function applyFilters(query: any, filters: ListingFilters) {
+  let next = query;
+
+  if (!filters.includeInactive) {
+    next = next.eq("is_active", true);
+  }
+
+  if (filters.sourceKeys?.length) next = next.in("source_key", filters.sourceKeys);
+  if (filters.offerTypes?.length) next = next.in("offer_type", filters.offerTypes);
+  if (filters.propertyTypes?.length) next = next.in("property_type", filters.propertyTypes);
+  if (filters.dispositions?.length) next = next.in("disposition", filters.dispositions);
+
+  if (filters.localityQuery) {
+    next = next.or(`locality.ilike.%${filters.localityQuery}%,title.ilike.%${filters.localityQuery}%`);
+  }
+
+  if (filters.region) next = next.ilike("region", `%${filters.region}%`);
+  if (filters.minPrice != null) next = next.gte("price_amount", filters.minPrice);
+  if (filters.maxPrice != null) next = next.lte("price_amount", filters.maxPrice);
+  if (filters.minFloorArea != null) next = next.gte("floor_area_m2", filters.minFloorArea);
+  if (filters.maxFloorArea != null) next = next.lte("floor_area_m2", filters.maxFloorArea);
+  if (filters.minLandArea != null) next = next.gte("land_area_m2", filters.minLandArea);
+  if (filters.maxLandArea != null) next = next.lte("land_area_m2", filters.maxLandArea);
+
+  if (filters.bounds) {
+    next = next
+      .not("latitude", "is", null)
+      .not("longitude", "is", null)
+      .gte("latitude", filters.bounds.south)
+      .lte("latitude", filters.bounds.north)
+      .gte("longitude", filters.bounds.west)
+      .lte("longitude", filters.bounds.east);
+  }
+
+  return next;
+}
+
 export async function searchListings(filters: ListingFilters): Promise<ListingSearchResult> {
   const supabase = getSupabaseAdminClient();
 
@@ -160,26 +158,7 @@ export async function searchListings(filters: ListingFilters): Promise<ListingSe
       { count: "exact" }
     );
 
-  if (!filters.includeInactive) {
-    query = query.eq("is_active", true);
-  }
-
-  if (filters.sourceKeys?.length) query = query.in("source_key", filters.sourceKeys);
-  if (filters.offerTypes?.length) query = query.in("offer_type", filters.offerTypes);
-  if (filters.propertyTypes?.length) query = query.in("property_type", filters.propertyTypes);
-  if (filters.dispositions?.length) query = query.in("disposition", filters.dispositions);
-
-  if (filters.localityQuery) {
-    query = query.or(`locality.ilike.%${filters.localityQuery}%,title.ilike.%${filters.localityQuery}%`);
-  }
-
-  if (filters.region) query = query.ilike("region", `%${filters.region}%`);
-  if (filters.minPrice != null) query = query.gte("price_amount", filters.minPrice);
-  if (filters.maxPrice != null) query = query.lte("price_amount", filters.maxPrice);
-  if (filters.minFloorArea != null) query = query.gte("floor_area_m2", filters.minFloorArea);
-  if (filters.maxFloorArea != null) query = query.lte("floor_area_m2", filters.maxFloorArea);
-  if (filters.minLandArea != null) query = query.gte("land_area_m2", filters.minLandArea);
-  if (filters.maxLandArea != null) query = query.lte("land_area_m2", filters.maxLandArea);
+  query = applyFilters(query, filters);
 
   switch (filters.sort) {
     case "price_asc":
@@ -217,11 +196,13 @@ export async function searchListings(filters: ListingFilters): Promise<ListingSe
     total,
     page: filters.page,
     perPage: filters.perPage,
-    hasNextPage: filters.page * filters.perPage < total
+    hasNextPage: filters.page * filters.perPage < total,
+    mapBounds: filters.bounds ?? null,
+    totalInBounds: filters.bounds ? total : null
   };
 }
 
-export async function getListingDetailById(listingId: string): Promise<ListingDetailItem | null> {
+export async function getListingDetailById(listingId: string): Promise<ListingDetailDto | null> {
   const id = listingId.trim();
   if (!id) return null;
 

@@ -1,28 +1,59 @@
-﻿import { requireAuthenticatedUser } from "@/lib/auth/server-auth";
+﻿import { getAuthenticatedUserFromRequest } from "@/lib/auth/server-auth";
 import { parseListingFiltersFromUrl } from "@/lib/listings/filters";
 import { searchListings } from "@/lib/listings/queries";
+import { listSavedListings } from "@/lib/listings/saved-listings";
+import { logger } from "@/lib/observability/logger";
 
 export const runtime = "nodejs";
 
+function getCorrelationId(request: Request): string {
+  return request.headers.get("x-correlation-id")?.trim() || crypto.randomUUID();
+}
+
 export async function GET(request: Request) {
+  const correlationId = getCorrelationId(request);
+
   try {
-    await requireAuthenticatedUser(request);
+    const user = await getAuthenticatedUserFromRequest(request);
     const filters = parseListingFiltersFromUrl(new URL(request.url));
     const result = await searchListings(filters);
 
+    let savedIds = new Set<string>();
+    if (user) {
+      const saved = await listSavedListings(user.id);
+      savedIds = new Set(saved.map((item) => item.listingId));
+    }
+
+    const items = result.items.map((item) => ({
+      ...item,
+      isSaved: user ? savedIds.has(item.id) : false
+    }));
+
+    logger.info("market_listings_query", {
+      correlationId,
+      userId: user?.id ?? null,
+      hasBounds: Boolean(filters.bounds),
+      count: items.length,
+      total: result.total
+    });
+
     return Response.json({
-      items: result.items,
+      items,
       pagination: {
         page: result.page,
         perPage: result.perPage,
         total: result.total,
         hasNextPage: result.hasNextPage
+      },
+      map: {
+        bounds: result.mapBounds,
+        totalInBounds: result.totalInBounds
       }
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    const status = message.includes("Unauthorized") || message.includes("Bearer") ? 401 : 400;
-    return Response.json({ error: message }, { status });
+    logger.warn("market_listings_query_failed", { correlationId, message });
+    return Response.json({ error: message }, { status: 400 });
   }
 }
 

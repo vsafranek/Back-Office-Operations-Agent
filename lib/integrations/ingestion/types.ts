@@ -59,4 +59,5 @@ export type ListingIngestionSummary = {
   parsedCount: number;
   upsertedCount: number;
   failedCount: number;
+  removedCount?: number;
 };

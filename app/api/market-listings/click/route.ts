@@ -1,4 +1,4 @@
-import { z } from "zod";
+ï»¿import { z } from "zod";
 
 import { requireAuthenticatedUser } from "@/lib/auth/server-auth";
 import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const parsed = ClickPayloadSchema.safeParse(body);
 
     if (!parsed.success) {
-      return Response.json({ error: "Neplatný payload kliknutí.", details: parsed.error.flatten() }, { status: 400 });
+      return Response.json({ error: "Neplatny payload kliknuti.", details: parsed.error.flatten() }, { status: 400 });
     }
 
     const supabase = getSupabaseAdminClient();

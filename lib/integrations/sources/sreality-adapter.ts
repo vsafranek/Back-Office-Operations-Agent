@@ -1,4 +1,4 @@
-import { buildSrealityListingDetailUrl } from "@/lib/integrations/sreality-detail-seo-url";
+﻿import { buildSrealityListingDetailUrl } from "@/lib/integrations/sreality-detail-seo-url";
 import { logger } from "@/lib/observability/logger";
 import type {
   SourceAdapter,
@@ -94,6 +94,8 @@ export type FetchSrealityAdapterParams = {
   categorySubCb?: number;
   userAgent?: string;
   timeoutMs?: number;
+  fullScan?: boolean;
+  maxPages?: number;
 };
 
 export class SrealitySourceAdapter implements SourceAdapter {
@@ -101,11 +103,7 @@ export class SrealitySourceAdapter implements SourceAdapter {
 
   constructor(private readonly options: FetchSrealityAdapterParams = {}) {}
 
-  async fetchListings(params: SourceAdapterFetchParams): Promise<SourceAdapterFetchResult> {
-    const fetchedAt = new Date().toISOString();
-    const page = Math.max(1, params.page ?? 1);
-    const perPage = Math.min(Math.max(1, params.perPage ?? 60), 60);
-
+  private async fetchPage(page: number, perPage: number, signal?: AbortSignal) {
     const query = new URLSearchParams({
       category_main_cb: String(this.options.categoryMain ?? 1),
       category_type_cb: String(this.options.categoryType ?? 1),
@@ -136,44 +134,131 @@ export class SrealitySourceAdapter implements SourceAdapter {
           Accept: "application/json",
           "User-Agent": this.options.userAgent?.trim() || DEFAULT_USER_AGENT
         },
-        signal: params.signal ?? controller.signal
+        signal: signal ?? controller.signal
       });
     } finally {
       clearTimeout(timeout);
     }
 
     if (!response.ok) {
-      logger.warn("sreality_adapter_http_error", { status: response.status, url });
-      return { sourceKey: this.sourceKey, fetchedAt, records: [] };
+      logger.warn("sreality_adapter_http_error", { status: response.status, url, page });
+      return null;
     }
 
-    let payload: SrealityApiPayload;
     try {
-      payload = (await response.json()) as SrealityApiPayload;
+      return (await response.json()) as SrealityApiPayload;
     } catch {
-      logger.warn("sreality_adapter_json_parse_error", { url });
-      return { sourceKey: this.sourceKey, fetchedAt, records: [] };
+      logger.warn("sreality_adapter_json_parse_error", { url, page });
+      return null;
+    }
+  }
+
+  async fetchListings(params: SourceAdapterFetchParams): Promise<SourceAdapterFetchResult> {
+    const fetchedAt = new Date().toISOString();
+    const page = Math.max(1, params.page ?? 1);
+    const perPage = Math.min(Math.max(1, params.perPage ?? 60), 60);
+
+    const firstPayload = await this.fetchPage(page, perPage, params.signal);
+    if (!firstPayload) {
+      return {
+        sourceKey: this.sourceKey,
+        fetchedAt,
+        records: [],
+        diagnostics: {
+          fullScanRequested: Boolean(this.options.fullScan),
+          pagesRequested: 1,
+          pagesSucceeded: 0,
+          failedPages: [page],
+          cappedByMaxPages: false,
+          isCompleteSnapshot: false
+        }
+      };
     }
 
-    const estates = payload._embedded?.estates;
+    const estates = firstPayload._embedded?.estates;
     if (!Array.isArray(estates)) {
-      logger.warn("sreality_adapter_unexpected_shape", { url });
-      return { sourceKey: this.sourceKey, fetchedAt, records: [] };
+      logger.warn("sreality_adapter_unexpected_shape", { page });
+      return {
+        sourceKey: this.sourceKey,
+        fetchedAt,
+        records: [],
+        diagnostics: {
+          fullScanRequested: Boolean(this.options.fullScan),
+          pagesRequested: 1,
+          pagesSucceeded: 1,
+          failedPages: [],
+          cappedByMaxPages: false,
+          isCompleteSnapshot: false
+        }
+      };
     }
 
-    const records: SourceListingRecord[] = [];
-    for (const estate of estates) {
-      const mapped = mapEstateToRecord(estate, fetchedAt);
-      if (mapped) {
-        records.push(mapped);
+    const records: SourceListingRecord[] = estates
+      .map((estate) => mapEstateToRecord(estate, fetchedAt))
+      .filter((record): record is SourceListingRecord => Boolean(record));
+
+    const totalCount = typeof firstPayload.result_size === "number" ? firstPayload.result_size : undefined;
+
+    if (!this.options.fullScan || !totalCount) {
+      return {
+        sourceKey: this.sourceKey,
+        fetchedAt,
+        records,
+        totalCount,
+        diagnostics: {
+          fullScanRequested: Boolean(this.options.fullScan),
+          pagesRequested: 1,
+          pagesSucceeded: 1,
+          failedPages: [],
+          totalPagesFromSource: totalCount ? Math.max(1, Math.ceil(totalCount / perPage)) : undefined,
+          cappedByMaxPages: false,
+          isCompleteSnapshot: true
+        }
+      };
+    }
+
+    const totalPages = Math.max(1, Math.ceil(totalCount / perPage));
+    const maxPagesToFetch = this.options.maxPages ?? totalPages - page + 1;
+    const pagesRequested = Math.max(1, Math.min(totalPages - page + 1, maxPagesToFetch));
+    const endPage = Math.min(totalPages, page + pagesRequested - 1);
+    const cappedByMaxPages = endPage < totalPages;
+    const failedPages: number[] = [];
+    let pagesSucceeded = 1;
+
+    for (let currentPage = page + 1; currentPage <= endPage; currentPage += 1) {
+      const payload = await this.fetchPage(currentPage, perPage, params.signal);
+      if (!payload?._embedded?.estates || !Array.isArray(payload._embedded.estates)) {
+        failedPages.push(currentPage);
+        continue;
+      }
+      pagesSucceeded += 1;
+      for (const estate of payload._embedded.estates) {
+        const mapped = mapEstateToRecord(estate, fetchedAt);
+        if (mapped) records.push(mapped);
       }
     }
+
+    const isCompleteSnapshot =
+      page === 1 &&
+      !cappedByMaxPages &&
+      failedPages.length === 0 &&
+      pagesSucceeded === pagesRequested &&
+      records.length >= totalCount;
 
     return {
       sourceKey: this.sourceKey,
       fetchedAt,
       records,
-      totalCount: typeof payload.result_size === "number" ? payload.result_size : undefined
+      totalCount,
+      diagnostics: {
+        fullScanRequested: true,
+        pagesRequested,
+        pagesSucceeded,
+        failedPages,
+        totalPagesFromSource: totalPages,
+        cappedByMaxPages,
+        isCompleteSnapshot
+      }
     };
   }
 }

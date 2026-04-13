@@ -1,4 +1,4 @@
-"use client";
+Ôªø"use client";
 
 import {
   Alert,
@@ -18,41 +18,9 @@ import { IconArrowLeft, IconExternalLink, IconMapPin } from "@tabler/icons-react
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { SavedListingButton } from "@/components/listings/SavedListingButton";
+import type { ListingDetailDto } from "@/lib/listings/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
-
-type ListingDetail = {
-  id: string;
-  sourceKey: string;
-  sourceListingId: string;
-  title: string;
-  description: string | null;
-  sourceUrl: string;
-  locality: string;
-  city: string | null;
-  district: string | null;
-  region: string | null;
-  offerType: string | null;
-  propertyType: string | null;
-  disposition: string | null;
-  floorAreaM2: number | null;
-  landAreaM2: number | null;
-  floorNumber: number | null;
-  totalFloors: number | null;
-  priceAmount: number | null;
-  currency: string;
-  previewImageUrl: string | null;
-  imageCount: number;
-  latitude: number | null;
-  longitude: number | null;
-  metadata: Record<string, unknown> | null;
-  images: Array<{
-    url: string;
-    type: string;
-    sortOrder: number;
-    width: number | null;
-    height: number | null;
-  }>;
-};
 
 function formatPrice(price: number | null, currency: string): string {
   if (price == null) return "Cena na dotaz";
@@ -63,7 +31,35 @@ export function ListingDetailPage({ listingId }: { listingId: string }) {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [item, setItem] = useState<ListingDetail | null>(null);
+  const [item, setItem] = useState<(ListingDetailDto & { isSaved?: boolean }) | null>(null);
+
+  async function toggleSaved(nextSaved: boolean) {
+    if (!item) return;
+    const session = await supabase.auth.getSession();
+    const token = session.data.session?.access_token;
+
+    if (!token) {
+      setError("Pro ukl√°d√°n√≠ nab√≠dek se pros√≠m p≈ôihlas.");
+      return;
+    }
+
+    const response = await fetch(nextSaved ? "/api/saved-listings" : `/api/saved-listings/${item.id}`, {
+      method: nextSaved ? "POST" : "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`
+      },
+      body: nextSaved ? JSON.stringify({ listingId: item.id }) : undefined
+    });
+
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      setError(body.error ?? "Zmƒõna obl√≠ben√Ωch selhala.");
+      return;
+    }
+
+    setItem((current) => (current ? { ...current, isSaved: nextSaved } : current));
+  }
 
   useEffect(() => {
     let alive = true;
@@ -75,28 +71,23 @@ export function ListingDetailPage({ listingId }: { listingId: string }) {
       const session = await supabase.auth.getSession();
       const token = session.data.session?.access_token;
 
-      if (!token) {
-        if (!alive) return;
-        setLoading(false);
-        setError("Pro zobrazenÌ detailu se prosÌm p¯ihlas.");
-        return;
-      }
-
       const response = await fetch(`/api/market-listings/${listingId}`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+        headers: token
+          ? {
+              Authorization: `Bearer ${token}`
+            }
+          : undefined
       });
 
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { error?: string };
         if (!alive) return;
-        setError(body.error ?? `Chyba naËtenÌ detailu (${response.status})`);
+        setError(body.error ?? `Chyba naƒçten√≠ detailu (${response.status})`);
         setLoading(false);
         return;
       }
 
-      const payload = (await response.json()) as { item: ListingDetail };
+      const payload = (await response.json()) as { item: ListingDetailDto & { isSaved?: boolean } };
       if (!alive) return;
 
       setItem(payload.item);
@@ -124,10 +115,10 @@ export function ListingDetailPage({ listingId }: { listingId: string }) {
       <Container size="lg" py="xl">
         <Stack gap="md">
           <Button component={Link} href="/" variant="subtle" leftSection={<IconArrowLeft size={16} />} w="fit-content">
-            ZpÏt na v˝pis
+            Zpƒõt na v√Ωpis
           </Button>
-          <Alert color="red" title="Detail se nepoda¯ilo naËÌst">
-            {error ?? "Inzer·t nebyl nalezen."}
+          <Alert color="red" title="Detail se nepoda≈ôilo naƒç√≠st">
+            {error ?? "Inzer√°t nebyl nalezen."}
           </Alert>
         </Stack>
       </Container>
@@ -135,9 +126,7 @@ export function ListingDetailPage({ listingId }: { listingId: string }) {
   }
 
   const mapLink =
-    item.latitude != null && item.longitude != null
-      ? `https://www.google.com/maps?q=${item.latitude},${item.longitude}`
-      : null;
+    item.latitude != null && item.longitude != null ? `https://www.google.com/maps?q=${item.latitude},${item.longitude}` : null;
 
   return (
     <Box component="main" style={{ background: "#f4f6fb", minHeight: "100%" }}>
@@ -145,24 +134,34 @@ export function ListingDetailPage({ listingId }: { listingId: string }) {
         <Stack gap="lg">
           <Group justify="space-between">
             <Button component={Link} href="/" variant="subtle" leftSection={<IconArrowLeft size={16} />}>
-              ZpÏt na v˝pis
+              Zpƒõt na v√Ωpis
             </Button>
-            <Button component="a" href={item.sourceUrl} target="_blank" rel="noopener noreferrer" rightSection={<IconExternalLink size={14} />}>
-              Otev¯Ìt origin·l
-            </Button>
+            <Group>
+              <SavedListingButton listingId={item.id} isSaved={Boolean(item.isSaved)} onToggle={(_, next) => void toggleSaved(next)} />
+              <Button component="a" href={item.sourceUrl} target="_blank" rel="noopener noreferrer" rightSection={<IconExternalLink size={14} />}>
+                Otev≈ô√≠t origin√°l
+              </Button>
+            </Group>
           </Group>
 
           <Card withBorder radius="lg" p="lg">
             <Stack gap="sm">
               <Group gap="xs" wrap="wrap">
-                <Badge color="dark" variant="filled">{item.sourceKey}</Badge>
+                <Badge color="dark" variant="filled">
+                  {item.sourceKey}
+                </Badge>
                 {item.offerType ? <Badge variant="light">{item.offerType}</Badge> : null}
                 {item.propertyType ? <Badge variant="light">{item.propertyType}</Badge> : null}
                 {item.disposition ? <Badge variant="light">{item.disposition}</Badge> : null}
+                {!item.isActive ? <Badge color="gray">Inzer√°t je neaktivn√≠</Badge> : null}
               </Group>
 
-              <Title order={1} size="h2">{item.title}</Title>
-              <Text fw={800} size="xl">{formatPrice(item.priceAmount, item.currency)}</Text>
+              <Title order={1} size="h2">
+                {item.title}
+              </Title>
+              <Text fw={800} size="xl">
+                {formatPrice(item.priceAmount, item.currency)}
+              </Text>
 
               <Group gap={6} c="dimmed">
                 <IconMapPin size={16} />
@@ -179,15 +178,28 @@ export function ListingDetailPage({ listingId }: { listingId: string }) {
               </Group>
 
               {mapLink ? (
-                <Button component="a" href={mapLink} target="_blank" rel="noopener noreferrer" variant="light" w="fit-content" rightSection={<IconExternalLink size={14} />}>
-                  Otev¯Ìt na mapÏ
+                <Button
+                  component="a"
+                  href={mapLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  variant="light"
+                  w="fit-content"
+                  rightSection={<IconExternalLink size={14} />}
+                >
+                  Otev≈ô√≠t na mapƒõ
                 </Button>
               ) : null}
             </Stack>
           </Card>
 
           <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
-            {(item.images.length > 0 ? item.images : item.previewImageUrl ? [{ url: item.previewImageUrl, type: "image", sortOrder: 0, width: null, height: null }] : []).map((image) => (
+            {(item.images.length > 0
+              ? item.images
+              : item.previewImageUrl
+                ? [{ url: item.previewImageUrl, type: "image", sortOrder: 0, width: null, height: null }]
+                : []
+            ).map((image) => (
               <Card key={`${image.sortOrder}-${image.url}`} withBorder radius="md" p={0} style={{ overflow: "hidden" }}>
                 <img src={image.url} alt={item.title} style={{ width: "100%", height: 220, objectFit: "cover", display: "block" }} />
               </Card>

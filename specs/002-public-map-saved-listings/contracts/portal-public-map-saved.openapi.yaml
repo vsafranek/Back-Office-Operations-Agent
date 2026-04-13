@@ -1,0 +1,255 @@
+﻿openapi: 3.1.0
+info:
+  title: Real Estate Portal - Public Browsing, Saved Listings & Ingestion
+  version: 0.1.0
+  description: |
+    Contract for anonymous listing browsing, authenticated saved listings,
+    and operator-triggered full apartment ingestion from Sreality.
+servers:
+  - url: /
+paths:
+  /api/market-listings:
+    get:
+      summary: Get public listings for catalog/map view
+      operationId: getMarketListings
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 24 }
+        - in: query
+          name: north
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - in: query
+          name: south
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - in: query
+          name: east
+          schema: { type: number, minimum: -180, maximum: 180 }
+        - in: query
+          name: west
+          schema: { type: number, minimum: -180, maximum: 180 }
+        - in: query
+          name: priceMin
+          schema: { type: number, minimum: 0 }
+        - in: query
+          name: priceMax
+          schema: { type: number, minimum: 0 }
+        - in: query
+          name: offerType
+          schema: { type: string, enum: [sale, rent] }
+        - in: query
+          name: disposition
+          schema: { type: string }
+        - in: query
+          name: areaMin
+          schema: { type: number, minimum: 0 }
+        - in: query
+          name: areaMax
+          schema: { type: number, minimum: 0 }
+      responses:
+        '200':
+          description: Paginated listings in requested filter/bounds
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingsResponse'
+        '400':
+          description: Invalid filter or map bounds
+
+  /api/market-listings/{id}:
+    get:
+      summary: Get public listing detail
+      operationId: getMarketListingDetail
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Listing detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingDetail'
+        '404':
+          description: Listing not found
+
+  /api/saved-listings:
+    get:
+      summary: Get saved listings of current authenticated user
+      operationId: getSavedListings
+      security:
+        - supabaseAuth: []
+      responses:
+        '200':
+          description: Saved listings list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SavedListingItem'
+        '401':
+          description: Unauthorized
+
+    post:
+      summary: Save listing for current authenticated user
+      operationId: saveListing
+      security:
+        - supabaseAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [listingId]
+              properties:
+                listingId:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Listing saved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedListingItem'
+        '401':
+          description: Unauthorized
+        '404':
+          description: Listing not found
+        '409':
+          description: Listing already saved
+
+  /api/saved-listings/{listingId}:
+    delete:
+      summary: Remove listing from current authenticated user's saved collection
+      operationId: unsaveListing
+      security:
+        - supabaseAuth: []
+      parameters:
+        - in: path
+          name: listingId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Removed
+        '401':
+          description: Unauthorized
+        '404':
+          description: Not found in user collection
+
+  /api/integrations/sreality/ingest:
+    post:
+      summary: Trigger full Sreality apartment ingestion run
+      operationId: triggerSrealityIngest
+      security:
+        - operatorKey: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode:
+                  type: string
+                  enum: [apartments_full]
+                  default: apartments_full
+                dryRun:
+                  type: boolean
+                  default: false
+      responses:
+        '202':
+          description: Ingestion accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestionAccepted'
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden (not operator)
+
+components:
+  securitySchemes:
+    supabaseAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    operatorKey:
+      type: apiKey
+      in: header
+      name: x-operator-key
+
+  schemas:
+    ListingCard:
+      type: object
+      required: [id, title, priceAmount, currency, locality, sourceUrl]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        priceAmount: { type: number }
+        currency: { type: string }
+        locality: { type: string }
+        disposition: { type: string, nullable: true }
+        areaM2: { type: number, nullable: true }
+        latitude: { type: number, nullable: true }
+        longitude: { type: number, nullable: true }
+        imageUrl: { type: string, nullable: true }
+        sourceUrl: { type: string }
+        isSaved:
+          type: boolean
+          description: Present and meaningful only for authenticated users
+
+    ListingsResponse:
+      type: object
+      required: [items, page, limit, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListingCard'
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+
+    ListingDetail:
+      allOf:
+        - $ref: '#/components/schemas/ListingCard'
+        - type: object
+          properties:
+            description: { type: string, nullable: true }
+            gallery:
+              type: array
+              items: { type: string }
+            publishedAt:
+              type: string
+              format: date-time
+              nullable: true
+
+    SavedListingItem:
+      type: object
+      required: [listingId, savedAt]
+      properties:
+        listingId: { type: string, format: uuid }
+        savedAt: { type: string, format: date-time }
+        listing:
+          $ref: '#/components/schemas/ListingCard'
+
+    IngestionAccepted:
+      type: object
+      required: [runId, status]
+      properties:
+        runId: { type: string, format: uuid }
+        status: { type: string, enum: [accepted, running] }
+        scope: { type: string, example: apartments }

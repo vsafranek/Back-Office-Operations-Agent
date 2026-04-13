@@ -1,4 +1,4 @@
-import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
+﻿import { getSupabaseAdminClient } from "@/lib/supabase/server-client";
 
 export type IngestionRunStatus = "running" | "succeeded" | "partial" | "failed";
 
@@ -18,6 +18,15 @@ export type IngestionRunFinalizeInput = {
   errorMessage?: string | null;
   metadata?: Record<string, unknown>;
 };
+
+export function buildIngestionStatusFromCounts(input: {
+  upsertedCount: number;
+  failedCount: number;
+}): IngestionRunStatus {
+  if (input.failedCount === 0) return "succeeded";
+  if (input.upsertedCount > 0) return "partial";
+  return "failed";
+}
 
 export async function createIngestionRun(input: IngestionRunCreateInput): Promise<string> {
   const supabase = getSupabaseAdminClient();

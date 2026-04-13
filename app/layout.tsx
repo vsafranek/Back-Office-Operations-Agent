@@ -1,4 +1,5 @@
 import { ColorSchemeScript } from "@mantine/core";
+import "leaflet/dist/leaflet.css";
 import type { Metadata } from "next";
 import { Outfit, Plus_Jakarta_Sans } from "next/font/google";
 import React from "react";

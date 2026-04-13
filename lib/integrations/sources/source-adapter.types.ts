@@ -1,4 +1,4 @@
-export type PortalSourceKey = "sreality" | (string & {});
+﻿export type PortalSourceKey = "sreality" | (string & {});
 
 export type SourceListingRecord = {
   sourceKey: PortalSourceKey;
@@ -14,11 +14,22 @@ export type SourceAdapterFetchParams = {
   signal?: AbortSignal;
 };
 
+export type SourceAdapterFetchDiagnostics = {
+  fullScanRequested: boolean;
+  pagesRequested: number;
+  pagesSucceeded: number;
+  failedPages: number[];
+  totalPagesFromSource?: number;
+  cappedByMaxPages: boolean;
+  isCompleteSnapshot: boolean;
+};
+
 export type SourceAdapterFetchResult = {
   sourceKey: PortalSourceKey;
   fetchedAt: string;
   records: SourceListingRecord[];
   totalCount?: number;
+  diagnostics?: SourceAdapterFetchDiagnostics;
 };
 
 export interface SourceAdapter {

@@ -1,32 +1,32 @@
 ﻿# Reality Portal (Zillow-style) - Portal-only scope
 
-Aplikace je nyní čistě realitní portál zaměřený na agregaci inzerátů do jedné databáze.
-MVP zdroj je **Sreality**.
+Aplikace je realitní portál zaměřený na agregaci nabídek do jedné databáze.
+MVP zdroj je **Sreality** (scope: **byty**).
 
 ## Co aplikace dělá
 - Pullne listing data ze Sreality přes adapter vrstvu.
 - Deterministicky naparsuje data do kanonického modelu.
 - Uloží listingy + média + raw snapshoty + parse výsledky do Supabase.
-- Zobrazí katalog a detail inzerátů se Zillow-like filtrováním.
+- Nabídne veřejný katalog + detail bez přihlášení.
+- Umožní přihlášeným uživatelům ukládání oblíbených nabídek.
+- Nabídne Zillow-like split view (mapa + synchronizovaný seznam podle viewportu).
 - Trackuje kliky na detail i originální inzerát.
-
-## Co bylo odstraněno
-- Agent/chat orchestrace.
-- Email/kalendář workflow.
-- Dashboard back-office, portfolio zákazníků, storage/browser presets.
-- Legacy API route stromy mimo realitní scope.
 
 ## Quick start
 1. `cp .env.example .env.local`
-2. Nastav Supabase proměnné (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`).
-3. `npm install`
-4. `npm run dev`
+2. Nastav Supabase proměnné (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`, `SUPABASE_SERVICE_ROLE_KEY`).
+3. Volitelně nastav operator ingest key: `OPERATOR_INGEST_KEY`.
+4. `npm install`
+5. `npm run dev`
 
 ## Klíčové endpointy
-- `GET /api/market-listings` – katalog + filtry.
-- `GET /api/market-listings/:id` – detail inzerátu.
-- `POST /api/market-listings/click` – tracking kliknutí.
-- `POST /api/integrations/sreality/ingest` – ruční spuštění ingestu.
+- `GET /api/market-listings` - veřejný katalog + filtry + bbox mapy.
+- `GET /api/market-listings/:id` - veřejný detail inzerátu.
+- `GET /api/saved-listings` - seznam uložených nabídek přihlášeného uživatele.
+- `POST /api/saved-listings` - uložit nabídku (`{ listingId }`).
+- `DELETE /api/saved-listings/:listingId` - odebrat nabídku z oblíbených.
+- `POST /api/market-listings/click` - tracking kliknutí.
+- `POST /api/integrations/sreality/ingest` - chráněné spuštění full ingestu bytů.
 
 ## Databáze (Supabase)
 Použité migrace pro portal model:
@@ -35,7 +35,15 @@ Použité migrace pro portal model:
 - `033_portal_only_cleanup_drop_legacy.sql`
 - `034_listings_filter_performance_indexes.sql`
 - `035_listing_parse_results_provenance.sql`
+- `036_saved_listings.sql`
+- `037_public_listing_read_policies.sql`
+- `038_map_bounds_indexes.sql`
 
 ## Test/validace
 - `npm run typecheck`
-- `npx vitest run tests/parsers/sreality-deterministic.test.ts tests/parsers/llm-enrichment-parser.test.ts tests/integrations/sreality-ingestion.test.ts tests/listings-filters.test.ts tests/market-listings-detail-route.test.ts tests/market-listings-route.test.ts tests/listings/list-page.test.tsx`
+- `npm run test`
+
+## Operacni monitoring
+- /admin/ingestion - operator prehled ingest runu (nacita pres /api/integrations/sreality/ingest/runs).
+
+

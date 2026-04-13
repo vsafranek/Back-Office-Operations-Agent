@@ -1,30 +1,33 @@
-import { z } from "zod";
+Ôªøimport { z } from "zod";
 
-import { requireAuthenticatedUser } from "@/lib/auth/server-auth";
 import { runSrealityIngestion } from "@/lib/integrations/ingestion/run-ingestion";
+import { logger } from "@/lib/observability/logger";
+import { requireOperatorAccess } from "@/lib/security/operator-auth";
 
 export const runtime = "nodejs";
 
 const IngestRequestSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
+  mode: z.enum(["apartments_full", "apartments_chunk"]).default("apartments_full"),
+  dryRun: z.boolean().default(false),
   perPage: z.coerce.number().int().min(1).max(60).default(60),
-  localityRegionId: z.coerce.number().int().optional(),
-  localityDistrictId: z.coerce.number().int().optional(),
-  offerKind: z.enum(["prodej", "pronajem"]).default("prodej"),
-  categoryMain: z.union([z.literal(1), z.literal(2)]).optional(),
-  categorySubCb: z.coerce.number().int().optional()
+  maxPages: z.coerce.number().int().min(1).max(500).optional(),
+  pageStart: z.coerce.number().int().min(1).default(1),
+  chunkPages: z.coerce.number().int().min(1).max(500).optional(),
+  offerKind: z.enum(["prodej", "pronajem"]).default("prodej")
 });
 
 export async function POST(request: Request) {
+  const correlationId = request.headers.get("x-correlation-id") ?? crypto.randomUUID();
+
   try {
-    const user = await requireAuthenticatedUser(request);
+    const operator = await requireOperatorAccess(request);
     const body = await request.json().catch(() => ({}));
     const parsed = IngestRequestSchema.safeParse(body);
 
     if (!parsed.success) {
       return Response.json(
         {
-          error: "NeplatnÈ parametry ingestion poûadavku.",
+          error: "Neplatn√© parametry ingestion po≈æadavku.",
           details: parsed.error.flatten()
         },
         { status: 400 }
@@ -32,35 +35,57 @@ export async function POST(request: Request) {
     }
 
     const data = parsed.data;
+    const fullScan = data.mode === "apartments_full" || data.mode === "apartments_chunk";
+    const maxPages = data.mode === "apartments_chunk" ? data.chunkPages ?? data.maxPages ?? 1 : data.maxPages;
+
     const result = await runSrealityIngestion({
-      page: data.page,
+      page: data.pageStart,
       perPage: data.perPage,
-      requestedByUserId: user.id,
+      fullScan,
+      dryRun: data.dryRun,
+      requestedByUserId: operator.id === "operator-key" ? null : operator.id,
       triggerMode: "api",
       sourceOptions: {
-        categoryMain: data.categoryMain,
+        categoryMain: 1,
         categoryType: data.offerKind === "pronajem" ? 2 : 1,
-        localityRegionId: data.localityRegionId,
-        localityDistrictId: data.localityDistrictId,
-        categorySubCb: data.categorySubCb
+        categorySubCb: 2,
+        fullScan,
+        maxPages
       }
     });
 
-    return Response.json({
-      ok: true,
-      source: "sreality",
+    logger.info("sreality_ingest_triggered", {
+      correlationId,
       runId: result.runId,
-      summary: {
-        fetched: result.fetchedCount,
-        parsed: result.parsedCount,
-        upserted: result.upsertedCount,
-        failed: result.failedCount
-      }
+      status: result.status,
+      triggeredBy: operator.id,
+      mode: data.mode,
+      pageStart: data.pageStart,
+      maxPages
     });
+
+    return Response.json(
+      {
+        status: "accepted",
+        source: "sreality",
+        runId: result.runId,
+        scope: "apartments",
+        mode: data.mode,
+        pageStart: data.pageStart,
+        maxPages,
+        summary: {
+          fetched: result.fetchedCount,
+          parsed: result.parsedCount,
+          upserted: result.upsertedCount,
+          failed: result.failedCount,
+          removed: result.removedCount ?? 0
+        }
+      },
+      { status: 202 }
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    const status =
-      message.includes("Unauthorized") || message.includes("Bearer") || message.includes("Missing Bearer") ? 401 : 500;
+    const status = message.includes("Forbidden") ? 403 : 500;
 
     return Response.json({ error: message }, { status });
   }
