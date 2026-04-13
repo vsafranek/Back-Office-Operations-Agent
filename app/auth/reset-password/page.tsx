@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Anchor, Button, Paper, PasswordInput, Stack, Text, Title } from "@mantine/core";
 import Link from "next/link";
@@ -26,11 +26,11 @@ export default function ResetPasswordPage() {
     setMessage(null);
 
     if (password.length < 8) {
-      setMessage("Heslo musí mít alespoň 8 znaků.");
+      setMessage("Heslo musĂ­ mĂ­t alespoĹ 8 znakĹŻ.");
       return;
     }
     if (password !== password2) {
-      setMessage("Hesla se neshodují.");
+      setMessage("Hesla se neshodujĂ­.");
       return;
     }
 
@@ -43,21 +43,21 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    router.replace("/dashboard");
+    router.replace("/");
   }
 
   return (
     <Paper shadow="sm" p="xl" radius="md" withBorder>
-      <Title order={2}>Nové heslo</Title>
+      <Title order={2}>NovĂ© heslo</Title>
       {!ready ? (
         <Text size="sm" c="dimmed" mt="md">
-          Otevřete odkaz z e-mailu v tomto prohlížeči. Pokud relace nepřijde, zkuste znovu „Zapomenuté heslo“.
+          OtevĹ™ete odkaz z e-mailu v tomto prohlĂ­ĹľeÄŤi. Pokud relace nepĹ™ijde, zkuste znovu â€žZapomenutĂ© hesloâ€ś.
         </Text>
       ) : (
         <form onSubmit={handleSubmit}>
           <Stack gap="md" mt="lg">
             <PasswordInput
-              label="Nové heslo"
+              label="NovĂ© heslo"
               value={password}
               onChange={(e) => setPassword(e.currentTarget.value)}
               required
@@ -65,7 +65,7 @@ export default function ResetPasswordPage() {
               autoComplete="new-password"
             />
             <PasswordInput
-              label="Nové heslo znovu"
+              label="NovĂ© heslo znovu"
               value={password2}
               onChange={(e) => setPassword2(e.currentTarget.value)}
               required
@@ -73,14 +73,14 @@ export default function ResetPasswordPage() {
               autoComplete="new-password"
             />
             <Button type="submit" fullWidth loading={loading}>
-              {loading ? "Ukládám…" : "Nastavit heslo"}
+              {loading ? "UklĂˇdĂˇmâ€¦" : "Nastavit heslo"}
             </Button>
           </Stack>
         </form>
       )}
 
       <Anchor component={Link} href="/auth/login" size="sm" mt="lg" display="inline-block">
-        Přihlášení
+        PĹ™ihlĂˇĹˇenĂ­
       </Anchor>
 
       {message ? (
@@ -91,3 +91,4 @@ export default function ResetPasswordPage() {
     </Paper>
   );
 }
+

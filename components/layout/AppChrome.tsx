@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   Anchor,
@@ -18,23 +18,14 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
-const mainLinks = [
-  { href: "/", label: "Domů", match: (p: string) => p === "/" },
-  { href: "/dashboard", label: "Dashboard", match: (p: string) => p.startsWith("/dashboard") },
-  { href: "/settings", label: "Nastavení", match: (p: string) => p.startsWith("/settings") },
-  { href: "/storage", label: "Storage", match: (p: string) => p.startsWith("/storage") }
-];
+type NavLinkDef = { href: string; label: string; match: (pathname: string) => boolean };
 
-function NavItems({
-  pathname,
-  onNavigate
-}: {
-  pathname: string;
-  onNavigate?: () => void;
-}) {
+const mainLinks: NavLinkDef[] = [{ href: "/", label: "Nabídky", match: (p) => p === "/" }];
+
+function NavItems({ pathname, links, onNavigate }: { pathname: string; links: NavLinkDef[]; onNavigate?: () => void }) {
   return (
     <>
-      {mainLinks.map((link) => {
+      {links.map((link) => {
         const active = link.match(pathname);
         return (
           <Anchor
@@ -67,6 +58,8 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
   const [mobileOpened, { toggle, close }] = useDisclosure(false);
   const [authReady, setAuthReady] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  const navLinks = useMemo(() => mainLinks, []);
+
   const isAuth = pathname.startsWith("/auth");
   const isPublicLegal = pathname === "/privacy" || pathname === "/terms";
   const isHome = pathname === "/";
@@ -104,7 +97,7 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
       <Box mih="100vh" bg="gray.0">
         <Box maw={800} mx="auto" py="xl" px="md">
           <Anchor component={Link} href="/" size="sm" c="dimmed" mb="lg" display="inline-block">
-            ← Zpět na úvod
+            ‹ Zpět na úvod
           </Anchor>
           {children}
         </Box>
@@ -112,7 +105,6 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
     );
   }
 
-  // On homepage for logged-out users, keep a clean public layout without app chrome.
   if (isHome && authReady && !signedIn) {
     return (
       <Box mih="100vh" bg="gray.0">
@@ -152,12 +144,11 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
             borderBottom: "1px solid var(--mantine-color-default-border)"
           }}
         >
-          {/* Řádek 1: značka vlevo nahoře, akce vpravo (burger + odhlášení na mobilu) */}
           <Box px="md" py={10}>
             <Group justify="space-between" wrap="nowrap" align="center" gap="md">
               <Anchor component={Link} href="/" underline="never" c="inherit" style={{ minWidth: 0 }}>
                 <Text ff="heading" fw={700} fz="lg" lh={1.3} component="span" lts="-0.02em">
-                  Back Office
+                  Reality Portal
                 </Text>
               </Anchor>
               <Group gap="xs" wrap="nowrap">
@@ -169,7 +160,6 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
             </Group>
           </Box>
 
-          {/* Řádek 2: horizontální menu (jen desktop) — pod názvem, zarovnané s obsahem */}
           <Box
             component="nav"
             aria-label="Hlavní navigace"
@@ -181,7 +171,7 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
             }}
           >
             <Group gap={4} wrap="wrap">
-              <NavItems pathname={pathname} />
+              <NavItems pathname={pathname} links={navLinks} />
             </Group>
           </Box>
         </Stack>
@@ -199,7 +189,7 @@ export function AppChrome({ children }: Readonly<{ children: React.ReactNode }>)
       >
         <Stack gap="lg" justify="space-between" style={{ minHeight: "60vh" }}>
           <Stack gap="xs">
-            {mainLinks.map((link) => {
+            {navLinks.map((link) => {
               const active = link.match(pathname);
               return (
                 <Anchor

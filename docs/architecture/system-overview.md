@@ -1,25 +1,34 @@
-# Back Office Agent – přehled systému
+﻿# System Overview (Portal-only)
 
-## Kontext (C4 – kontejner)
+## Cíl
+Zillow-style realitní portal agregující více zdrojů do jedné kanonické databáze.
+Aktuálně je aktivní zdroj **Sreality**.
 
-- **Klient**: Next.js dashboard (`app/dashboard`) volá REST API s Bearer tokenem (Supabase Auth).
-- **API**: `app/api/agent` spouští `runBackOfficeAgent`; `app/api/agent/trace` vrací strom kroků pro `runId`; `app/api/audit/run` agreguje běh + odchozí e-maily; `app/api/agent/trace/ops` čte trace pro systémové actory (tajný klíč).
-- **Orchestrace**: profil agenta (`lib/agent/config`) → klasifikace záměru (basic LLM nebo thinking orchestrátor) → `runAgentOrchestrator` → specializované subagenty.
-- **Nástroje**: `ToolRunner` validuje vstup/výstup dle Zod a volá implementace v `lib/agent/tools/*` (SQL, reporty, prezentace, kalendář, e-mail, web…).
-- **Data**: Postgres + Storage (Supabase); Azure OpenAI přes oficiální `openai` SDK (`lib/llm/azure-proxy-provider`).
+## Hlavní vrstvy
 
-## Korelace běhu
+1. **Source adapters** (`lib/integrations/sources/*`)
+   - sjednocené načítání dat z externích portálů.
+   - aktuálně: `sreality-adapter.ts`.
 
-- Každý požadavek dostane **`runId`** (UUID). Stejná hodnota je v odpovědi agenta, v metadatech zpráv konverzace a v řádcích **`agent_trace_events`**.
+2. **Parsers** (`lib/integrations/parsers/*`)
+   - deterministic parser pro stabilní mapping.
+   - optional LLM enrichment parser s confidence a fallback.
 
-## Trace strom
+3. **Ingestion orchestration** (`lib/integrations/ingestion/*`)
+   - běh ingestu (`run-ingestion.ts`), run logy, upsert canonical dat.
 
-- Uzly: `orchestrator` (start běhu, výběr intentu), `llm` (volání modelu), `subagent` (hranice intentu), `tool` (konkrétní nástroj).
-- Rodičovské vazby přes **`parent_id`**; pořadí přes **`step_index`**.
-- V UI lze rozkliknout vstup/výstup (velké tabulky v trace jen náhled přes serializaci).
+4. **Persistence (Supabase)**
+   - `portal_sources`, `listing_ingestion_runs`, `listings`, `listing_media`, `listing_raw_snapshots`, `listing_parse_results`, `listing_click_events`.
 
-## Další čtení
+5. **Portal API + UI**
+   - API: `app/api/market-listings/*`, `app/api/integrations/sreality/ingest`.
+   - UI: `app/page.tsx`, `components/listings/*`, detail `app/listing/[id]/page.tsx`.
 
-- [ADR 001 – Orchestrace a profily agentů](./adr/001-orchestration-and-agents.md)
-- [ADR 002 – Trace a observabilita](./adr/002-trace-and-observability.md)
-- [Konvence auditního meta u trace](./audit-meta-conventions.md)
+## Scope boundaries
+- Mimo scope: email, calendar, CRM, workflow orchestrace, konverzační agent.
+- Legacy back-office DB objekty se odstraňují migrací `033_portal_only_cleanup_drop_legacy.sql`.
+
+## Runtime
+- Next.js App Router
+- Supabase auth + DB
+- Mantine UI

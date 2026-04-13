@@ -20,8 +20,8 @@ const fontDisplay = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "Back Office Operations Agent",
-  description: "Agent for real estate operations, analytics and workflows."
+  title: "Reality Portal",
+  description: "Zillow-style real estate portal with multi-source listings."
 };
 
 export default function RootLayout({
@@ -44,3 +44,4 @@ export default function RootLayout({
     </html>
   );
 }
+

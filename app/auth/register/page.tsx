@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { Anchor, Button, Divider, Paper, PasswordInput, Stack, Text, TextInput, Title } from "@mantine/core";
 import Link from "next/link";
@@ -39,7 +39,7 @@ export default function RegisterPage() {
       return;
     }
 
-    setMessage("Registrace proběhla. Pokud máš zapnuté email potvrzení, potvrď email a pak se přihlas.");
+    setMessage("Registrace probÄ›hla. Pokud mĂˇĹˇ zapnutĂ© email potvrzenĂ­, potvrÄŹ email a pak se pĹ™ihlas.");
     router.push("/auth/login");
   }
 
@@ -47,7 +47,7 @@ export default function RegisterPage() {
     setGoogleLoading(true);
     setMessage(null);
 
-    const redirectTo = `${window.location.origin}/dashboard`;
+    const redirectTo = `${window.location.origin}/`;
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -70,7 +70,7 @@ export default function RegisterPage() {
     setMicrosoftLoading(true);
     setMessage(null);
 
-    const redirectTo = `${window.location.origin}/dashboard`;
+    const redirectTo = `${window.location.origin}/`;
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "azure",
       options: {
@@ -89,9 +89,9 @@ export default function RegisterPage() {
     <Paper shadow="sm" p="xl" radius="md" withBorder>
       <Title order={2}>Registrace</Title>
       <Text size="sm" c="dimmed" mt="xs">
-        Založte účet e-mailem (ověření dle Supabase) nebo přes <strong>Google</strong> / <strong>Microsoft</strong>. Doplňky v{" "}
+        ZaloĹľte ĂşÄŤet e-mailem (ovÄ›Ĺ™enĂ­ dle Supabase) nebo pĹ™es <strong>Google</strong> / <strong>Microsoft</strong>. DoplĹky v{" "}
         <Anchor component={Link} href="/settings" size="sm">
-          Nastavení
+          NastavenĂ­
         </Anchor>
         .
       </Text>
@@ -124,25 +124,26 @@ export default function RegisterPage() {
 
       <Stack gap="sm">
         <Button variant="light" fullWidth onClick={() => void handleGoogleRegister()} loading={googleLoading}>
-          {googleLoading ? "Přesměrovávám…" : "Pokračovat s Google"}
+          {googleLoading ? "PĹ™esmÄ›rovĂˇvĂˇmâ€¦" : "PokraÄŤovat s Google"}
         </Button>
         <Button variant="light" fullWidth onClick={() => void handleMicrosoftRegister()} loading={microsoftLoading}>
-          {microsoftLoading ? "Přesměrovávám…" : "Pokračovat s Microsoftem"}
+          {microsoftLoading ? "PĹ™esmÄ›rovĂˇvĂˇmâ€¦" : "PokraÄŤovat s Microsoftem"}
         </Button>
       </Stack>
 
       <Text size="sm" mt="lg">
-        Už máš účet?{" "}
+        UĹľ mĂˇĹˇ ĂşÄŤet?{" "}
         <Anchor component={Link} href="/auth/login" size="sm">
-          Přihlásit se
+          PĹ™ihlĂˇsit se
         </Anchor>
       </Text>
 
       {message ? (
-        <Text c={message.includes("proběhla") ? "dimmed" : "red"} size="sm" mt="md">
+        <Text c={message.includes("probÄ›hla") ? "dimmed" : "red"} size="sm" mt="md">
           {message}
         </Text>
       ) : null}
     </Paper>
   );
 }
+

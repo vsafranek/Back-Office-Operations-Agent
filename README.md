@@ -1,49 +1,41 @@
-# Back Office Operations Agent
+﻿# Reality Portal (Zillow-style) - Portal-only scope
 
-Back-office agent for real-estate operations built on:
-- Next.js (API + orchestration),
-- Supabase (database, storage),
-- Azure OpenAI-compatible endpoint via official **`openai`** SDK (chat completions),
-- Google Workspace (Calendar + Gmail drafts).
+Aplikace je nyní čistě realitní portál zaměřený na agregaci inzerátů do jedné databáze.
+MVP zdroj je **Sreality**.
+
+## Co aplikace dělá
+- Pullne listing data ze Sreality přes adapter vrstvu.
+- Deterministicky naparsuje data do kanonického modelu.
+- Uloží listingy + média + raw snapshoty + parse výsledky do Supabase.
+- Zobrazí katalog a detail inzerátů se Zillow-like filtrováním.
+- Trackuje kliky na detail i originální inzerát.
+
+## Co bylo odstraněno
+- Agent/chat orchestrace.
+- Email/kalendář workflow.
+- Dashboard back-office, portfolio zákazníků, storage/browser presets.
+- Legacy API route stromy mimo realitní scope.
 
 ## Quick start
-1. Copy `.env.example` to `.env.local`.
-2. Fill Supabase, Azure proxy and Google credentials.
-3. Install dependencies: `npm install`
-4. Run dev server: `npm run dev`
+1. `cp .env.example .env.local`
+2. Nastav Supabase proměnné (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`).
+3. `npm install`
+4. `npm run dev`
 
-## Main endpoints
-- `POST /api/agent` - natural-language prompt for analytics/workflows. Body: `question`, optional `conversationId`, optional `agentId` (`basic` / `thinking-orchestrator`, default = thinking orchestrator), optional `options.presentation.slideCount` (weekly report defaults to **3** slides).
-- `GET /api/agent/trace?runId=...` - strom LLM + nástrojů pro jeden běh (stejný uživatel jako Bearer token).
-- `GET /api/audit/run?runId=...` - agregát auditu běhu (agent run + outbound e-maily + počet trace); `format=csv` pro export.
-- `GET /api/agent/trace/ops?runId=...&traceUserId=automation_worker` + hlavička `X-Audit-Ops-Secret` - trace pro cron (vyžaduje `AUDIT_OPS_SECRET`).
-- `POST /api/cron/purge-audit` - mazání starých `agent_trace_events` (stejná autorizace jako `x-cron-secret`; volitelně `AGENT_TRACE_RETENTION_DAYS`).
-- `POST /api/cron/daily` - daily market monitoring job.
-- `POST /api/workflows/weekly-report` - weekly executive report trigger (optional: `slideCount` default **3**, `title`, `context`).
-- `GET /api/storage/list` - list files in Supabase Storage (auth required).
-- `GET /api/storage/download` - create signed download link (auth required).
-- `POST /api/storage/download-batch` - create multiple signed download links (auth required).
-- `DELETE /api/storage/file` - delete one file in Supabase Storage (auth required).
-- `DELETE /api/storage/files` - bulk delete files (auth required).
+## Klíčové endpointy
+- `GET /api/market-listings` – katalog + filtry.
+- `GET /api/market-listings/:id` – detail inzerátu.
+- `POST /api/market-listings/click` – tracking kliknutí.
+- `POST /api/integrations/sreality/ingest` – ruční spuštění ingestu.
 
-## Presentation artifacts
-- Weekly report flow now generates:
-  - CSV dataset
-  - Markdown summary
-  - PPTX presentation (`presentation.pptx`) with dynamic slide count (default **3** for weekly flow). Default output is a **styled wide deck** built in `pptxgenjs` (header, content card, spacing). Optional `PRESENTATION_USE_TEMPLATE=true` uses the blue-white file + `pptx-automizer`; see `docs/architecture/presentation-modes.md` and `docs/architecture/presentation-template-blue-white.md`.
-  - PDF version (`presentation.pdf`) for direct sharing — still a simple text layout from slide specs (not the PPTX design); optional `PRESENTATION_SKIP_PDF=true` replaces it with a short placeholder file.
-- **Template rights**: the blue-white deck is a third-party style; verify license/usage before shipping or redistributing the binary.
-- Decision note for future MCP-based presentation mode:
-  - `docs/architecture/presentation-modes.md`
+## Databáze (Supabase)
+Použité migrace pro portal model:
+- `031_real_estate_portal_ingestion_foundation.sql`
+- `032_listing_click_events.sql`
+- `033_portal_only_cleanup_drop_legacy.sql`
+- `034_listings_filter_performance_indexes.sql`
+- `035_listing_parse_results_provenance.sql`
 
-## Supabase migrations
-Run files in order (včetně konverzací a trace), např.:
-1. `001_init_core.sql` … `006_conversations.sql` (jak máte v repu),
-2. **`007_agent_trace_events.sql`** – strom agent / LLM / tool pro dashboard.
-
-Architektura: `docs/architecture/system-overview.md`.
-
-## Security notes
-- Keep service keys only in server env vars.
-- Rotate secrets and cron token regularly.
-- Keep external communication in approval mode (email drafts first).
+## Test/validace
+- `npm run typecheck`
+- `npx vitest run tests/parsers/sreality-deterministic.test.ts tests/parsers/llm-enrichment-parser.test.ts tests/integrations/sreality-ingestion.test.ts tests/listings-filters.test.ts tests/market-listings-detail-route.test.ts tests/market-listings-route.test.ts tests/listings/list-page.test.tsx`
