@@ -1,5 +1,7 @@
 ﻿import { z } from "zod";
 
+import type { TransitMode } from "@/lib/listings/types";
+
 const toInt = (value: string | null, fallback: number): number => {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
@@ -25,6 +27,16 @@ const splitCsv = (value: string | null): string[] | undefined => {
     .map((part) => part.trim())
     .filter(Boolean);
   return parts.length > 0 ? parts : undefined;
+};
+
+const TransitModeSchema = z.enum(["metro", "tram", "bus", "train"]);
+
+const toBoolean = (value: string | null): boolean | undefined => {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return undefined;
 };
 
 const BoundsSchema = z
@@ -60,10 +72,20 @@ export const ListingFilterSchema = z.object({
   maxLandArea: z.number().min(0).optional(),
   sort: z.enum(["last_seen_desc", "price_asc", "price_desc", "area_desc", "area_asc"]).default("last_seen_desc"),
   includeInactive: z.boolean().default(false),
-  bounds: BoundsSchema.optional()
+  bounds: BoundsSchema.optional(),
+  nearMetro: z.boolean().optional(),
+  maxMetroDistanceM: z.number().int().min(100).max(5000).optional(),
+  maxMetroWalkMin: z.number().int().min(1).max(60).optional(),
+  minTransitScore: z.number().int().min(0).max(100).optional(),
+  metroLines: z.array(z.string().trim().min(1)).optional(),
+  metroStopIds: z.array(z.string().uuid()).optional(),
+  transitModes: z.array(TransitModeSchema).optional(),
+  transitMatchMode: z.enum(["any", "all"]).default("any")
 });
 
 export type ListingFilters = z.infer<typeof ListingFilterSchema>;
+export type ListingTransitMatchMode = ListingFilters["transitMatchMode"];
+export type ListingTransitModeFilter = TransitMode;
 
 export function parseListingFiltersFromUrl(url: URL): ListingFilters {
   const p = url.searchParams;
@@ -90,6 +112,14 @@ export function parseListingFiltersFromUrl(url: URL): ListingFilters {
     maxLandArea: toOptionalNumber(p.get("maxLandArea")),
     sort: p.get("sort") ?? "last_seen_desc",
     includeInactive: ["1", "true", "yes", "on"].includes((p.get("includeInactive") ?? "").toLowerCase()),
+    nearMetro: toBoolean(p.get("nearMetro")),
+    maxMetroDistanceM: toOptionalInt(p.get("maxMetroDistanceM")),
+    maxMetroWalkMin: toOptionalInt(p.get("maxMetroWalkMin")),
+    minTransitScore: toOptionalInt(p.get("minTransitScore")),
+    metroLines: splitCsv(p.get("metroLines")),
+    metroStopIds: splitCsv(p.get("metroStopIds")),
+    transitModes: splitCsv(p.get("transitModes")) as TransitMode[] | undefined,
+    transitMatchMode: p.get("transitMatchMode") ?? "any",
     bounds:
       north != null && south != null && east != null && west != null
         ? {

@@ -14,6 +14,7 @@ type ListingResultsPanelProps = {
   onSelect: (listingId: string) => void;
   onToggleSaved: (listingId: string, nextSaved: boolean) => void;
   layout?: "mapGrid" | "listGrid";
+  hasActiveTransitFilters?: boolean;
 };
 
 function formatPrice(value: number | null, currency: string): string {
@@ -82,11 +83,22 @@ function ListingImageCarousel({ listing, height }: { listing: ListingCardDto; he
   );
 }
 
-export function ListingResultsPanel({ items, selectedId, onSelect, onToggleSaved, layout = "listGrid" }: ListingResultsPanelProps) {
+export function ListingResultsPanel({
+  items,
+  selectedId,
+  onSelect,
+  onToggleSaved,
+  layout = "listGrid",
+  hasActiveTransitFilters = false
+}: ListingResultsPanelProps) {
   if (items.length === 0) {
     return (
       <Card withBorder radius="md" p="lg">
-        <Text c="dimmed">Žádné nabídky v aktuálním mapovém výřezu.</Text>
+        <Text c="dimmed">
+          {hasActiveTransitFilters
+            ? "Žádné nabídky neodpovídají aktivním dopravním filtrům. Zkus uvolnit limity metra/režimů."
+            : "Žádné nabídky v aktuálním mapovém výřezu."}
+        </Text>
       </Card>
     );
   }
@@ -129,6 +141,26 @@ export function ListingResultsPanel({ items, selectedId, onSelect, onToggleSaved
             <Group gap={6} wrap="wrap">
               {listing.disposition ? <Badge size={compact ? "xs" : "sm"} variant="light">{listing.disposition}</Badge> : null}
               {listing.floorAreaM2 ? <Badge size={compact ? "xs" : "sm"} variant="outline">{listing.floorAreaM2} m²</Badge> : null}
+              {listing.latitude == null || listing.longitude == null ? (
+                <Badge size={compact ? "xs" : "sm"} color="gray" variant="light">
+                  Bez GPS
+                </Badge>
+              ) : null}
+              {listing.transit?.nearestMetroWalkMin != null ? (
+                <Badge size={compact ? "xs" : "sm"} color="blue" variant="light">
+                  Metro {listing.transit.nearestMetroWalkMin} min
+                </Badge>
+              ) : null}
+              {listing.transit?.transitScore != null ? (
+                <Badge size={compact ? "xs" : "sm"} color="teal" variant="outline">
+                  Transit {listing.transit.transitScore}
+                </Badge>
+              ) : null}
+              {!listing.transit ? (
+                <Badge size={compact ? "xs" : "sm"} color="gray" variant="outline">
+                  Transit profil nedostupný
+                </Badge>
+              ) : null}
               {!listing.isActive ? <Badge size={compact ? "xs" : "sm"} color="gray">Neaktivní</Badge> : null}
             </Group>
 

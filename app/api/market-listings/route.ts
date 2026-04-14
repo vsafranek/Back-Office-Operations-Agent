@@ -33,6 +33,12 @@ export async function GET(request: Request) {
       correlationId,
       userId: user?.id ?? null,
       hasBounds: Boolean(filters.bounds),
+      nearMetro: Boolean(filters.nearMetro),
+      maxMetroDistanceM: filters.maxMetroDistanceM ?? null,
+      maxMetroWalkMin: filters.maxMetroWalkMin ?? null,
+      minTransitScore: filters.minTransitScore ?? null,
+      transitModes: filters.transitModes ?? [],
+      transitMatchMode: filters.transitMatchMode,
       count: items.length,
       total: result.total
     });
@@ -49,11 +55,11 @@ export async function GET(request: Request) {
         bounds: result.mapBounds,
         totalInBounds: result.totalInBounds
       }
-    });
+    }, { headers: { "x-correlation-id": correlationId } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     logger.warn("market_listings_query_failed", { correlationId, message });
-    return Response.json({ error: message }, { status: 400 });
+    return Response.json({ error: message }, { status: 400, headers: { "x-correlation-id": correlationId } });
   }
 }
 

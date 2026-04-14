@@ -42,6 +42,20 @@ type ListingMediaRow = {
   height?: number | null;
 };
 
+type ListingTransitProfileRow = {
+  listing_id: string;
+  nearest_metro_stop_id: string | null;
+  nearest_metro_stop_name: string | null;
+  nearest_metro_line: string | null;
+  nearest_metro_distance_m: number | null;
+  nearest_metro_walk_min: number | null;
+  nearest_tram_distance_m: number | null;
+  nearest_bus_distance_m: number | null;
+  nearest_train_distance_m: number | null;
+  transit_score: number | null;
+  transit_score_band: "low" | "medium" | "high" | null;
+};
+
 export type ListingSearchResult = {
   items: ListingCardDto[];
   total: number;
@@ -52,7 +66,17 @@ export type ListingSearchResult = {
   totalInBounds: number | null;
 };
 
-function toListItem(row: ListingRow, mediaRows: ListingMediaRow[]): ListingCardDto {
+const listingProjection =
+  "id,source_key,source_listing_id,title,description,source_url,locality,city,district,region,country_code,latitude,longitude,offer_type,property_type,disposition,floor_area_m2,land_area_m2,floor_number,total_floors,price_amount,currency,price_note,is_active,first_seen_at,last_seen_at,published_at,metadata,listing_transit_profile(listing_id,nearest_metro_stop_id,nearest_metro_stop_name,nearest_metro_line,nearest_metro_distance_m,nearest_metro_walk_min,nearest_tram_distance_m,nearest_bus_distance_m,nearest_train_distance_m,transit_score,transit_score_band)";
+
+function coerceTransitProfile(value: unknown): ListingTransitProfileRow | null {
+  if (!value) return null;
+  if (Array.isArray(value)) return (value[0] as ListingTransitProfileRow | undefined) ?? null;
+  return value as ListingTransitProfileRow;
+}
+
+function toListItem(row: ListingRow & { listing_transit_profile?: unknown }, mediaRows: ListingMediaRow[]): ListingCardDto {
+  const transit = coerceTransitProfile(row.listing_transit_profile);
   const sorted = [...mediaRows].sort((a, b) => a.sort_order - b.sort_order);
   return {
     id: row.id,
@@ -84,7 +108,21 @@ function toListItem(row: ListingRow, mediaRows: ListingMediaRow[]): ListingCardD
     publishedAt: row.published_at,
     previewImageUrl: sorted[0]?.media_url ?? null,
     galleryPreviewUrls: sorted.slice(0, 10).map((media) => media.media_url),
-    imageCount: sorted.length
+    imageCount: sorted.length,
+    transit: transit
+      ? {
+          nearestMetroStopId: transit.nearest_metro_stop_id,
+          nearestMetroStopName: transit.nearest_metro_stop_name,
+          nearestMetroLine: transit.nearest_metro_line,
+          nearestMetroDistanceM: transit.nearest_metro_distance_m,
+          nearestMetroWalkMin: transit.nearest_metro_walk_min,
+          nearestTramDistanceM: transit.nearest_tram_distance_m,
+          nearestBusDistanceM: transit.nearest_bus_distance_m,
+          nearestTrainDistanceM: transit.nearest_train_distance_m,
+          transitScore: transit.transit_score,
+          transitScoreBand: transit.transit_score_band
+        }
+      : undefined
   };
 }
 
@@ -145,6 +183,52 @@ function applyFilters(query: any, filters: ListingFilters) {
       .lte("longitude", filters.bounds.east);
   }
 
+  if (filters.nearMetro) {
+    next = next.not("listing_transit_profile.nearest_metro_distance_m", "is", null);
+  }
+  if (filters.maxMetroDistanceM != null) {
+    next = next.lte("listing_transit_profile.nearest_metro_distance_m", filters.maxMetroDistanceM);
+  }
+  if (filters.maxMetroWalkMin != null) {
+    next = next.lte("listing_transit_profile.nearest_metro_walk_min", filters.maxMetroWalkMin);
+  }
+  if (filters.minTransitScore != null) {
+    next = next.gte("listing_transit_profile.transit_score", filters.minTransitScore);
+  }
+  if (filters.metroLines?.length) {
+    next = next.in("listing_transit_profile.nearest_metro_line", filters.metroLines);
+  }
+  if (filters.metroStopIds?.length) {
+    next = next.in("listing_transit_profile.nearest_metro_stop_id", filters.metroStopIds);
+  }
+  if (filters.transitModes?.length) {
+    const modeConditions = filters.transitModes.map((mode) => {
+      switch (mode) {
+        case "metro":
+          return "listing_transit_profile.nearest_metro_distance_m.not.is.null";
+        case "tram":
+          return "listing_transit_profile.nearest_tram_distance_m.not.is.null";
+        case "bus":
+          return "listing_transit_profile.nearest_bus_distance_m.not.is.null";
+        case "train":
+          return "listing_transit_profile.nearest_train_distance_m.not.is.null";
+        default:
+          return null;
+      }
+    });
+    const validConditions = modeConditions.filter(Boolean) as string[];
+    if (validConditions.length > 0) {
+      if (filters.transitMatchMode === "all") {
+        for (const condition of validConditions) {
+          const [column] = condition.split(".not.is.null");
+          next = next.not(column, "is", null);
+        }
+      } else {
+        next = next.or(validConditions.join(","));
+      }
+    }
+  }
+
   return next;
 }
 
@@ -153,10 +237,7 @@ export async function searchListings(filters: ListingFilters): Promise<ListingSe
 
   let query = supabase
     .from("listings")
-    .select(
-      "id,source_key,source_listing_id,title,description,source_url,locality,city,district,region,country_code,latitude,longitude,offer_type,property_type,disposition,floor_area_m2,land_area_m2,floor_number,total_floors,price_amount,currency,price_note,is_active,first_seen_at,last_seen_at,published_at,metadata",
-      { count: "exact" }
-    );
+    .select(listingProjection, { count: "exact" });
 
   query = applyFilters(query, filters);
 
@@ -185,7 +266,7 @@ export async function searchListings(filters: ListingFilters): Promise<ListingSe
   const { data, error, count } = await query.range(from, to);
   if (error) throw new Error(`Failed to read listings: ${error.message}`);
 
-  const listingRows = (data ?? []) as ListingRow[];
+  const listingRows = (data ?? []) as Array<ListingRow & { listing_transit_profile?: unknown }>;
   const mediaByListingId = await fetchMediaByListingIds(listingRows.map((row) => row.id));
 
   const items = listingRows.map((row) => toListItem(row, mediaByListingId.get(row.id) ?? []));
@@ -209,9 +290,7 @@ export async function getListingDetailById(listingId: string): Promise<ListingDe
   const supabase = getSupabaseAdminClient();
   const { data, error } = await supabase
     .from("listings")
-    .select(
-      "id,source_key,source_listing_id,title,description,source_url,locality,city,district,region,country_code,latitude,longitude,offer_type,property_type,disposition,floor_area_m2,land_area_m2,floor_number,total_floors,price_amount,currency,price_note,is_active,first_seen_at,last_seen_at,published_at,metadata"
-    )
+    .select(listingProjection)
     .eq("id", id)
     .maybeSingle();
 

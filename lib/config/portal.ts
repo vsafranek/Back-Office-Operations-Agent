@@ -21,6 +21,14 @@ export function isMobileMapToggleEnabled(): boolean {
   return readFlag(process.env.PORTAL_MOBILE_MAP_TOGGLE_ENABLED ?? process.env.NEXT_PUBLIC_PORTAL_MOBILE_MAP_TOGGLE_ENABLED, true);
 }
 
+export function isTransitFiltersEnabled(): boolean {
+  return readFlag(process.env.PORTAL_TRANSIT_FILTERS_ENABLED ?? process.env.NEXT_PUBLIC_PORTAL_TRANSIT_FILTERS_ENABLED, true);
+}
+
+export function isTransitMapOverlayEnabled(): boolean {
+  return readFlag(process.env.PORTAL_TRANSIT_MAP_OVERLAY_ENABLED ?? process.env.NEXT_PUBLIC_PORTAL_TRANSIT_MAP_OVERLAY_ENABLED, true);
+}
+
 export function assertLegacyFeatureEnabled(feature: string): void {
   if (!isPortalModeOnly()) return;
   throw new Error(`Feature '${feature}' is disabled in portal-only mode.`);

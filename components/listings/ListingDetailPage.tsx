@@ -175,6 +175,16 @@ export function ListingDetailPage({ listingId }: { listingId: string }) {
                 {item.landAreaM2 != null ? <Badge variant="outline">Pozemek: {item.landAreaM2} m2</Badge> : null}
                 {item.floorNumber != null ? <Badge variant="outline">Patro: {item.floorNumber}</Badge> : null}
                 {item.totalFloors != null ? <Badge variant="outline">Celkem pater: {item.totalFloors}</Badge> : null}
+                {item.transit?.nearestMetroWalkMin != null ? (
+                  <Badge color="blue" variant="light">
+                    Metro: {item.transit.nearestMetroWalkMin} min
+                  </Badge>
+                ) : null}
+                {item.transit?.transitScore != null ? (
+                  <Badge color="teal" variant="outline">
+                    Transit score: {item.transit.transitScore}
+                  </Badge>
+                ) : null}
               </Group>
 
               {mapLink ? (

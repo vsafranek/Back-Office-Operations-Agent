@@ -5,6 +5,30 @@
   west: number;
 };
 
+export type TransitMode = "metro" | "tram" | "bus" | "train";
+
+export type ListingTransitInfoDto = {
+  nearestMetroStopId: string | null;
+  nearestMetroStopName: string | null;
+  nearestMetroLine: string | null;
+  nearestMetroDistanceM: number | null;
+  nearestMetroWalkMin: number | null;
+  nearestTramDistanceM: number | null;
+  nearestBusDistanceM: number | null;
+  nearestTrainDistanceM: number | null;
+  transitScore: number | null;
+  transitScoreBand: "low" | "medium" | "high" | null;
+};
+
+export type TransitStopDto = {
+  id: string;
+  name: string;
+  mode: TransitMode;
+  metroLine: string | null;
+  latitude: number;
+  longitude: number;
+};
+
 export type ListingCardDto = {
   id: string;
   sourceKey: string;
@@ -37,6 +61,7 @@ export type ListingCardDto = {
   galleryPreviewUrls: string[];
   imageCount: number;
   isSaved?: boolean;
+  transit?: ListingTransitInfoDto;
 };
 
 export type ListingDetailDto = ListingCardDto & {

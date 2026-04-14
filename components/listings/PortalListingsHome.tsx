@@ -19,8 +19,8 @@ import { useEffect, useMemo, useState } from "react";
 import { ListingFiltersPanel } from "@/components/listings/filters/ListingFiltersPanel";
 import { ListingMapPanel } from "@/components/listings/ListingMapPanel";
 import { ListingResultsPanel } from "@/components/listings/ListingResultsPanel";
-import { isSplitMapListEnabled } from "@/lib/config/portal";
-import type { ListingCardDto, ListingMapBounds, ListingSearchResponseDto } from "@/lib/listings/types";
+import { isSplitMapListEnabled, isTransitMapOverlayEnabled } from "@/lib/config/portal";
+import type { ListingCardDto, ListingMapBounds, ListingSearchResponseDto, TransitStopDto } from "@/lib/listings/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 const BOUNDS_SYNC_EPS = 0.0008;
@@ -45,6 +45,14 @@ function buildQuery(params: {
   maxPrice: number | undefined;
   minFloorArea: number | undefined;
   maxFloorArea: number | undefined;
+  nearMetro: boolean;
+  maxMetroDistanceM: number | undefined;
+  maxMetroWalkMin: number | undefined;
+  minTransitScore: number | undefined;
+  metroLinesCsv: string;
+  metroStopIdsCsv: string;
+  transitModesCsv: string;
+  transitMatchMode: "any" | "all";
   sort: string;
   bounds: ListingMapBounds;
 }): string {
@@ -61,6 +69,14 @@ function buildQuery(params: {
   if (params.maxPrice != null) query.set("maxPrice", String(Math.round(params.maxPrice)));
   if (params.minFloorArea != null) query.set("minFloorArea", String(params.minFloorArea));
   if (params.maxFloorArea != null) query.set("maxFloorArea", String(params.maxFloorArea));
+  if (params.nearMetro) query.set("nearMetro", "true");
+  if (params.maxMetroDistanceM != null) query.set("maxMetroDistanceM", String(Math.round(params.maxMetroDistanceM)));
+  if (params.maxMetroWalkMin != null) query.set("maxMetroWalkMin", String(Math.round(params.maxMetroWalkMin)));
+  if (params.minTransitScore != null) query.set("minTransitScore", String(Math.round(params.minTransitScore)));
+  if (params.metroLinesCsv.trim()) query.set("metroLines", params.metroLinesCsv.trim());
+  if (params.metroStopIdsCsv.trim()) query.set("metroStopIds", params.metroStopIdsCsv.trim());
+  if (params.transitModesCsv.trim()) query.set("transitModes", params.transitModesCsv.trim());
+  query.set("transitMatchMode", params.transitMatchMode);
 
   query.set("north", String(params.bounds.north));
   query.set("south", String(params.bounds.south));
@@ -110,9 +126,19 @@ export function PortalListingsHome() {
   const [maxPrice, setMaxPrice] = useState<number | undefined>(undefined);
   const [minFloorArea, setMinFloorArea] = useState<number | undefined>(undefined);
   const [maxFloorArea, setMaxFloorArea] = useState<number | undefined>(undefined);
+  const [nearMetro, setNearMetro] = useState(false);
+  const [maxMetroDistanceM, setMaxMetroDistanceM] = useState<number | undefined>(undefined);
+  const [maxMetroWalkMin, setMaxMetroWalkMin] = useState<number | undefined>(undefined);
+  const [minTransitScore, setMinTransitScore] = useState<number | undefined>(undefined);
+  const [metroLinesCsv, setMetroLinesCsv] = useState("");
+  const [metroStopIdsCsv, setMetroStopIdsCsv] = useState("");
+  const [transitModesCsv, setTransitModesCsv] = useState("");
+  const [transitMatchMode, setTransitMatchMode] = useState<"any" | "all">("any");
 
   const [rawBounds, setRawBounds] = useState<ListingMapBounds>(DEFAULT_BOUNDS);
   const [bounds, setBounds] = useState<ListingMapBounds>(DEFAULT_BOUNDS);
+  const [transitStops, setTransitStops] = useState<TransitStopDto[]>([]);
+  const [showTransitOverlay, setShowTransitOverlay] = useState(isTransitMapOverlayEnabled());
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -145,6 +171,14 @@ export function PortalListingsHome() {
         maxPrice,
         minFloorArea,
         maxFloorArea,
+        nearMetro,
+        maxMetroDistanceM,
+        maxMetroWalkMin,
+        minTransitScore,
+        metroLinesCsv,
+        metroStopIdsCsv,
+        transitModesCsv,
+        transitMatchMode,
         sort,
         bounds
       });
@@ -184,7 +218,60 @@ export function PortalListingsHome() {
       alive = false;
       controller.abort();
     };
-  }, [supabase, page, q, offerType, propertyType, disposition, minPrice, maxPrice, minFloorArea, maxFloorArea, sort, bounds]);
+  }, [
+    supabase,
+    page,
+    q,
+    offerType,
+    propertyType,
+    disposition,
+    minPrice,
+    maxPrice,
+    minFloorArea,
+    maxFloorArea,
+    nearMetro,
+    maxMetroDistanceM,
+    maxMetroWalkMin,
+    minTransitScore,
+    metroLinesCsv,
+    metroStopIdsCsv,
+    transitModesCsv,
+    transitMatchMode,
+    sort,
+    bounds
+  ]);
+
+  useEffect(() => {
+    if (!showTransitOverlay) {
+      setTransitStops([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const query = new URLSearchParams();
+    query.set("north", String(bounds.north));
+    query.set("south", String(bounds.south));
+    query.set("east", String(bounds.east));
+    query.set("west", String(bounds.west));
+    query.set("mode", "metro,tram,bus,train");
+    if (metroLinesCsv.trim()) {
+      query.set("metroLines", metroLinesCsv.trim());
+    }
+
+    void fetch(`/api/transit/stops?${query.toString()}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) {
+          return;
+        }
+        const payload = (await response.json()) as { items?: TransitStopDto[] };
+        setTransitStops(Array.isArray(payload.items) ? payload.items : []);
+      })
+      .catch((err) => {
+        if ((err as Error).name === "AbortError") return;
+      });
+
+    return () => controller.abort();
+  }, [showTransitOverlay, bounds, metroLinesCsv]);
 
   async function triggerDebugRefetch() {
     const operatorKey = process.env.NEXT_PUBLIC_OPERATOR_INGEST_KEY?.trim() ?? "";
@@ -260,6 +347,9 @@ export function PortalListingsHome() {
   const showListPanel = true;
   const splitEnabled = isSplitMapListEnabled();
   const twoColumnLayout = showMapPanel && showListPanel && splitEnabled;
+  const coverageRadiusM =
+    maxMetroDistanceM ??
+    (maxMetroWalkMin != null && Number.isFinite(maxMetroWalkMin) ? Math.round(maxMetroWalkMin * 78) : undefined);
 
   return (
     <Box component="main" style={{ background: "#f4f6fb", minHeight: "100%" }}>
@@ -322,6 +412,22 @@ export function PortalListingsHome() {
             setMinFloorArea={setMinFloorArea}
             maxFloorArea={maxFloorArea}
             setMaxFloorArea={setMaxFloorArea}
+            nearMetro={nearMetro}
+            setNearMetro={setNearMetro}
+            maxMetroDistanceM={maxMetroDistanceM}
+            setMaxMetroDistanceM={setMaxMetroDistanceM}
+            maxMetroWalkMin={maxMetroWalkMin}
+            setMaxMetroWalkMin={setMaxMetroWalkMin}
+            minTransitScore={minTransitScore}
+            setMinTransitScore={setMinTransitScore}
+            metroLinesCsv={metroLinesCsv}
+            setMetroLinesCsv={setMetroLinesCsv}
+            metroStopIdsCsv={metroStopIdsCsv}
+            setMetroStopIdsCsv={setMetroStopIdsCsv}
+            transitModesCsv={transitModesCsv}
+            setTransitModesCsv={setTransitModesCsv}
+            transitMatchMode={transitMatchMode}
+            setTransitMatchMode={setTransitMatchMode}
             currentPage={pagination.page}
             currentCount={items.length}
             onChangePageToFirst={() => setPage(1)}
@@ -336,6 +442,14 @@ export function PortalListingsHome() {
               setMaxPrice(undefined);
               setMinFloorArea(undefined);
               setMaxFloorArea(undefined);
+              setNearMetro(false);
+              setMaxMetroDistanceM(undefined);
+              setMaxMetroWalkMin(undefined);
+              setMinTransitScore(undefined);
+              setMetroLinesCsv("");
+              setMetroStopIdsCsv("");
+              setTransitModesCsv("");
+              setTransitMatchMode("any");
               setRawBounds(DEFAULT_BOUNDS);
             }}
           />
@@ -367,6 +481,10 @@ export function PortalListingsHome() {
               {showMapPanel ? (
                 <ListingMapPanel
                   items={items}
+                  transitStops={transitStops}
+                  showTransitOverlay={showTransitOverlay}
+                  onToggleTransitOverlay={setShowTransitOverlay}
+                  coverageRadiusM={coverageRadiusM}
                   bounds={rawBounds}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
@@ -402,6 +520,15 @@ export function PortalListingsHome() {
                     onSelect={setSelectedId}
                     onToggleSaved={toggleSaved}
                     layout={showMapPanel ? "mapGrid" : "listGrid"}
+                    hasActiveTransitFilters={
+                      nearMetro ||
+                      maxMetroDistanceM != null ||
+                      maxMetroWalkMin != null ||
+                      minTransitScore != null ||
+                      metroLinesCsv.trim().length > 0 ||
+                      metroStopIdsCsv.trim().length > 0 ||
+                      transitModesCsv.trim().length > 0
+                    }
                   />
 
                   <Group justify="space-between" mt="md">

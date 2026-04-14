@@ -3,7 +3,7 @@
 import maplibregl, { type LngLatBoundsLike } from "maplibre-gl";
 import { useEffect, useMemo, useRef } from "react";
 
-import type { ListingCardDto, ListingMapBounds } from "@/lib/listings/types";
+import type { ListingCardDto, ListingMapBounds, TransitStopDto } from "@/lib/listings/types";
 
 type MapPoint = {
   id: string;
@@ -18,6 +18,9 @@ type MapPoint = {
 
 type ListingMapLibreCanvasProps = {
   items: ListingCardDto[];
+  transitStops: TransitStopDto[];
+  showTransitOverlay: boolean;
+  coverageRadiusM?: number;
   selectedId: string | null;
   bounds: ListingMapBounds;
   onSelect: (listingId: string | null) => void;
@@ -78,10 +81,20 @@ function applyMarkerVisualState(button: HTMLButtonElement, selected: boolean): v
   button.style.border = `1px solid ${selected ? "#1971c2" : "#d0d7e2"}`;
 }
 
-export function ListingMapLibreCanvas({ items, selectedId, bounds, onSelect, onBoundsChange }: ListingMapLibreCanvasProps) {
+export function ListingMapLibreCanvas({
+  items,
+  transitStops,
+  showTransitOverlay,
+  coverageRadiusM = 0,
+  selectedId,
+  bounds,
+  onSelect,
+  onBoundsChange
+}: ListingMapLibreCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const transitMarkersRef = useRef<maplibregl.Marker[]>([]);
   const markerButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const suppressMoveEventRef = useRef(false);
   const lastFromMapRef = useRef<ListingMapBounds | null>(null);
@@ -172,7 +185,9 @@ export function ListingMapLibreCanvas({ items, selectedId, bounds, onSelect, onB
         boundsEmitTimerRef.current = null;
       }
       markersRef.current.forEach((m) => m.remove());
+      transitMarkersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
+      transitMarkersRef.current = [];
       markerButtonsRef.current.clear();
       map.remove();
       mapRef.current = null;
@@ -235,6 +250,78 @@ export function ListingMapLibreCanvas({ items, selectedId, bounds, onSelect, onB
       applyMarkerVisualState(button, selectedId === pointId);
     }
   }, [selectedId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    transitMarkersRef.current.forEach((m) => m.remove());
+    transitMarkersRef.current = [];
+
+    const coverageSourceId = "transit-coverage-source";
+    const coverageLayerId = "transit-coverage-layer";
+    const hasCoverageSource = Boolean(map.getSource(coverageSourceId));
+    if (map.getLayer(coverageLayerId)) {
+      map.removeLayer(coverageLayerId);
+    }
+    if (hasCoverageSource) {
+      map.removeSource(coverageSourceId);
+    }
+
+    if (!showTransitOverlay || transitStops.length === 0) return;
+
+    for (const stop of transitStops) {
+      const dot = document.createElement("div");
+      dot.style.width = "10px";
+      dot.style.height = "10px";
+      dot.style.borderRadius = "999px";
+      dot.style.background = stop.mode === "metro" ? "#1d4ed8" : "#64748b";
+      dot.style.border = "2px solid #ffffff";
+      dot.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.25)";
+      dot.title = stop.metroLine ? `${stop.name} (${stop.metroLine})` : stop.name;
+
+      const marker = new maplibregl.Marker({ element: dot, anchor: "center" })
+        .setLngLat([stop.longitude, stop.latitude])
+        .addTo(map);
+
+      transitMarkersRef.current.push(marker);
+    }
+
+    if (coverageRadiusM > 0) {
+      const features = transitStops.map((stop) => ({
+        type: "Feature" as const,
+        geometry: {
+          type: "Point" as const,
+          coordinates: [stop.longitude, stop.latitude]
+        },
+        properties: {
+          radius: coverageRadiusM
+        }
+      }));
+
+      map.addSource(coverageSourceId, {
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features
+        }
+      });
+
+      map.addLayer({
+        id: coverageLayerId,
+        type: "circle",
+        source: coverageSourceId,
+        paint: {
+          "circle-color": "#60a5fa",
+          "circle-opacity": 0.11,
+          "circle-stroke-color": "#3b82f6",
+          "circle-stroke-width": 1,
+          // Visual proxy radius for MVP coverage hint.
+          "circle-radius": 52
+        }
+      });
+    }
+  }, [showTransitOverlay, transitStops, coverageRadiusM]);
 
   if (!process.env.NEXT_PUBLIC_MAPY_API_KEY?.trim()) {
     return (

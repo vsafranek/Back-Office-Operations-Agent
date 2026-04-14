@@ -1,4 +1,4 @@
-﻿import { Button, Card, Grid, Group, NumberInput, Select, Text, TextInput } from "@mantine/core";
+﻿import { Button, Card, Checkbox, Grid, Group, NumberInput, Select, Text, TextInput } from "@mantine/core";
 import { IconSearch } from "@tabler/icons-react";
 
 const offerTypeOptions = [
@@ -24,6 +24,11 @@ const sortOptions = [
   { label: "Plocha ˇ", value: "area_desc" }
 ];
 
+const transitMatchOptions = [
+  { label: "Splní libovolný režim", value: "any" },
+  { label: "Splní všechny režimy", value: "all" }
+];
+
 type ListingFiltersPanelProps = {
   q: string;
   setQ: (value: string) => void;
@@ -43,6 +48,22 @@ type ListingFiltersPanelProps = {
   setMinFloorArea: (value: number | undefined) => void;
   maxFloorArea: number | undefined;
   setMaxFloorArea: (value: number | undefined) => void;
+  nearMetro: boolean;
+  setNearMetro: (value: boolean) => void;
+  maxMetroDistanceM: number | undefined;
+  setMaxMetroDistanceM: (value: number | undefined) => void;
+  maxMetroWalkMin: number | undefined;
+  setMaxMetroWalkMin: (value: number | undefined) => void;
+  minTransitScore: number | undefined;
+  setMinTransitScore: (value: number | undefined) => void;
+  metroLinesCsv: string;
+  setMetroLinesCsv: (value: string) => void;
+  metroStopIdsCsv: string;
+  setMetroStopIdsCsv: (value: string) => void;
+  transitModesCsv: string;
+  setTransitModesCsv: (value: string) => void;
+  transitMatchMode: "any" | "all";
+  setTransitMatchMode: (value: "any" | "all") => void;
   currentPage: number;
   currentCount: number;
   onReset: () => void;
@@ -160,6 +181,104 @@ export function ListingFiltersPanel(props: ListingFiltersPanelProps) {
             onChange={(value) => {
               props.onChangePageToFirst();
               props.setMaxFloorArea(typeof value === "number" ? value : undefined);
+            }}
+          />
+        </Grid.Col>
+
+        <Grid.Col span={{ base: 12, md: 2 }}>
+          <Checkbox
+            mt={34}
+            label="Pouze u metra"
+            checked={props.nearMetro}
+            onChange={(event) => {
+              props.onChangePageToFirst();
+              props.setNearMetro(event.currentTarget.checked);
+            }}
+          />
+        </Grid.Col>
+
+        <Grid.Col span={{ base: 6, md: 2 }}>
+          <NumberInput
+            label="Metro do (m)"
+            allowNegative={false}
+            value={props.maxMetroDistanceM}
+            onChange={(value) => {
+              props.onChangePageToFirst();
+              props.setMaxMetroDistanceM(typeof value === "number" ? value : undefined);
+            }}
+          />
+        </Grid.Col>
+
+        <Grid.Col span={{ base: 6, md: 2 }}>
+          <NumberInput
+            label="Metro do (min)"
+            allowNegative={false}
+            value={props.maxMetroWalkMin}
+            onChange={(value) => {
+              props.onChangePageToFirst();
+              props.setMaxMetroWalkMin(typeof value === "number" ? value : undefined);
+            }}
+          />
+        </Grid.Col>
+
+        <Grid.Col span={{ base: 6, md: 2 }}>
+          <NumberInput
+            label="Transit score od"
+            allowNegative={false}
+            min={0}
+            max={100}
+            value={props.minTransitScore}
+            onChange={(value) => {
+              props.onChangePageToFirst();
+              props.setMinTransitScore(typeof value === "number" ? value : undefined);
+            }}
+          />
+        </Grid.Col>
+
+        <Grid.Col span={{ base: 6, md: 4 }}>
+          <TextInput
+            label="Linky metra (CSV)"
+            placeholder="A,B,C"
+            value={props.metroLinesCsv}
+            onChange={(event) => {
+              props.onChangePageToFirst();
+              props.setMetroLinesCsv(event.currentTarget.value);
+            }}
+          />
+        </Grid.Col>
+
+        <Grid.Col span={{ base: 6, md: 4 }}>
+          <TextInput
+            label="Stanice metra (UUID CSV)"
+            placeholder="id1,id2"
+            value={props.metroStopIdsCsv}
+            onChange={(event) => {
+              props.onChangePageToFirst();
+              props.setMetroStopIdsCsv(event.currentTarget.value);
+            }}
+          />
+        </Grid.Col>
+
+        <Grid.Col span={{ base: 6, md: 3 }}>
+          <TextInput
+            label="Režimy dopravy (CSV)"
+            placeholder="metro,tram,bus,train"
+            value={props.transitModesCsv}
+            onChange={(event) => {
+              props.onChangePageToFirst();
+              props.setTransitModesCsv(event.currentTarget.value);
+            }}
+          />
+        </Grid.Col>
+
+        <Grid.Col span={{ base: 6, md: 3 }}>
+          <Select
+            label="Transit match"
+            data={transitMatchOptions}
+            value={props.transitMatchMode}
+            onChange={(value) => {
+              props.onChangePageToFirst();
+              props.setTransitMatchMode((value as "any" | "all") ?? "any");
             }}
           />
         </Grid.Col>

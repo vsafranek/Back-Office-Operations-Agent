@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useMemo } from "react";
 
-import type { ListingCardDto, ListingMapBounds } from "@/lib/listings/types";
+import type { ListingCardDto, ListingMapBounds, TransitStopDto } from "@/lib/listings/types";
 
 const ListingMapLibreCanvas = dynamic(
   () => import("@/components/listings/ListingMapLibreCanvas").then((mod) => mod.ListingMapLibreCanvas),
@@ -21,13 +21,27 @@ const ListingMapLibreCanvas = dynamic(
 
 type ListingMapPanelProps = {
   items: ListingCardDto[];
+  transitStops: TransitStopDto[];
+  showTransitOverlay: boolean;
+  onToggleTransitOverlay: (enabled: boolean) => void;
+  coverageRadiusM?: number;
   bounds: ListingMapBounds;
   selectedId: string | null;
   onSelect: (listingId: string | null) => void;
   onApplyBounds: (bounds: ListingMapBounds) => void;
 };
 
-export function ListingMapPanel({ items, bounds, selectedId, onSelect, onApplyBounds }: ListingMapPanelProps) {
+export function ListingMapPanel({
+  items,
+  transitStops,
+  showTransitOverlay,
+  onToggleTransitOverlay,
+  coverageRadiusM,
+  bounds,
+  selectedId,
+  onSelect,
+  onApplyBounds
+}: ListingMapPanelProps) {
   const withCoordsCount = useMemo(() => items.filter((item) => item.latitude != null && item.longitude != null).length, [items]);
   const selectedItem = useMemo(() => items.find((item) => item.id === selectedId) ?? null, [items, selectedId]);
   const selectedPreviewImage = useMemo(() => {
@@ -46,7 +60,16 @@ export function ListingMapPanel({ items, bounds, selectedId, onSelect, onApplyBo
           overflow: "hidden"
         }}
       >
-        <ListingMapLibreCanvas items={items} selectedId={selectedId} bounds={bounds} onSelect={onSelect} onBoundsChange={onApplyBounds} />
+        <ListingMapLibreCanvas
+          items={items}
+          transitStops={transitStops}
+          showTransitOverlay={showTransitOverlay}
+          coverageRadiusM={coverageRadiusM}
+          selectedId={selectedId}
+          bounds={bounds}
+          onSelect={onSelect}
+          onBoundsChange={onApplyBounds}
+        />
         {selectedItem ? (
           <Box
             style={{
@@ -132,6 +155,28 @@ export function ListingMapPanel({ items, bounds, selectedId, onSelect, onApplyBo
           <Text size="xs" c="dimmed">
             Zobrazeno v mapě: {withCoordsCount}/{items.length} nabídek (jen s GPS).
           </Text>
+          <Text
+            component="button"
+            onClick={() => onToggleTransitOverlay(!showTransitOverlay)}
+            style={{
+              border: "none",
+              background: "transparent",
+              padding: 0,
+              margin: 0,
+              textAlign: "left",
+              fontSize: 12,
+              color: "#2563eb",
+              cursor: "pointer"
+            }}
+          >
+            {showTransitOverlay ? "Skrýt vrstvu zastávek MHD" : "Zobrazit vrstvu zastávek MHD"}
+          </Text>
+          {showTransitOverlay ? (
+            <Text size="xs" c="dimmed">
+              Zastávek v mapě: {transitStops.length}
+              {coverageRadiusM && coverageRadiusM > 0 ? ` · zóna ${coverageRadiusM} m` : ""}
+            </Text>
+          ) : null}
         </Stack>
         <Text size="xs" c="dimmed" ta="right">
           Klik na částku v mapě otevře/skryje spodní náhled nabídky.

@@ -2,7 +2,7 @@ type LogLevel = "info" | "warn" | "error";
 
 type LogPayload = Record<string, unknown>;
 
-const SENSITIVE_KEYS = ["email", "apiKey", "authorization", "body", "token", "privateKey"];
+const SENSITIVE_KEYS = ["email", "apiKey", "authorization", "body", "token", "privateKey", "operatorKey", "x-operator-key"];
 
 function redact(value: unknown): unknown {
   if (typeof value === "string") {

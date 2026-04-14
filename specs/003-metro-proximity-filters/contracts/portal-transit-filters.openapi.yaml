@@ -1,0 +1,192 @@
+openapi: 3.1.0
+info:
+  title: Real Estate Portal - Transit Proximity Filters
+  version: 0.1.0
+  description: |
+    Contract for transport-aware listing discovery focused on metro proximity,
+    transit score filtering, and map stop overlays.
+servers:
+  - url: /
+paths:
+  /api/market-listings:
+    get:
+      summary: Get public listings filtered by map bounds and transit criteria
+      operationId: getMarketListingsWithTransit
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: perPage
+          schema: { type: integer, minimum: 1, maximum: 100, default: 24 }
+        - in: query
+          name: north
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - in: query
+          name: south
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - in: query
+          name: east
+          schema: { type: number, minimum: -180, maximum: 180 }
+        - in: query
+          name: west
+          schema: { type: number, minimum: -180, maximum: 180 }
+        - in: query
+          name: nearMetro
+          schema: { type: boolean, default: false }
+        - in: query
+          name: maxMetroDistanceM
+          schema: { type: integer, minimum: 100, maximum: 5000 }
+        - in: query
+          name: maxMetroWalkMin
+          schema: { type: integer, minimum: 1, maximum: 60 }
+        - in: query
+          name: metroLines
+          description: Comma-separated metro lines (e.g. A,B,C)
+          schema:
+            type: array
+            items: { type: string }
+            style: form
+            explode: false
+        - in: query
+          name: metroStopIds
+          description: Comma-separated stop UUIDs
+          schema:
+            type: array
+            items: { type: string, format: uuid }
+            style: form
+            explode: false
+        - in: query
+          name: transitModes
+          description: Comma-separated transport modes
+          schema:
+            type: array
+            items: { type: string, enum: [metro, tram, bus, train] }
+            style: form
+            explode: false
+        - in: query
+          name: transitMatchMode
+          schema: { type: string, enum: [any, all], default: any }
+        - in: query
+          name: minTransitScore
+          schema: { type: integer, minimum: 0, maximum: 100 }
+      responses:
+        "200":
+          description: Transit-aware listing result set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListingsResponse"
+        "400":
+          description: Invalid transit filter values
+
+  /api/transit/stops:
+    get:
+      summary: Get public transit stops for map overlay
+      operationId: getTransitStops
+      parameters:
+        - in: query
+          name: mode
+          schema:
+            type: array
+            items: { type: string, enum: [metro, tram, bus, train] }
+            style: form
+            explode: false
+        - in: query
+          name: metroLines
+          schema:
+            type: array
+            items: { type: string }
+            style: form
+            explode: false
+        - in: query
+          name: north
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - in: query
+          name: south
+          schema: { type: number, minimum: -90, maximum: 90 }
+        - in: query
+          name: east
+          schema: { type: number, minimum: -180, maximum: 180 }
+        - in: query
+          name: west
+          schema: { type: number, minimum: -180, maximum: 180 }
+      responses:
+        "200":
+          description: Visible transit stops in bounds
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TransitStop"
+        "400":
+          description: Invalid map bounds
+
+components:
+  schemas:
+    ListingTransitInfo:
+      type: object
+      properties:
+        nearestMetroStopName: { type: string, nullable: true }
+        nearestMetroLine: { type: string, nullable: true }
+        nearestMetroDistanceM: { type: integer, nullable: true }
+        nearestMetroWalkMin: { type: integer, nullable: true }
+        transitScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        transitScoreBand: { type: string, enum: [low, medium, high], nullable: true }
+
+    ListingCard:
+      type: object
+      required: [id, title, locality, sourceUrl, currency]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        locality: { type: string }
+        sourceUrl: { type: string }
+        currency: { type: string }
+        priceAmount: { type: number, nullable: true }
+        latitude: { type: number, nullable: true }
+        longitude: { type: number, nullable: true }
+        transit:
+          $ref: "#/components/schemas/ListingTransitInfo"
+
+    ListingsResponse:
+      type: object
+      required: [items, pagination]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ListingCard"
+        pagination:
+          type: object
+          required: [page, perPage, total, hasNextPage]
+          properties:
+            page: { type: integer }
+            perPage: { type: integer }
+            total: { type: integer }
+            hasNextPage: { type: boolean }
+        diagnostics:
+          type: object
+          properties:
+            activeTransitFilters:
+              type: object
+              additionalProperties: true
+            reasons:
+              type: array
+              items: { type: string }
+
+    TransitStop:
+      type: object
+      required: [id, name, mode, lat, lng]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        mode: { type: string, enum: [metro, tram, bus, train] }
+        metroLine: { type: string, nullable: true }
+        lat: { type: number }
+        lng: { type: number }
