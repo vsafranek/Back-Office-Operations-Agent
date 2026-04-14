@@ -6,8 +6,8 @@ import { useMemo } from "react";
 
 import type { ListingCardDto, ListingMapBounds } from "@/lib/listings/types";
 
-const ListingLeafletCanvas = dynamic(
-  () => import("@/components/listings/ListingLeafletCanvas").then((mod) => mod.ListingLeafletCanvas),
+const ListingMapLibreCanvas = dynamic(
+  () => import("@/components/listings/ListingMapLibreCanvas").then((mod) => mod.ListingMapLibreCanvas),
   {
     ssr: false,
     loading: () => (
@@ -67,7 +67,7 @@ export function ListingMapPanel({ items, bounds, selectedId, onSelect, onApplyBo
           overflow: "hidden"
         }}
       >
-        <ListingLeafletCanvas items={items} selectedId={selectedId} bounds={bounds} onSelect={onSelect} onBoundsChange={onApplyBounds} />
+        <ListingMapLibreCanvas items={items} selectedId={selectedId} bounds={bounds} onSelect={onSelect} onBoundsChange={onApplyBounds} />
       </Box>
 
       <Group justify="space-between" align="start" wrap="nowrap">
@@ -84,3 +84,4 @@ export function ListingMapPanel({ items, bounds, selectedId, onSelect, onApplyBo
     </Stack>
   );
 }
+

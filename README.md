@@ -16,8 +16,8 @@ MVP zdroj je **Sreality** (scope: **byty**).
 1. `cp .env.example .env.local`
 2. Nastav Supabase proměnné (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`, `SUPABASE_SERVICE_ROLE_KEY`).
 3. Volitelně nastav operator ingest key: `OPERATOR_INGEST_KEY`.
-4. `npm install`
-5. `npm run dev`
+5. `npm install`
+6. `npm run dev`
 
 ## Klíčové endpointy
 - `GET /api/market-listings` - veřejný katalog + filtry + bbox mapy.
@@ -45,5 +45,6 @@ Použité migrace pro portal model:
 
 ## Operacni monitoring
 - /admin/ingestion - operator prehled ingest runu (nacita pres /api/integrations/sreality/ingest/runs).
+
 
 

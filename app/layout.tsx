@@ -1,5 +1,5 @@
-import { ColorSchemeScript } from "@mantine/core";
-import "leaflet/dist/leaflet.css";
+﻿import { ColorSchemeScript } from "@mantine/core";
+import "maplibre-gl/dist/maplibre-gl.css";
 import type { Metadata } from "next";
 import { Outfit, Plus_Jakarta_Sans } from "next/font/google";
 import React from "react";
@@ -45,4 +45,5 @@ export default function RootLayout({
     </html>
   );
 }
+
 
