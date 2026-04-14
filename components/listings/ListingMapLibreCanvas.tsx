@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import maplibregl, { type LngLatBoundsLike, type Popup } from "maplibre-gl";
+import maplibregl, { type LngLatBoundsLike } from "maplibre-gl";
 import { useEffect, useMemo, useRef } from "react";
 
 import type { ListingCardDto, ListingMapBounds } from "@/lib/listings/types";
@@ -20,16 +20,12 @@ type ListingMapLibreCanvasProps = {
   items: ListingCardDto[];
   selectedId: string | null;
   bounds: ListingMapBounds;
-  onSelect: (listingId: string) => void;
+  onSelect: (listingId: string | null) => void;
   onBoundsChange: (bounds: ListingMapBounds) => void;
 };
 
 const EPS = 0.0005;
-
-function formatPrice(value: number | null, currency: string): string {
-  if (value == null) return "Cena na dotaz";
-  return `${value.toLocaleString("cs-CZ")} ${currency}`;
-}
+const BOUNDS_EMIT_DEBOUNCE_MS = 420;
 
 function makePriceLabel(priceAmount: number | null): string {
   return priceAmount == null ? "N/A" : `${Math.round(priceAmount / 1000)} tis.`;
@@ -76,66 +72,24 @@ function mapyRasterStyle(apiKey: string): maplibregl.StyleSpecification {
   };
 }
 
-function buildPopupDom(point: MapPoint): HTMLDivElement {
-  const root = document.createElement("div");
-  root.style.minWidth = "220px";
-  root.style.maxWidth = "260px";
-
-  const title = document.createElement("div");
-  title.style.fontWeight = "700";
-  title.style.marginBottom = "4px";
-  title.textContent = point.title;
-
-  const locality = document.createElement("div");
-  locality.style.color = "#64748b";
-  locality.style.fontSize = "12px";
-  locality.style.marginBottom = "8px";
-  locality.textContent = point.locality;
-
-  const price = document.createElement("div");
-  price.style.fontWeight = "700";
-  price.style.marginBottom = "10px";
-  price.textContent = formatPrice(point.priceAmount, point.currency);
-
-  const links = document.createElement("div");
-  links.style.display = "flex";
-  links.style.gap = "8px";
-
-  const detailLink = document.createElement("a");
-  detailLink.href = `/listing/${point.id}`;
-  detailLink.style.fontSize = "12px";
-  detailLink.style.color = "#1d4ed8";
-  detailLink.style.textDecoration = "none";
-  detailLink.style.fontWeight = "600";
-  detailLink.textContent = "Detail";
-
-  const sourceLink = document.createElement("a");
-  sourceLink.href = point.sourceUrl;
-  sourceLink.target = "_blank";
-  sourceLink.rel = "noopener noreferrer";
-  sourceLink.style.fontSize = "12px";
-  sourceLink.style.color = "#1d4ed8";
-  sourceLink.style.textDecoration = "none";
-  sourceLink.style.fontWeight = "600";
-  sourceLink.textContent = "Originál";
-
-  links.appendChild(detailLink);
-  links.appendChild(sourceLink);
-
-  root.appendChild(title);
-  root.appendChild(locality);
-  root.appendChild(price);
-  root.appendChild(links);
-
-  return root;
+function applyMarkerVisualState(button: HTMLButtonElement, selected: boolean): void {
+  button.style.background = selected ? "#1971c2" : "#ffffff";
+  button.style.color = selected ? "#ffffff" : "#1f2937";
+  button.style.border = `1px solid ${selected ? "#1971c2" : "#d0d7e2"}`;
 }
 
 export function ListingMapLibreCanvas({ items, selectedId, bounds, onSelect, onBoundsChange }: ListingMapLibreCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const markerButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const suppressMoveEventRef = useRef(false);
   const lastFromMapRef = useRef<ListingMapBounds | null>(null);
+  const boundsEmitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onBoundsChangeRef = useRef(onBoundsChange);
+  const onSelectRef = useRef(onSelect);
+  const selectedIdRef = useRef(selectedId);
+  const initialBoundsRef = useRef(bounds);
 
   const points = useMemo<MapPoint[]>(
     () =>
@@ -155,13 +109,25 @@ export function ListingMapLibreCanvas({ items, selectedId, bounds, onSelect, onB
   );
 
   useEffect(() => {
+    onBoundsChangeRef.current = onBoundsChange;
+  }, [onBoundsChange]);
+
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+  }, [onSelect]);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  useEffect(() => {
     const apiKey = process.env.NEXT_PUBLIC_MAPY_API_KEY?.trim();
     if (!containerRef.current || mapRef.current || !apiKey) return;
 
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: mapyRasterStyle(apiKey),
-      bounds: toBoundsLike(bounds),
+      bounds: toBoundsLike(initialBoundsRef.current),
       fitBoundsOptions: { padding: 20, duration: 0 }
     });
 
@@ -181,19 +147,37 @@ export function ListingMapLibreCanvas({ items, selectedId, bounds, onSelect, onB
         west: b.getWest()
       };
 
-      lastFromMapRef.current = nextBounds;
-      onBoundsChange(nextBounds);
+      if (lastFromMapRef.current && closeEnough(lastFromMapRef.current, nextBounds)) {
+        return;
+      }
+
+      if (boundsEmitTimerRef.current) {
+        clearTimeout(boundsEmitTimerRef.current);
+      }
+
+      boundsEmitTimerRef.current = setTimeout(() => {
+        if (lastFromMapRef.current && closeEnough(lastFromMapRef.current, nextBounds)) {
+          return;
+        }
+        lastFromMapRef.current = nextBounds;
+        onBoundsChangeRef.current(nextBounds);
+      }, BOUNDS_EMIT_DEBOUNCE_MS);
     });
 
     mapRef.current = map;
 
     return () => {
+      if (boundsEmitTimerRef.current) {
+        clearTimeout(boundsEmitTimerRef.current);
+        boundsEmitTimerRef.current = null;
+      }
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
+      markerButtonsRef.current.clear();
       map.remove();
       mapRef.current = null;
     };
-  }, [bounds, onBoundsChange]);
+  }, []);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -220,15 +204,11 @@ export function ListingMapLibreCanvas({ items, selectedId, bounds, onSelect, onB
 
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
+    markerButtonsRef.current.clear();
 
     for (const point of points) {
-      const selected = selectedId === point.id;
-
       const button = document.createElement("button");
       button.type = "button";
-      button.style.background = selected ? "#1971c2" : "#ffffff";
-      button.style.color = selected ? "#ffffff" : "#1f2937";
-      button.style.border = `1px solid ${selected ? "#1971c2" : "#d0d7e2"}`;
       button.style.borderRadius = "999px";
       button.style.padding = "4px 8px";
       button.style.fontSize = "12px";
@@ -237,18 +217,24 @@ export function ListingMapLibreCanvas({ items, selectedId, bounds, onSelect, onB
       button.style.boxShadow = "0 3px 12px rgba(0,0,0,0.15)";
       button.style.cursor = "pointer";
       button.textContent = makePriceLabel(point.priceAmount);
-      button.onclick = () => onSelect(point.id);
+      applyMarkerVisualState(button, selectedId === point.id);
+      button.onclick = () => {
+        const nextSelection = selectedIdRef.current === point.id ? null : point.id;
+        onSelectRef.current(nextSelection);
+      };
 
-      const popup: Popup = new maplibregl.Popup({ offset: 12 }).setDOMContent(buildPopupDom(point));
-
-      const marker = new maplibregl.Marker({ element: button, anchor: "center" })
-        .setLngLat([point.lng, point.lat])
-        .setPopup(popup)
-        .addTo(map);
+      const marker = new maplibregl.Marker({ element: button, anchor: "center" }).setLngLat([point.lng, point.lat]).addTo(map);
 
       markersRef.current.push(marker);
+      markerButtonsRef.current.set(point.id, button);
     }
-  }, [points, selectedId, onSelect]);
+  }, [points]);
+
+  useEffect(() => {
+    for (const [pointId, button] of markerButtonsRef.current.entries()) {
+      applyMarkerVisualState(button, selectedId === pointId);
+    }
+  }, [selectedId]);
 
   if (!process.env.NEXT_PUBLIC_MAPY_API_KEY?.trim()) {
     return (

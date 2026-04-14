@@ -23,6 +23,17 @@ import { isSplitMapListEnabled } from "@/lib/config/portal";
 import type { ListingCardDto, ListingMapBounds, ListingSearchResponseDto } from "@/lib/listings/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
+const BOUNDS_SYNC_EPS = 0.0008;
+
+function boundsAlmostEqual(a: ListingMapBounds, b: ListingMapBounds): boolean {
+  return (
+    Math.abs(a.north - b.north) < BOUNDS_SYNC_EPS &&
+    Math.abs(a.south - b.south) < BOUNDS_SYNC_EPS &&
+    Math.abs(a.east - b.east) < BOUNDS_SYNC_EPS &&
+    Math.abs(a.west - b.west) < BOUNDS_SYNC_EPS
+  );
+}
+
 function buildQuery(params: {
   page: number;
   perPage: number;
@@ -106,7 +117,7 @@ export function PortalListingsHome() {
   useEffect(() => {
     const timeout = setTimeout(() => {
       setBounds(rawBounds);
-    }, 300);
+    }, 550);
 
     return () => clearTimeout(timeout);
   }, [rawBounds]);
@@ -360,7 +371,10 @@ export function PortalListingsHome() {
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   onApplyBounds={(next) => {
-                    setPage(1);
+                    if (boundsAlmostEqual(rawBounds, next)) return;
+                    if (page !== 1) {
+                      setPage(1);
+                    }
                     setRawBounds(next);
                   }}
                 />
