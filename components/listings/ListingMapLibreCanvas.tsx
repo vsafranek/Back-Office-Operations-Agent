@@ -3,7 +3,7 @@
 import maplibregl, { type LngLatBoundsLike } from "maplibre-gl";
 import { useEffect, useMemo, useRef } from "react";
 
-import type { ListingCardDto, ListingMapBounds, TransitStopDto } from "@/lib/listings/types";
+import type { ListingCardDto, ListingMapBounds, TransitRouteDto, TransitStopDto } from "@/lib/listings/types";
 
 type MapPoint = {
   id: string;
@@ -19,7 +19,11 @@ type MapPoint = {
 type ListingMapLibreCanvasProps = {
   items: ListingCardDto[];
   transitStops: TransitStopDto[];
-  showTransitOverlay: boolean;
+  metroRoutes: TransitRouteDto[];
+  showListingMarkers: boolean;
+  showTransitStops: boolean;
+  showMetroRoutes: boolean;
+  showCoverage: boolean;
   coverageRadiusM?: number;
   selectedId: string | null;
   bounds: ListingMapBounds;
@@ -28,7 +32,24 @@ type ListingMapLibreCanvasProps = {
 };
 
 const EPS = 0.0005;
-const BOUNDS_EMIT_DEBOUNCE_MS = 420;
+const BOUNDS_EMIT_DEBOUNCE_MS = 140;
+const TRANSIT_STOP_MARKER_MIN_ZOOM = 12;
+const TRANSIT_STOP_LABEL_MIN_ZOOM = 13;
+const METRO_LINE_COLORS: Record<string, string> = {
+  A: "#22c55e",
+  B: "#facc15",
+  C: "#ef4444",
+  D: "#3b82f6"
+};
+const TRANSIT_MODE_VISUALS: Record<
+  TransitStopDto["mode"],
+  { color: string; chip: string; title: string }
+> = {
+  metro: { color: "#1d4ed8", chip: "M", title: "Metro" },
+  tram: { color: "#16a34a", chip: "T", title: "Tramvaj" },
+  bus: { color: "#f59e0b", chip: "B", title: "Bus" },
+  train: { color: "#7c3aed", chip: "V", title: "Vlak" }
+};
 
 function makePriceLabel(priceAmount: number | null): string {
   return priceAmount == null ? "N/A" : `${Math.round(priceAmount / 1000)} tis.`;
@@ -81,10 +102,36 @@ function applyMarkerVisualState(button: HTMLButtonElement, selected: boolean): v
   button.style.border = `1px solid ${selected ? "#1971c2" : "#d0d7e2"}`;
 }
 
+function stopLabel(stop: TransitStopDto): string {
+  const line = stop.metroLine?.trim().toUpperCase();
+  if (stop.mode === "metro" && line) {
+    return `${stop.name} (M${line})`;
+  }
+  return stop.name;
+}
+
+function applyTransitLabelVisibility(labels: HTMLSpanElement[], zoom: number): void {
+  const showLabels = zoom >= TRANSIT_STOP_LABEL_MIN_ZOOM;
+  for (const label of labels) {
+    label.style.display = showLabels ? "inline" : "none";
+  }
+}
+
+function applyTransitMarkerVisibility(markers: HTMLDivElement[], zoom: number): void {
+  const showMarkers = zoom >= TRANSIT_STOP_MARKER_MIN_ZOOM;
+  for (const marker of markers) {
+    marker.style.display = showMarkers ? "flex" : "none";
+  }
+}
+
 export function ListingMapLibreCanvas({
   items,
   transitStops,
-  showTransitOverlay,
+  metroRoutes,
+  showListingMarkers,
+  showTransitStops,
+  showMetroRoutes,
+  showCoverage,
   coverageRadiusM = 0,
   selectedId,
   bounds,
@@ -95,6 +142,8 @@ export function ListingMapLibreCanvas({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const transitMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const transitMarkerElementsRef = useRef<HTMLDivElement[]>([]);
+  const transitLabelElementsRef = useRef<Array<{ label: HTMLSpanElement; mode: TransitStopDto["mode"] }>>([]);
   const markerButtonsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const suppressMoveEventRef = useRef(false);
   const lastFromMapRef = useRef<ListingMapBounds | null>(null);
@@ -146,9 +195,8 @@ export function ListingMapLibreCanvas({
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
 
-    map.on("moveend", () => {
+    map.on("move", () => {
       if (suppressMoveEventRef.current) {
-        suppressMoveEventRef.current = false;
         return;
       }
 
@@ -188,6 +236,8 @@ export function ListingMapLibreCanvas({
       transitMarkersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
       transitMarkersRef.current = [];
+      transitMarkerElementsRef.current = [];
+      transitLabelElementsRef.current = [];
       markerButtonsRef.current.clear();
       map.remove();
       mapRef.current = null;
@@ -210,6 +260,9 @@ export function ListingMapLibreCanvas({
     if (lastFromMapRef.current && closeEnough(lastFromMapRef.current, bounds)) return;
 
     suppressMoveEventRef.current = true;
+    map.once("moveend", () => {
+      suppressMoveEventRef.current = false;
+    });
     map.fitBounds(toBoundsLike(bounds), { padding: 20, duration: 0 });
   }, [bounds]);
 
@@ -220,6 +273,7 @@ export function ListingMapLibreCanvas({
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
     markerButtonsRef.current.clear();
+    if (!showListingMarkers) return;
 
     for (const point of points) {
       const button = document.createElement("button");
@@ -243,7 +297,7 @@ export function ListingMapLibreCanvas({
       markersRef.current.push(marker);
       markerButtonsRef.current.set(point.id, button);
     }
-  }, [points]);
+  }, [points, showListingMarkers]);
 
   useEffect(() => {
     for (const [pointId, button] of markerButtonsRef.current.entries()) {
@@ -255,73 +309,181 @@ export function ListingMapLibreCanvas({
     const map = mapRef.current;
     if (!map) return;
 
-    transitMarkersRef.current.forEach((m) => m.remove());
-    transitMarkersRef.current = [];
-
     const coverageSourceId = "transit-coverage-source";
     const coverageLayerId = "transit-coverage-layer";
-    const hasCoverageSource = Boolean(map.getSource(coverageSourceId));
-    if (map.getLayer(coverageLayerId)) {
-      map.removeLayer(coverageLayerId);
-    }
-    if (hasCoverageSource) {
-      map.removeSource(coverageSourceId);
-    }
+    const routesSourceId = "metro-routes-source";
+    const routesLayerId = "metro-routes-layer";
 
-    if (!showTransitOverlay || transitStops.length === 0) return;
+    const renderTransitLayers = () => {
+      transitMarkersRef.current.forEach((m) => m.remove());
+      transitMarkersRef.current = [];
+      transitMarkerElementsRef.current = [];
+      transitLabelElementsRef.current = [];
 
-    for (const stop of transitStops) {
-      const dot = document.createElement("div");
-      dot.style.width = "10px";
-      dot.style.height = "10px";
-      dot.style.borderRadius = "999px";
-      dot.style.background = stop.mode === "metro" ? "#1d4ed8" : "#64748b";
-      dot.style.border = "2px solid #ffffff";
-      dot.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.25)";
-      dot.title = stop.metroLine ? `${stop.name} (${stop.metroLine})` : stop.name;
+      const hasCoverageSource = Boolean(map.getSource(coverageSourceId));
+      const hasRoutesSource = Boolean(map.getSource(routesSourceId));
+      if (map.getLayer(coverageLayerId)) map.removeLayer(coverageLayerId);
+      if (map.getLayer(routesLayerId)) map.removeLayer(routesLayerId);
+      if (hasCoverageSource) map.removeSource(coverageSourceId);
+      if (hasRoutesSource) map.removeSource(routesSourceId);
 
-      const marker = new maplibregl.Marker({ element: dot, anchor: "center" })
-        .setLngLat([stop.longitude, stop.latitude])
-        .addTo(map);
+      const visibleStops = transitStops.filter((stop) => showTransitStops || (showMetroRoutes && stop.mode === "metro"));
 
-      transitMarkersRef.current.push(marker);
-    }
+      if (visibleStops.length > 0) {
+        for (const stop of visibleStops) {
+          const metroLine = stop.metroLine?.trim().toUpperCase() ?? null;
+          const modeVisual = TRANSIT_MODE_VISUALS[stop.mode];
+          const modeColor = stop.mode === "metro" && metroLine ? METRO_LINE_COLORS[metroLine] ?? modeVisual.color : modeVisual.color;
 
-    if (coverageRadiusM > 0) {
-      const features = transitStops.map((stop) => ({
-        type: "Feature" as const,
-        geometry: {
-          type: "Point" as const,
-          coordinates: [stop.longitude, stop.latitude]
-        },
-        properties: {
-          radius: coverageRadiusM
+          const markerRoot = document.createElement("div");
+          markerRoot.style.display = "flex";
+          markerRoot.style.alignItems = "center";
+          markerRoot.style.gap = "6px";
+          markerRoot.style.padding = "3px 7px 3px 4px";
+          markerRoot.style.borderRadius = "999px";
+          markerRoot.style.border = "1px solid rgba(15, 23, 42, 0.2)";
+          markerRoot.style.background = "rgba(255, 255, 255, 0.93)";
+          markerRoot.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.2)";
+          markerRoot.style.backdropFilter = "blur(2px)";
+          transitMarkerElementsRef.current.push(markerRoot);
+
+          const chip = document.createElement("span");
+          chip.textContent = modeVisual.chip;
+          chip.style.display = "inline-flex";
+          chip.style.alignItems = "center";
+          chip.style.justifyContent = "center";
+          chip.style.minWidth = "18px";
+          chip.style.height = "18px";
+          chip.style.padding = "0 5px";
+          chip.style.borderRadius = "999px";
+          chip.style.fontSize = "10px";
+          chip.style.fontWeight = "800";
+          chip.style.lineHeight = "1";
+          chip.style.color = "#ffffff";
+          chip.style.background = modeColor;
+
+          const label = document.createElement("span");
+          label.textContent = stopLabel(stop);
+          label.style.fontSize = "11px";
+          label.style.fontWeight = "700";
+          label.style.color = "#0f172a";
+          label.style.lineHeight = "1.1";
+          label.style.maxWidth = "168px";
+          label.style.whiteSpace = "nowrap";
+          label.style.overflow = "hidden";
+          label.style.textOverflow = "ellipsis";
+          transitLabelElementsRef.current.push({ label, mode: stop.mode });
+
+          markerRoot.title = `${modeVisual.title}: ${stopLabel(stop)}`;
+          markerRoot.append(chip, label);
+
+          const marker = new maplibregl.Marker({ element: markerRoot, anchor: "left" })
+            .setLngLat([stop.longitude, stop.latitude])
+            .addTo(map);
+
+          transitMarkersRef.current.push(marker);
         }
-      }));
-
-      map.addSource(coverageSourceId, {
-        type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features
+        applyTransitMarkerVisibility(transitMarkerElementsRef.current, map.getZoom());
+        const showLabels = map.getZoom() >= TRANSIT_STOP_LABEL_MIN_ZOOM;
+        for (const { label, mode } of transitLabelElementsRef.current) {
+          const allowMetroLabel = mode !== "metro" || showMetroRoutes;
+          label.style.display = showLabels && allowMetroLabel ? "inline" : "none";
         }
-      });
+      }
 
-      map.addLayer({
-        id: coverageLayerId,
-        type: "circle",
-        source: coverageSourceId,
-        paint: {
-          "circle-color": "#60a5fa",
-          "circle-opacity": 0.11,
-          "circle-stroke-color": "#3b82f6",
-          "circle-stroke-width": 1,
-          // Visual proxy radius for MVP coverage hint.
-          "circle-radius": 52
-        }
-      });
+      if (showMetroRoutes && metroRoutes.length > 0) {
+        map.addSource(routesSourceId, {
+          type: "geojson",
+          data: {
+            type: "FeatureCollection",
+            features: metroRoutes
+              .filter((route) => route.points.length >= 2)
+              .map((route) => ({
+                type: "Feature" as const,
+                geometry: {
+                  type: "LineString" as const,
+                  coordinates: route.points.map((point) => [point.longitude, point.latitude])
+                },
+                properties: {
+                  line: route.line,
+                  color: route.color
+                }
+              }))
+          }
+        });
+
+        map.addLayer({
+          id: routesLayerId,
+          type: "line",
+          source: routesSourceId,
+          paint: {
+            "line-color": ["coalesce", ["get", "color"], "#2563eb"],
+            "line-width": 3.2,
+            "line-opacity": 0.85
+          }
+        });
+      }
+
+      if (showCoverage && showTransitStops && coverageRadiusM > 0 && transitStops.length > 0) {
+        const features = transitStops.map((stop) => ({
+          type: "Feature" as const,
+          geometry: {
+            type: "Point" as const,
+            coordinates: [stop.longitude, stop.latitude]
+          },
+          properties: {
+            radius: coverageRadiusM
+          }
+        }));
+
+        map.addSource(coverageSourceId, {
+          type: "geojson",
+          data: {
+            type: "FeatureCollection",
+            features
+          }
+        });
+
+        map.addLayer({
+          id: coverageLayerId,
+          type: "circle",
+          source: coverageSourceId,
+          paint: {
+            "circle-color": "#60a5fa",
+            "circle-opacity": 0.11,
+            "circle-stroke-color": "#3b82f6",
+            "circle-stroke-width": 1,
+            "circle-radius": 52
+          }
+        });
+      }
+    };
+
+    const onZoom = () => {
+      const zoom = map.getZoom();
+      applyTransitMarkerVisibility(transitMarkerElementsRef.current, zoom);
+      const showLabels = zoom >= TRANSIT_STOP_LABEL_MIN_ZOOM;
+      for (const { label, mode } of transitLabelElementsRef.current) {
+        const allowMetroLabel = mode !== "metro" || showMetroRoutes;
+        label.style.display = showLabels && allowMetroLabel ? "inline" : "none";
+      }
+    };
+    map.on("zoom", onZoom);
+
+    if (map.isStyleLoaded()) {
+      renderTransitLayers();
+      return () => {
+        map.off("zoom", onZoom);
+      };
     }
-  }, [showTransitOverlay, transitStops, coverageRadiusM]);
+
+    const onLoad = () => renderTransitLayers();
+    map.once("load", onLoad);
+    return () => {
+      map.off("zoom", onZoom);
+      map.off("load", onLoad);
+    };
+  }, [showTransitStops, showMetroRoutes, showCoverage, transitStops, metroRoutes, coverageRadiusM]);
 
   if (!process.env.NEXT_PUBLIC_MAPY_API_KEY?.trim()) {
     return (

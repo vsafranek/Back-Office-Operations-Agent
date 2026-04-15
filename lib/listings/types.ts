@@ -29,6 +29,16 @@ export type TransitStopDto = {
   longitude: number;
 };
 
+export type TransitRouteDto = {
+  id: string;
+  line: string;
+  color: string;
+  points: Array<{
+    latitude: number;
+    longitude: number;
+  }>;
+};
+
 export type ListingCardDto = {
   id: string;
   sourceKey: string;

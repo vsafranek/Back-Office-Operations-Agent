@@ -1,29 +1,32 @@
 ﻿"use client";
 
-import { Badge, Box, Group, Stack, Text } from "@mantine/core";
+import { ActionIcon, Badge, Box, Checkbox, Group, Menu, Stack, Text } from "@mantine/core";
+import { IconLayersIntersect } from "@tabler/icons-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useMemo } from "react";
 
-import type { ListingCardDto, ListingMapBounds, TransitStopDto } from "@/lib/listings/types";
+import type { ListingCardDto, ListingMapBounds, TransitRouteDto, TransitStopDto } from "@/lib/listings/types";
 
 const ListingMapLibreCanvas = dynamic(
   () => import("@/components/listings/ListingMapLibreCanvas").then((mod) => mod.ListingMapLibreCanvas),
   {
     ssr: false,
-    loading: () => (
-      <Group justify="center" align="center" h="100%">
-        <Text c="dimmed">Načítám mapu...</Text>
-      </Group>
-    )
+    loading: () => null
   }
 );
 
 type ListingMapPanelProps = {
   items: ListingCardDto[];
   transitStops: TransitStopDto[];
-  showTransitOverlay: boolean;
-  onToggleTransitOverlay: (enabled: boolean) => void;
+  metroRoutes: TransitRouteDto[];
+  layers: {
+    listingMarkers: boolean;
+    transitStops: boolean;
+    metroRoutes: boolean;
+    coverage: boolean;
+  };
+  onChangeLayer: (layer: "listingMarkers" | "transitStops" | "metroRoutes" | "coverage", enabled: boolean) => void;
   coverageRadiusM?: number;
   bounds: ListingMapBounds;
   selectedId: string | null;
@@ -34,8 +37,9 @@ type ListingMapPanelProps = {
 export function ListingMapPanel({
   items,
   transitStops,
-  showTransitOverlay,
-  onToggleTransitOverlay,
+  metroRoutes,
+  layers,
+  onChangeLayer,
   coverageRadiusM,
   bounds,
   selectedId,
@@ -44,6 +48,13 @@ export function ListingMapPanel({
 }: ListingMapPanelProps) {
   const withCoordsCount = useMemo(() => items.filter((item) => item.latitude != null && item.longitude != null).length, [items]);
   const selectedItem = useMemo(() => items.find((item) => item.id === selectedId) ?? null, [items, selectedId]);
+  const transitTypeSummary = useMemo(() => {
+    const metro = transitStops.filter((stop) => stop.mode === "metro").length;
+    const tram = transitStops.filter((stop) => stop.mode === "tram").length;
+    const bus = transitStops.filter((stop) => stop.mode === "bus").length;
+    const train = transitStops.filter((stop) => stop.mode === "train").length;
+    return { metro, tram, bus, train };
+  }, [transitStops]);
   const selectedPreviewImage = useMemo(() => {
     if (!selectedItem) return null;
     return selectedItem.galleryPreviewUrls[0] ?? selectedItem.previewImageUrl ?? null;
@@ -63,13 +74,62 @@ export function ListingMapPanel({
         <ListingMapLibreCanvas
           items={items}
           transitStops={transitStops}
-          showTransitOverlay={showTransitOverlay}
+          metroRoutes={metroRoutes}
+          showListingMarkers={layers.listingMarkers}
+          showTransitStops={layers.transitStops}
+          showMetroRoutes={layers.metroRoutes}
+          showCoverage={layers.coverage}
           coverageRadiusM={coverageRadiusM}
           selectedId={selectedId}
           bounds={bounds}
           onSelect={onSelect}
           onBoundsChange={onApplyBounds}
         />
+        <Menu shadow="md" width={240} withinPortal position="bottom-start">
+          <Menu.Target>
+            <ActionIcon
+              variant="filled"
+              color="dark"
+              radius="md"
+              size="lg"
+              style={{ position: "absolute", top: 10, left: 10, zIndex: 5 }}
+              aria-label="Nastavení vrstev mapy"
+            >
+              <IconLayersIntersect size={18} />
+            </ActionIcon>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Label>Vrstvy mapy</Menu.Label>
+            <Menu.Item closeMenuOnClick={false}>
+              <Checkbox
+                label="Markery nabídek"
+                checked={layers.listingMarkers}
+                onChange={(event) => onChangeLayer("listingMarkers", event.currentTarget.checked)}
+              />
+            </Menu.Item>
+            <Menu.Item closeMenuOnClick={false}>
+              <Checkbox
+                label="Zastávky MHD"
+                checked={layers.transitStops}
+                onChange={(event) => onChangeLayer("transitStops", event.currentTarget.checked)}
+              />
+            </Menu.Item>
+            <Menu.Item closeMenuOnClick={false}>
+              <Checkbox
+                label="Trasy metra"
+                checked={layers.metroRoutes}
+                onChange={(event) => onChangeLayer("metroRoutes", event.currentTarget.checked)}
+              />
+            </Menu.Item>
+            <Menu.Item closeMenuOnClick={false}>
+              <Checkbox
+                label="Coverage zóny"
+                checked={layers.coverage}
+                onChange={(event) => onChangeLayer("coverage", event.currentTarget.checked)}
+              />
+            </Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
         {selectedItem ? (
           <Box
             style={{
@@ -155,26 +215,15 @@ export function ListingMapPanel({
           <Text size="xs" c="dimmed">
             Zobrazeno v mapě: {withCoordsCount}/{items.length} nabídek (jen s GPS).
           </Text>
-          <Text
-            component="button"
-            onClick={() => onToggleTransitOverlay(!showTransitOverlay)}
-            style={{
-              border: "none",
-              background: "transparent",
-              padding: 0,
-              margin: 0,
-              textAlign: "left",
-              fontSize: 12,
-              color: "#2563eb",
-              cursor: "pointer"
-            }}
-          >
-            {showTransitOverlay ? "Skrýt vrstvu zastávek MHD" : "Zobrazit vrstvu zastávek MHD"}
-          </Text>
-          {showTransitOverlay ? (
+          {layers.transitStops || layers.metroRoutes ? (
             <Text size="xs" c="dimmed">
-              Zastávek v mapě: {transitStops.length}
-              {coverageRadiusM && coverageRadiusM > 0 ? ` · zóna ${coverageRadiusM} m` : ""}
+              {layers.transitStops
+                ? `Zastávek v mapě: ${transitStops.length} (M:${transitTypeSummary.metro} T:${transitTypeSummary.tram} B:${transitTypeSummary.bus} V:${transitTypeSummary.train})`
+                : layers.metroRoutes
+                  ? `Detailní zastávky skryté (metro zastávky na trasách: ${transitTypeSummary.metro})`
+                  : "Zastávky skryté"}
+              {layers.metroRoutes ? ` · tras metra: ${metroRoutes.length}` : ""}
+              {layers.coverage && coverageRadiusM && coverageRadiusM > 0 ? ` · zóna ${coverageRadiusM} m` : ""}
             </Text>
           ) : null}
         </Stack>

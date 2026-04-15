@@ -20,7 +20,7 @@ import { ListingFiltersPanel } from "@/components/listings/filters/ListingFilter
 import { ListingMapPanel } from "@/components/listings/ListingMapPanel";
 import { ListingResultsPanel } from "@/components/listings/ListingResultsPanel";
 import { isSplitMapListEnabled, isTransitMapOverlayEnabled } from "@/lib/config/portal";
-import type { ListingCardDto, ListingMapBounds, ListingSearchResponseDto, TransitStopDto } from "@/lib/listings/types";
+import type { ListingCardDto, ListingMapBounds, ListingSearchResponseDto, TransitRouteDto, TransitStopDto } from "@/lib/listings/types";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser-client";
 
 const BOUNDS_SYNC_EPS = 0.0008;
@@ -138,7 +138,13 @@ export function PortalListingsHome() {
   const [rawBounds, setRawBounds] = useState<ListingMapBounds>(DEFAULT_BOUNDS);
   const [bounds, setBounds] = useState<ListingMapBounds>(DEFAULT_BOUNDS);
   const [transitStops, setTransitStops] = useState<TransitStopDto[]>([]);
-  const [showTransitOverlay, setShowTransitOverlay] = useState(isTransitMapOverlayEnabled());
+  const [metroRoutes, setMetroRoutes] = useState<TransitRouteDto[]>([]);
+  const [mapLayers, setMapLayers] = useState({
+    listingMarkers: true,
+    transitStops: isTransitMapOverlayEnabled(),
+    metroRoutes: isTransitMapOverlayEnabled(),
+    coverage: isTransitMapOverlayEnabled()
+  });
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -202,7 +208,7 @@ export function PortalListingsHome() {
 
       setItems(payload.items);
       setPagination(payload.pagination);
-      setSelectedId((current) => (current && payload.items.some((item) => item.id === current) ? current : payload.items[0]?.id ?? null));
+      setSelectedId((current) => (current && payload.items.some((item) => item.id === current) ? current : null));
       setInitialLoading(false);
       setIsFetching(false);
     }
@@ -242,17 +248,18 @@ export function PortalListingsHome() {
   ]);
 
   useEffect(() => {
-    if (!showTransitOverlay) {
+    if (!mapLayers.transitStops && !mapLayers.metroRoutes && !mapLayers.coverage) {
       setTransitStops([]);
+      setMetroRoutes([]);
       return;
     }
 
     const controller = new AbortController();
     const query = new URLSearchParams();
-    query.set("north", String(bounds.north));
-    query.set("south", String(bounds.south));
-    query.set("east", String(bounds.east));
-    query.set("west", String(bounds.west));
+    query.set("north", String(rawBounds.north));
+    query.set("south", String(rawBounds.south));
+    query.set("east", String(rawBounds.east));
+    query.set("west", String(rawBounds.west));
     query.set("mode", "metro,tram,bus,train");
     if (metroLinesCsv.trim()) {
       query.set("metroLines", metroLinesCsv.trim());
@@ -263,15 +270,16 @@ export function PortalListingsHome() {
         if (!response.ok) {
           return;
         }
-        const payload = (await response.json()) as { items?: TransitStopDto[] };
+        const payload = (await response.json()) as { items?: TransitStopDto[]; routes?: TransitRouteDto[] };
         setTransitStops(Array.isArray(payload.items) ? payload.items : []);
+        setMetroRoutes(Array.isArray(payload.routes) ? payload.routes : []);
       })
       .catch((err) => {
         if ((err as Error).name === "AbortError") return;
       });
 
     return () => controller.abort();
-  }, [showTransitOverlay, bounds, metroLinesCsv]);
+  }, [mapLayers.transitStops, mapLayers.metroRoutes, mapLayers.coverage, rawBounds, metroLinesCsv]);
 
   async function triggerDebugRefetch() {
     const operatorKey = process.env.NEXT_PUBLIC_OPERATOR_INGEST_KEY?.trim() ?? "";
@@ -473,17 +481,16 @@ export function PortalListingsHome() {
             </Group>
           ) : (
             <Stack gap="sm">
-              {isFetching ? (
-                <Text size="sm" c="dimmed">Aktualizuji vysledky podle mapy a filtru...</Text>
-              ) : null}
-
               <SimpleGrid cols={{ base: 1, lg: twoColumnLayout ? 2 : 1 }} spacing="md">
               {showMapPanel ? (
                 <ListingMapPanel
                   items={items}
                   transitStops={transitStops}
-                  showTransitOverlay={showTransitOverlay}
-                  onToggleTransitOverlay={setShowTransitOverlay}
+                  metroRoutes={metroRoutes}
+                  layers={mapLayers}
+                  onChangeLayer={(layer, enabled) => {
+                    setMapLayers((current) => ({ ...current, [layer]: enabled }));
+                  }}
                   coverageRadiusM={coverageRadiusM}
                   bounds={rawBounds}
                   selectedId={selectedId}
