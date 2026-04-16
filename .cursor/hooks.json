@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "node .cursor/hooks/ensure-spec-tasks-complete.mjs",
+        "matcher": "Shell",
+        "timeout": 10,
+        "failClosed": false
+      }
+    ]
+  }
+}

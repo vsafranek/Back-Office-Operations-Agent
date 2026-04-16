@@ -301,6 +301,30 @@ export async function getListingDetailById(listingId: string): Promise<ListingDe
   const mediaByListingId = await fetchMediaByListingIds([row.id]);
   const mediaRows = mediaByListingId.get(row.id) ?? [];
 
+  const baseMetadata = row.metadata;
+  const metadata =
+    baseMetadata && typeof baseMetadata === "object"
+      ? {
+          ...baseMetadata,
+          contactName:
+            (baseMetadata as Record<string, unknown>).contactName ??
+            (baseMetadata as Record<string, unknown>).sellerName ??
+            null,
+          contactPhone:
+            (baseMetadata as Record<string, unknown>).contactPhone ??
+            (baseMetadata as Record<string, unknown>).sellerPhone ??
+            null,
+          contactEmail:
+            (baseMetadata as Record<string, unknown>).contactEmail ??
+            (baseMetadata as Record<string, unknown>).sellerEmail ??
+            null,
+          organization:
+            (baseMetadata as Record<string, unknown>).organization ??
+            (baseMetadata as Record<string, unknown>).sellerOrganization ??
+            null
+        }
+      : null;
+
   return {
     ...toListItem(row, mediaRows),
     images: mediaRows
@@ -312,6 +336,6 @@ export async function getListingDetailById(listingId: string): Promise<ListingDe
         width: media.width ?? null,
         height: media.height ?? null
       })),
-    metadata: row.metadata
+    metadata
   };
 }

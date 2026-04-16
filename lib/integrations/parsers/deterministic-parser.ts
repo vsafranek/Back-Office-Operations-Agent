@@ -31,6 +31,10 @@ type SrealityRawEstate = {
   _embedded?: {
     seller?: {
       name?: unknown;
+      phone?: unknown;
+      mobile?: unknown;
+      email?: unknown;
+      company_name?: unknown;
     };
   };
   _links?: {
@@ -152,6 +156,9 @@ export function parseSrealityListingDeterministic(record: SourceListingRecord): 
       isActive: true,
       metadata: {
         sellerName: asString(raw._embedded?.seller?.name),
+        sellerPhone: asString(raw._embedded?.seller?.phone) ?? asString(raw._embedded?.seller?.mobile),
+        sellerEmail: asString(raw._embedded?.seller?.email),
+        sellerOrganization: asString(raw._embedded?.seller?.company_name),
         sourceCategoryMainCb: propertyTypeCb,
         sourceCategorySubCb: propertySubtypeCb
       }

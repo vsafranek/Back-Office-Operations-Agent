@@ -10,6 +10,7 @@ MVP zdroj je **Sreality** (scope: **byty**).
 - Nabídne veřejný katalog + detail bez přihlášení.
 - Umožní přihlášeným uživatelům ukládání oblíbených nabídek.
 - Nabídne Zillow-like split view (mapa + synchronizovaný seznam podle viewportu).
+- Detail nabídky obsahuje hero carousel fotek, kompletní facts sekce, náhled sousedství a kontakt na oprávněnou osobu (pokud je v datech dostupný).
 - Přidává dopravní filtry (u metra, vzdálenost/minuty, linky, stanice, transit score).
 - Umožňuje mapovou vrstvu zastávek MHD + orientační coverage zóny.
 - Trackuje kliky na detail i originální inzerát.
@@ -54,6 +55,11 @@ Použité migrace pro portal model:
 - `GET /api/market-listings?maxMetroWalkMin=10&minTransitScore=70`
 - `GET /api/market-listings?metroLines=A,C&transitModes=metro,tram&transitMatchMode=any`
 - `GET /api/transit/stops?north=50.2&south=49.9&east=14.8&west=14.2&mode=metro,tram`
+
+## Detail stránky nabídky
+- Top hero carousel se šipkami, indexem a miniaturami (fallback i pro 0/1 obrázek).
+- Sekce "Náhled sousedství" používá mini mapu (vyžaduje GPS + `NEXT_PUBLIC_MAPY_API_KEY`).
+- Sekce kontaktu čte metadata z inzerátu a bezpečně zobrazuje i částečné údaje.
 
 ## Operacni monitoring
 - /admin/ingestion - operator prehled ingest runu (nacita pres /api/integrations/sreality/ingest/runs).

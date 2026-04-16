@@ -29,7 +29,25 @@ describe("GET /api/market-listings/[id]", () => {
 
   it("returns detail item when found for anonymous", async () => {
     getAuthenticatedUserFromRequestMock.mockResolvedValue(null);
-    getListingDetailByIdMock.mockResolvedValue({ id: "listing-123", title: "Byt 2+kk" });
+    getListingDetailByIdMock.mockResolvedValue({
+      id: "listing-123",
+      title: "Byt 2+kk",
+      locality: "Praha 2",
+      sourceUrl: "https://example.test/listing-123",
+      sourceKey: "sreality",
+      sourceListingId: "123",
+      currency: "CZK",
+      images: [],
+      galleryPreviewUrls: [],
+      imageCount: 0,
+      firstSeenAt: "2026-01-01T00:00:00.000Z",
+      lastSeenAt: "2026-01-02T00:00:00.000Z",
+      isActive: true,
+      metadata: {
+        sellerName: "Makler Demo",
+        sellerPhone: "+420777123456"
+      }
+    });
 
     const request = new Request("https://example.test/api/market-listings/listing-123");
 
@@ -39,6 +57,15 @@ describe("GET /api/market-listings/[id]", () => {
     expect(response.status).toBe(200);
     expect(body.item?.id).toBe("listing-123");
     expect(body.item?.isSaved).toBe(false);
+    expect(body.item).toEqual(
+      expect.objectContaining({
+        title: "Byt 2+kk",
+        sourceUrl: "https://example.test/listing-123",
+        metadata: expect.objectContaining({
+          sellerName: "Makler Demo"
+        })
+      })
+    );
     expect(getListingDetailByIdMock).toHaveBeenCalledWith("listing-123");
   });
 
